@@ -1,0 +1,192 @@
+@page
+@model GuideModel
+@{
+    ViewData["Title"] = "Hướng dẫn sử dụng";
+}
+
+<section class="bg-gradient-to-r from-teal-800 via-teal-700 to-emerald-800 rounded-2xl shadow-md p-5 sm:p-6 text-white">
+    <div class="inline-flex items-center gap-2 bg-teal-900/60 text-teal-100 text-[11px] px-2.5 py-1 rounded font-semibold uppercase tracking-wider">
+        <i class="fa-regular fa-circle-question"></i> Hướng dẫn
+    </div>
+    <h1 class="mt-2 text-xl sm:text-2xl font-extrabold tracking-tight">CÁCH DÙNG CÔNG CỤ LỌC, KIỂM TRA &amp; IN HỒ SƠ</h1>
+    <p class="mt-1 text-teal-100 text-xs sm:text-sm max-w-3xl leading-relaxed">
+        Công cụ đọc toàn bộ sheet <strong>ML</strong>, phân hồ sơ theo năm và loại,
+        mô phỏng cách lọc của macro Excel cũ và in mỗi hồ sơ thành một trang A4 dọc riêng.
+    </p>
+</section>
+
+<div class="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-5">
+    <section class="lg:col-span-2 space-y-5">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span class="w-8 h-8 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center"><i class="fa-solid fa-list-ol"></i></span>
+                Quy trình 5 bước
+            </h2>
+            <ol class="mt-4 space-y-4 text-sm text-slate-700">
+                <li class="flex gap-3">
+                    <span class="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0">1</span>
+                    <div>
+                        <p class="font-bold text-slate-900">Import file Excel</p>
+                        <p class="text-xs text-slate-600 mt-0.5">
+                            Vào mục <strong>Nhập Excel</strong>, chọn file <span class="font-mono">.xlsx</span> gốc.
+                            Hệ thống đọc toàn bộ sheet <strong>ML</strong>; các sheet năm có block in được dùng để
+                            bổ sung tác giả, ghi chú và tiêu đề in.
+                        </p>
+                    </div>
+                </li>
+                <li class="flex gap-3">
+                    <span class="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0">2</span>
+                    <div>
+                        <p class="font-bold text-slate-900">Chọn năm và loại hồ sơ</p>
+                        <p class="text-xs text-slate-600 mt-0.5">
+                            Mỗi năm có danh sách loại hồ sơ riêng kèm số lượng. Chọn một loại để chỉ xem/in loại đó,
+                            hoặc để “Tất cả loại” để xem toàn bộ hồ sơ trong năm. Các sheet in bị chia nhỏ như
+                            <span class="font-mono">1999 (1)</span>, <span class="font-mono">1999 (2)</span> đã được gộp chung vào năm.
+                        </p>
+                    </div>
+                </li>
+                <li class="flex gap-3">
+                    <span class="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0">3</span>
+                    <div>
+                        <p class="font-bold text-slate-900">Chọn phạm vi hồ sơ</p>
+                        <p class="text-xs text-slate-600 mt-0.5">
+                            Chọn <strong>Cả năm / loại</strong>, <strong>Từ số – Đến số</strong> hoặc
+                            <strong>Các số tùy chọn</strong>. Có thể dùng nút chọn nhanh 50 số đầu / 100 số gần nhất.
+                        </p>
+                    </div>
+                </li>
+                <li class="flex gap-3">
+                    <span class="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0">4</span>
+                    <div>
+                        <p class="font-bold text-slate-900">Xem chi tiết và in</p>
+                        <p class="text-xs text-slate-600 mt-0.5">
+                            Bấm số hồ sơ để xem chi tiết, kiểm tra nhanh dữ liệu và điều hướng sang hồ sơ trước/sau.
+                            Bấm <strong>XEM TRƯỚC KHI IN</strong> để mở bản in ở tab mới; mỗi hồ sơ là một trang A4 dọc riêng.
+                        </p>
+                    </div>
+                </li>
+                <li class="flex gap-3">
+                    <span class="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0">5</span>
+                    <div>
+                        <p class="font-bold text-slate-900">Thống kê, kiểm tra và xuất CSV</p>
+                        <p class="text-xs text-slate-600 mt-0.5">
+                            Trang <strong>Thống kê</strong> hiển thị tổng hợp theo năm/loại, ma trận năm × loại và
+                            danh sách các hồ sơ thiếu ngày, thiếu số ký hiệu, không xác định tổng tờ, dòng tổng hợp,
+                            số hồ sơ cần kiểm tra hoặc chưa có bản in Excel. Có thể xuất toàn bộ kết quả đang lọc ra CSV.
+                        </p>
+                    </div>
+                </li>
+            </ol>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span class="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center"><i class="fa-solid fa-keyboard"></i></span>
+                Cú pháp lọc “Các số tùy chọn”
+            </h2>
+            <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <p class="font-semibold text-slate-900">Số đơn lẻ</p>
+                    <p class="mt-1 font-mono text-xs bg-white border border-slate-200 rounded px-2 py-1.5">85, 90, 120</p>
+                    <p class="mt-1 text-xs text-slate-500">In đúng các hồ sơ số 85, 90, 120.</p>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <p class="font-semibold text-slate-900">Khoảng liên tục</p>
+                    <p class="mt-1 font-mono text-xs bg-white border border-slate-200 rounded px-2 py-1.5">100-105</p>
+                    <p class="mt-1 text-xs text-slate-500">In các hồ sơ từ 100 đến 105.</p>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <p class="font-semibold text-slate-900">Kết hợp</p>
+                    <p class="mt-1 font-mono text-xs bg-white border border-slate-200 rounded px-2 py-1.5">85, 90, 100-105</p>
+                    <p class="mt-1 text-xs text-slate-500">In các số 85, 90 và khoảng 100–105.</p>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <p class="font-semibold text-slate-900">Dấu phân cách</p>
+                    <p class="mt-1 font-mono text-xs bg-white border border-slate-200 rounded px-2 py-1.5">85; 90; 100 – 105</p>
+                    <p class="mt-1 text-xs text-slate-500">Hỗ trợ dấu phẩy, chấm phẩy, khoảng trắng và gạch ngang en/em.</p>
+                </div>
+            </div>
+            <p class="mt-3 text-xs text-slate-500">
+                <i class="fa-solid fa-circle-info text-brand-600 mr-1"></i>
+                Nếu một số đơn lẻ không tồn tại, hệ thống vẫn in các số còn lại và hiển thị cảnh báo đúng như macro Excel.
+            </p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span class="w-8 h-8 rounded-lg bg-rose-50 text-rose-700 flex items-center justify-center"><i class="fa-solid fa-triangle-exclamation"></i></span>
+                Những trường hợp dữ liệu cần lưu ý
+            </h2>
+            <ul class="mt-4 space-y-2.5 text-xs text-slate-600 leading-relaxed list-disc list-inside">
+                <li><strong>Thiếu ngày / số ký hiệu / tờ số:</strong> bản in vẫn giữ ô trống. Khi không xác định được tổng tờ, dòng cuối hiện <span class="font-mono">Tổng số tờ: … tờ</span>; trang Thống kê sẽ đánh dấu các hồ sơ này.</li>
+                <li><strong>Dòng tổng hợp:</strong> một số dòng ML gom nhiều hồ sơ nhỏ (cột C bắt đầu bằng <span class="font-mono">HS</span> và không có số ký hiệu). Các dòng này vẫn được giữ và đánh dấu để kiểm tra.</li>
+                <li><strong>Số hồ sơ suy luận:</strong> nếu cột B trống hoặc chỉ có <span class="font-mono">/A</span>, hệ thống giữ nguyên nhãn in nhưng gán thêm số dạng số để lọc/sắp xếp. Ví dụ dòng 687 của năm 1994 được gán số 700; nhãn <span class="font-mono">/A</span> của năm 1995 vẫn được in đúng.</li>
+                <li><strong>Nhãn đặc biệt:</strong> các số như <span class="font-mono">346/1</span>, <span class="font-mono">350/1</span>, <span class="font-mono">355/1</span> được giữ nguyên khi in; khi lọc theo khoảng, hệ thống dùng phần số đầu tiên giống hàm <span class="font-mono">Val</span> của VBA.</li>
+                <li><strong>Hồ sơ chỉ có trong ML:</strong> các năm 2017–2025 và một phần hồ sơ 1990–2016 không có block in Excel. Hệ thống vẫn tạo trang in đầy đủ từ dữ liệu ML.</li>
+            </ul>
+        </div>
+    </section>
+
+    <aside class="space-y-5">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+            <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <i class="fa-solid fa-print text-brand-600"></i>Thiết lập máy in
+            </h2>
+            <ul class="mt-3 space-y-2 text-xs text-slate-600 leading-relaxed list-disc list-inside">
+                <li>Khổ giấy: <strong>A4</strong></li>
+                <li>Hướng giấy: <strong>Portrait (dọc)</strong></li>
+                <li>Màu: <strong>Đen trắng</strong></li>
+                <li>Lề: mặc định hoặc <strong>None</strong> nếu muốn rộng hơn</li>
+                <li>Tắt “Headers and footers” của trình duyệt nếu không cần</li>
+                <li>Mỗi hồ sơ đã được ngắt trang tự động</li>
+            </ul>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+            <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <i class="fa-solid fa-table-columns text-brand-600"></i>Cột dữ liệu đọc từ ML
+            </h2>
+            <div class="mt-3 space-y-1.5 text-xs">
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">A</span><span class="font-semibold text-slate-800">Hộp số</span></div>
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">B</span><span class="font-semibold text-slate-800">Hồ sơ số</span></div>
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">C</span><span class="font-semibold text-slate-800">STT / hồ sơ phụ</span></div>
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">D</span><span class="font-semibold text-slate-800">Trích yếu / tiêu đề nhóm</span></div>
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">E</span><span class="font-semibold text-slate-800">Thời gian tài liệu</span></div>
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">F</span><span class="font-semibold text-slate-800">Số ký hiệu</span></div>
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">G</span><span class="font-semibold text-slate-800">Tờ số</span></div>
+                <div class="flex justify-between gap-2 border-b border-slate-100 pb-1"><span class="text-slate-500">H</span><span class="font-semibold text-slate-800">Ghi chú</span></div>
+                <div class="flex justify-between gap-2"><span class="text-slate-500">I</span><span class="font-semibold text-slate-800">Trích yếu gốc</span></div>
+            </div>
+        </div>
+
+        <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
+            <h2 class="text-sm font-bold text-emerald-950 flex items-center gap-2">
+                <i class="fa-solid fa-circle-check text-emerald-600"></i>Đúng như bản gốc
+            </h2>
+            <p class="mt-2 text-xs text-emerald-900 leading-relaxed">
+                Tiêu đề “MỤC LỤC VĂN BẢN”, dòng “Hồ sơ số: …”, bảng 7 cột và dòng “Tổng số tờ: … tờ” được giữ đúng bố cục Excel.
+                Mỗi hồ sơ in trên một trang riêng, không gộp chung. Font Times New Roman, chỉ đen/trắng.
+            </p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+            <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <i class="fa-solid fa-compass text-brand-600"></i>Đi nhanh
+            </h2>
+            <div class="mt-3 space-y-2 text-xs font-semibold">
+                <a asp-page="/Index" class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 hover:bg-brand-50 hover:border-brand-300 px-3 py-2 transition">
+                    <span><i class="fa-solid fa-print mr-1.5 text-brand-600"></i>Lọc &amp; in hồ sơ</span>
+                    <i class="fa-solid fa-arrow-right text-[10px] text-slate-400"></i>
+                </a>
+                <a asp-page="/Statistics" class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 hover:bg-brand-50 hover:border-brand-300 px-3 py-2 transition">
+                    <span><i class="fa-solid fa-chart-column mr-1.5 text-brand-600"></i>Thống kê &amp; kiểm tra</span>
+                    <i class="fa-solid fa-arrow-right text-[10px] text-slate-400"></i>
+                </a>
+                <a asp-page="/Import" class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 hover:bg-brand-50 hover:border-brand-300 px-3 py-2 transition">
+                    <span><i class="fa-solid fa-file-import mr-1.5 text-brand-600"></i>Nhập dữ liệu Excel</span>
+                    <i class="fa-solid fa-arrow-right text-[10px] text-slate-400"></i>
+                </a>
+            </div>
+        </div>
+    </aside>
+</div>

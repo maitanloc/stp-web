@@ -1,0 +1,448 @@
+@page
+@model DossierModel
+@{
+    ViewData["Title"] = "Chi tiết hồ sơ";
+}
+
+@if (Model.NoData)
+{
+    <section class="max-w-3xl mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-slate-200 p-8 sm:p-12 text-center">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center text-2xl">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <h1 class="mt-5 text-2xl font-extrabold text-slate-900">Chưa có dữ liệu hồ sơ</h1>
+        <p class="mt-2 text-sm text-slate-600">Hãy import file Excel trước khi xem chi tiết hồ sơ.</p>
+        <a asp-page="/Import" class="mt-6 inline-flex items-center justify-center px-6 py-3 rounded-xl bg-brand-700 hover:bg-brand-800 text-white font-bold shadow-md transition">
+            <i class="fa-solid fa-file-import mr-2"></i>Import file Excel
+        </a>
+    </section>
+}
+else if (Model.SelectedDossier is null || Model.Book is null)
+{
+    <section class="max-w-3xl mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-slate-200 p-8 sm:p-12 text-center">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center text-2xl">
+            <i class="fa-solid fa-magnifying-glass"></i>
+        </div>
+        <h1 class="mt-5 text-2xl font-extrabold text-slate-900">Không tìm thấy hồ sơ</h1>
+        <p class="mt-2 text-sm text-slate-600">@(Model.Error ?? "Hồ sơ không tồn tại hoặc đã bị thay đổi sau lần import gần nhất.")</p>
+        <div class="mt-6 flex flex-wrap items-center justify-center gap-2">
+            <a asp-page="/Index" class="inline-flex items-center px-5 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold transition">
+                <i class="fa-solid fa-arrow-left mr-2"></i>Về danh sách hồ sơ
+            </a>
+            <a asp-page="/Statistics" class="inline-flex items-center px-5 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-bold transition">
+                <i class="fa-solid fa-chart-column mr-2"></i>Thống kê &amp; kiểm tra
+            </a>
+        </div>
+    </section>
+}
+else
+{
+    var book = Model.Book;
+    var dossier = Model.SelectedDossier;
+    var document = Model.MainDocument;
+
+    <section class="bg-gradient-to-r from-slate-900 via-brand-900 to-teal-900 rounded-2xl shadow-md p-5 sm:p-6 text-white">
+        <div class="flex flex-col xl:flex-row xl:items-start justify-between gap-5">
+            <div class="min-w-0 space-y-2">
+                <nav class="flex items-center gap-1.5 text-[11px] text-slate-300 flex-wrap" aria-label="Đường dẫn">
+                    <a asp-page="/Statistics" asp-route-bookId="@book.Id" asp-route-issue="all"
+                       class="hover:text-white transition">Năm @book.Year</a>
+                    <span class="text-slate-500">/</span>
+                    <a asp-page="/Index" asp-route-bookId="@book.Id" asp-route-type="@dossier.Type"
+                       class="hover:text-white transition">@dossier.TypeDisplay</a>
+                    <span class="text-slate-500">/</span>
+                    <span class="text-slate-200">Hồ sơ @dossier.NumberDisplay</span>
+                </nav>
+
+                <div class="inline-flex items-center gap-2 bg-white/10 text-slate-100 text-[11px] px-2.5 py-1 rounded font-semibold uppercase tracking-wider">
+                    <i class="fa-solid fa-folder-open"></i> Chi tiết hồ sơ
+                </div>
+
+                <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">
+                    HỒ SƠ @dossier.NumberDisplay
+                </h1>
+                <p class="text-slate-200 text-xs sm:text-sm max-w-3xl leading-relaxed">
+                    @dossier.TypeDisplay · @dossier.Group · Năm @book.Year
+                </p>
+
+                <div class="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 border border-white/15 px-2.5 py-1">
+                        <i class="fa-solid fa-calendar-days text-teal-300"></i>@book.Year
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 border border-white/15 px-2.5 py-1">
+                        <i class="fa-solid fa-list-ol text-teal-300"></i>Vị trí @Model.Position/@Model.BookCount trong năm
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 border border-white/15 px-2.5 py-1">
+                        <i class="fa-solid fa-tags text-teal-300"></i>@Model.TypePosition/@Model.TypeCount trong loại
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 border border-white/15 px-2.5 py-1">
+                        <i class="fa-solid fa-table-list text-teal-300"></i>Dòng ML @dossier.MlRow
+                    </span>
+                    @if (dossier.HasPrintLayout)
+                    {
+                        <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/20 border border-emerald-300/30 px-2.5 py-1 text-emerald-100">
+                            <i class="fa-solid fa-circle-check"></i>Có bản in Excel
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="inline-flex items-center gap-1.5 rounded-full bg-sky-400/20 border border-sky-300/30 px-2.5 py-1 text-sky-100">
+                            <i class="fa-solid fa-database"></i>Chỉ có trong ML
+                        </span>
+                    }
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row xl:flex-col gap-2 shrink-0 w-full xl:w-auto">
+                <a asp-page="/Print" asp-route-bookId="@book.Id" asp-route-mlRow="@dossier.MlRow" target="_blank"
+                   class="inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-white text-sm font-extrabold shadow-md transition">
+                    <i class="fa-solid fa-print mr-2"></i>In hồ sơ này
+                </a>
+                <div class="grid grid-cols-2 gap-2">
+                    @if (Model.Previous is not null)
+                    {
+                        <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@Model.Previous.MlRow"
+                           class="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition"
+                           title="Hồ sơ trước: @Model.Previous.NumberDisplay">
+                            <i class="fa-solid fa-arrow-left mr-1.5"></i>@Model.Previous.NumberDisplay
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-white/5 text-slate-400 text-xs font-semibold cursor-not-allowed">
+                            <i class="fa-solid fa-arrow-left mr-1.5"></i>Đầu năm
+                        </span>
+                    }
+                    @if (Model.Next is not null)
+                    {
+                        <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@Model.Next.MlRow"
+                           class="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition"
+                           title="Hồ sơ sau: @Model.Next.NumberDisplay">
+                            @Model.Next.NumberDisplay<i class="fa-solid fa-arrow-right ml-1.5"></i>
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-white/5 text-slate-400 text-xs font-semibold cursor-not-allowed">
+                            Cuối năm<i class="fa-solid fa-arrow-right ml-1.5"></i>
+                        </span>
+                    }
+                </div>
+                <a asp-page="/Index" asp-route-bookId="@book.Id" asp-route-type="@dossier.Type"
+                   class="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-white/20 bg-white/5 hover:bg-white/15 text-white text-xs font-semibold transition">
+                    <i class="fa-solid fa-arrow-left mr-1.5"></i>Quay lại danh sách
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <div class="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div class="xl:col-span-2 space-y-5">
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center"><i class="fa-solid fa-circle-info"></i></span>
+                    Thông tin hồ sơ
+                </h2>
+
+                <dl class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Năm lưu trữ</dt>
+                        <dd class="mt-0.5 font-semibold text-slate-900">@book.Year <span class="text-xs font-normal text-slate-500">(@book.Name)</span></dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Nhóm lưu trữ</dt>
+                        <dd class="mt-0.5 font-semibold text-slate-900">@(string.IsNullOrWhiteSpace(dossier.Group) ? "—" : dossier.Group)</dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Loại hồ sơ</dt>
+                        <dd class="mt-0.5">
+                            <a asp-page="/Index" asp-route-bookId="@book.Id" asp-route-type="@dossier.Type"
+                               class="inline-flex items-center rounded bg-brand-50 border border-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-800 hover:bg-brand-100 transition">
+                                @dossier.TypeDisplay
+                            </a>
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Hộp số</dt>
+                        <dd class="mt-0.5 font-mono font-semibold text-slate-900">@(string.IsNullOrWhiteSpace(dossier.BoxNumber) ? "—" : dossier.BoxNumber)</dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Hồ sơ số (nhãn in)</dt>
+                        <dd class="mt-0.5 font-mono text-base font-extrabold text-brand-700">@dossier.NumberDisplay</dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Số dùng để lọc</dt>
+                        <dd class="mt-0.5 font-mono font-semibold text-slate-900">@dossier.Number</dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">STT / hồ sơ phụ</dt>
+                        <dd class="mt-0.5 font-mono text-slate-800">@(string.IsNullOrWhiteSpace(dossier.SubNumber) ? "—" : dossier.SubNumber)</dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Dòng ML / nguồn in</dt>
+                        <dd class="mt-0.5 text-slate-800">
+                            <span class="font-mono">Dòng @dossier.MlRow</span>
+                            @if (!string.IsNullOrWhiteSpace(dossier.SourceVolume))
+                            {
+                                <span class="text-slate-500"> · sheet @dossier.SourceVolume</span>
+                            }
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tổng số tờ</dt>
+                        <dd class="mt-0.5 font-semibold text-slate-900">@dossier.TotalPagesText</dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tiêu đề in</dt>
+                        <dd class="mt-0.5 font-semibold text-slate-900">@dossier.Title</dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Dòng tổng hợp</dt>
+                        <dd class="mt-0.5">
+                            @if (dossier.IsAggregate)
+                            {
+                                <span class="inline-flex items-center rounded bg-violet-50 border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-800">Có – cần kiểm tra</span>
+                            }
+                            else
+                            {
+                                <span class="text-slate-700">Không</span>
+                            }
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sổ in gốc của năm</dt>
+                        <dd class="mt-0.5 text-xs text-slate-700">@(book.SourceVolumes.Count == 0 ? "Chỉ có trong ML" : string.Join(", ", book.SourceVolumes))</dd>
+                    </div>
+                </dl>
+
+                @if (!string.IsNullOrWhiteSpace(dossier.NumberNote))
+                {
+                    <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-900">
+                        <p class="font-bold flex items-center gap-1.5"><i class="fa-solid fa-triangle-exclamation"></i>Ghi chú số hồ sơ</p>
+                        <p class="mt-1 leading-relaxed">@dossier.NumberNote</p>
+                    </div>
+                }
+            </section>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="px-5 sm:px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-2">
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <span class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center"><i class="fa-solid fa-file-lines"></i></span>
+                        Văn bản trong hồ sơ
+                    </h2>
+                    <span class="text-[11px] text-slate-500">@dossier.Documents.Count dòng</span>
+                </div>
+
+                @if (dossier.Documents.Count == 0)
+                {
+                    <p class="px-5 py-8 text-sm text-slate-500 text-center">Hồ sơ chưa có dòng văn bản nào.</p>
+                }
+                else
+                {
+                    <div class="overflow-x-auto thin-scroll">
+                        <table class="min-w-full text-xs sm:text-sm">
+                            <thead class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-600">
+                                <tr>
+                                    <th class="px-3 py-2.5 text-center font-semibold">STT</th>
+                                    <th class="px-3 py-2.5 text-left font-semibold">Số ký hiệu</th>
+                                    <th class="px-3 py-2.5 text-left font-semibold whitespace-nowrap">Ngày</th>
+                                    <th class="px-3 py-2.5 text-left font-semibold">Trích yếu nội dung</th>
+                                    <th class="px-3 py-2.5 text-left font-semibold">Tác giả</th>
+                                    <th class="px-3 py-2.5 text-center font-semibold">Tờ số</th>
+                                    <th class="px-3 py-2.5 text-left font-semibold">Ghi chú</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                @foreach (var line in dossier.Documents)
+                                {
+                                    <tr class="hover:bg-slate-50/80">
+                                        <td class="px-3 py-2.5 text-center font-bold text-slate-500">@line.Stt</td>
+                                        <td class="px-3 py-2.5 text-slate-800 break-words">@line.SoKyHieu</td>
+                                        <td class="px-3 py-2.5 text-slate-600 whitespace-nowrap">@line.Ngay</td>
+                                        <td class="px-3 py-2.5 text-slate-900 leading-relaxed">@line.TrichYeu</td>
+                                        <td class="px-3 py-2.5 text-slate-700">@line.TacGia</td>
+                                        <td class="px-3 py-2.5 text-center font-mono text-slate-600">@line.ToSo</td>
+                                        <td class="px-3 py-2.5 text-slate-600">@line.GhiChu</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-quote-left"></i></span>
+                    Trích yếu gốc &amp; ghi chú
+                </h2>
+                <div class="mt-4 space-y-3">
+                    <div>
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Trích yếu gốc (cột I của ML)</p>
+                        <p class="mt-1 text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-line break-words">
+                            @(string.IsNullOrWhiteSpace(dossier.OriginalSummary) ? "Không có dữ liệu." : dossier.OriginalSummary)
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ghi chú của dòng văn bản</p>
+                        <p class="mt-1 text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-line break-words">
+                            @(string.IsNullOrWhiteSpace(document?.GhiChu) ? "Không có ghi chú." : document!.GhiChu)
+                        </p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <aside class="space-y-5">
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+                <div class="flex items-start justify-between gap-2">
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <span class="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center"><i class="fa-solid fa-list-check"></i></span>
+                        Kiểm tra nhanh
+                    </h2>
+                    <span class="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold @(Model.WarningCount > 0 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800")">
+                        @(Model.WarningCount > 0 ? $"{Model.WarningCount} cần chú ý" : "Đủ thông tin")
+                    </span>
+                </div>
+
+                <ul class="mt-4 space-y-2">
+                    @foreach (var check in Model.Checks)
+                    {
+                        var tone = check.Status switch
+                        {
+                            "ok" => "border-emerald-200 bg-emerald-50 text-emerald-950",
+                            "warn" => "border-amber-200 bg-amber-50 text-amber-950",
+                            _ => "border-sky-200 bg-sky-50 text-sky-950"
+                        };
+                        var icon = check.Status switch
+                        {
+                            "ok" => "fa-circle-check text-emerald-600",
+                            "warn" => "fa-triangle-exclamation text-amber-600",
+                            _ => "fa-circle-info text-sky-600"
+                        };
+                        <li class="rounded-lg border px-3 py-2 @tone">
+                            <div class="flex items-start gap-2">
+                                <i class="fa-solid @icon mt-0.5 text-xs"></i>
+                                <div class="min-w-0">
+                                    <p class="text-[10px] font-semibold uppercase tracking-wide opacity-70">@check.Label</p>
+                                    <p class="text-xs font-bold leading-snug break-words">@check.Value</p>
+                                    <p class="mt-0.5 text-[10px] leading-snug opacity-70">@check.Hint</p>
+                                </div>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            </section>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-violet-50 text-violet-700 flex items-center justify-center"><i class="fa-solid fa-arrows-left-right"></i></span>
+                    Điều hướng hồ sơ
+                </h2>
+
+                <div class="mt-4 space-y-3">
+                    <div>
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Trong cùng năm (@Model.Position/@Model.BookCount)</p>
+                        <div class="mt-1.5 grid grid-cols-2 gap-2">
+                            @if (Model.Previous is not null)
+                            {
+                                <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@Model.Previous.MlRow"
+                                   class="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-3 py-2 transition">
+                                    <span class="block text-[10px] text-slate-500">Trước</span>
+                                    <span class="block font-mono text-xs font-bold text-slate-800">@Model.Previous.NumberDisplay</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-400">
+                                    <span class="block text-[10px]">Trước</span>
+                                    <span class="block text-xs font-semibold">—</span>
+                                </span>
+                            }
+                            @if (Model.Next is not null)
+                            {
+                                <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@Model.Next.MlRow"
+                                   class="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-3 py-2 transition text-right">
+                                    <span class="block text-[10px] text-slate-500">Sau</span>
+                                    <span class="block font-mono text-xs font-bold text-slate-800">@Model.Next.NumberDisplay</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-400 text-right">
+                                    <span class="block text-[10px]">Sau</span>
+                                    <span class="block text-xs font-semibold">—</span>
+                                </span>
+                            }
+                        </div>
+                    </div>
+
+                    <div>
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Trong cùng loại (@Model.TypePosition/@Model.TypeCount)</p>
+                        <div class="mt-1.5 grid grid-cols-2 gap-2">
+                            @if (Model.PreviousSameType is not null)
+                            {
+                                <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@Model.PreviousSameType.MlRow"
+                                   class="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-3 py-2 transition">
+                                    <span class="block text-[10px] text-slate-500">Trước</span>
+                                    <span class="block font-mono text-xs font-bold text-slate-800">@Model.PreviousSameType.NumberDisplay</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-400">
+                                    <span class="block text-[10px]">Trước</span>
+                                    <span class="block text-xs font-semibold">—</span>
+                                </span>
+                            }
+                            @if (Model.NextSameType is not null)
+                            {
+                                <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@Model.NextSameType.MlRow"
+                                   class="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-3 py-2 transition text-right">
+                                    <span class="block text-[10px] text-slate-500">Sau</span>
+                                    <span class="block font-mono text-xs font-bold text-slate-800">@Model.NextSameType.NumberDisplay</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-400 text-right">
+                                    <span class="block text-[10px]">Sau</span>
+                                    <span class="block text-xs font-semibold">—</span>
+                                </span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center"><i class="fa-solid fa-print"></i></span>
+                    In &amp; thao tác
+                </h2>
+                <div class="mt-4 space-y-2">
+                    <a asp-page="/Print" asp-route-bookId="@book.Id" asp-route-mlRow="@dossier.MlRow" target="_blank"
+                       class="flex items-center justify-between rounded-lg bg-brand-700 hover:bg-brand-800 px-3 py-2.5 text-white text-xs font-bold transition">
+                        <span><i class="fa-solid fa-print mr-1.5"></i>In hồ sơ này</span>
+                        <i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-70"></i>
+                    </a>
+                    <a asp-page="/Print" asp-route-bookId="@book.Id" asp-route-type="@dossier.Type" asp-route-mode="all" target="_blank"
+                       class="flex items-center justify-between rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-3 py-2.5 text-slate-700 text-xs font-semibold transition">
+                        <span><i class="fa-solid fa-tags mr-1.5 text-brand-600"></i>In cả loại trong năm</span>
+                        <span class="text-[10px] text-slate-400">@Model.TypeCount hồ sơ</span>
+                    </a>
+                    <a asp-page="/Print" asp-route-bookId="@book.Id" asp-route-mode="all" target="_blank"
+                       class="flex items-center justify-between rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-3 py-2.5 text-slate-700 text-xs font-semibold transition">
+                        <span><i class="fa-solid fa-calendar-days mr-1.5 text-brand-600"></i>In cả năm</span>
+                        <span class="text-[10px] text-slate-400">@Model.BookCount hồ sơ</span>
+                    </a>
+                    <a asp-page="/Statistics" asp-route-bookId="@book.Id" asp-route-type="@dossier.Type" asp-route-issue="all"
+                       class="flex items-center justify-between rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-3 py-2.5 text-slate-700 text-xs font-semibold transition">
+                        <span><i class="fa-solid fa-chart-column mr-1.5 text-brand-600"></i>Kiểm tra cả loại</span>
+                        <span class="text-[10px] text-slate-400">@Model.BookTypeCount loại</span>
+                    </a>
+                </div>
+            </section>
+        </aside>
+    </div>
+}

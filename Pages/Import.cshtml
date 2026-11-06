@@ -1,0 +1,207 @@
+@page
+@model ImportModel
+@{
+    ViewData["Title"] = "Nhập dữ liệu Excel";
+}
+
+<section class="bg-gradient-to-r from-slate-800 via-slate-700 to-brand-800 rounded-2xl shadow-md p-5 sm:p-6 text-white">
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+            <div class="inline-flex items-center gap-2 bg-white/10 text-slate-100 text-[11px] px-2.5 py-1 rounded font-semibold uppercase tracking-wider">
+                <i class="fa-solid fa-file-import"></i> Nhập dữ liệu
+            </div>
+            <h1 class="mt-2 text-xl sm:text-2xl font-extrabold tracking-tight">IMPORT FILE EXCEL GỐC</h1>
+            <p class="mt-1 text-slate-200 text-xs sm:text-sm max-w-2xl leading-relaxed">
+                Hệ thống đọc <strong>toàn bộ sheet ML</strong> của file <strong>DK_KET_HON.xlsx</strong>,
+                phân hồ sơ theo năm và loại. Các sheet năm có block in được dùng để bổ sung
+                tác giả/ghi chú và giữ đúng bố cục bản in gốc.
+                Dữ liệu cũ sẽ được thay thế hoàn toàn bằng dữ liệu mới.
+            </p>
+        </div>
+        <div class="flex items-center gap-3 bg-white/10 border border-white/15 rounded-xl px-4 py-3 self-start lg:self-auto">
+            <i class="fa-solid fa-shield-halved text-2xl text-teal-300"></i>
+            <div>
+                <p class="text-[11px] text-slate-300">Lưu trữ cục bộ</p>
+                <p class="text-sm font-bold">Không gửi dữ liệu ra ngoài</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="mt-4 bg-red-50 border border-red-300 text-red-800 rounded-xl px-4 py-3 text-sm flex items-start gap-2">
+        <i class="fa-solid fa-circle-exclamation mt-0.5"></i>
+        <span>@Model.Error</span>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+{
+    <div class="mt-4 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl px-4 py-3 text-sm flex items-start gap-2">
+        <i class="fa-solid fa-circle-check mt-0.5"></i>
+        <span>@Model.SuccessMessage</span>
+    </div>
+}
+
+<div class="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-5">
+    <section class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+        <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center"><i class="fa-solid fa-upload"></i></span>
+            Chọn file Excel cần import
+        </h2>
+
+        <form method="post" enctype="multipart/form-data" class="mt-5 space-y-4" onsubmit="return stpImportSubmitting(this)">
+            <div class="border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-2xl p-6 sm:p-8 text-center bg-slate-50/70 transition">
+                <div class="w-14 h-14 mx-auto rounded-2xl bg-white border border-slate-200 text-emerald-600 flex items-center justify-center text-2xl shadow-sm">
+                    <i class="fa-solid fa-file-excel"></i>
+                </div>
+                <p class="mt-4 text-sm font-bold text-slate-900">Chọn file .xlsx hoặc .xlsm</p>
+                <p class="mt-1 text-xs text-slate-500">Dung lượng khuyến nghị dưới 100 MB. File gốc khoảng 5,5 MB.</p>
+                <input type="file" name="Upload" accept=".xlsx,.xlsm" onchange="stpFileChosen(this)"
+                       class="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 cursor-pointer" />
+                <p id="file-name" class="mt-2 text-xs font-semibold text-brand-700">Chưa chọn file</p>
+            </div>
+
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p class="text-xs text-slate-500">
+                    <i class="fa-solid fa-circle-info text-brand-600 mr-1"></i>
+                    Hệ thống nhận diện sheet in qua ô <span class="font-mono font-semibold">K1 = BANG_IN_HANG_LOAT</span>.
+                </p>
+                <button id="btn-import" type="submit"
+                        class="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-extrabold shadow-md transition">
+                    <i class="fa-solid fa-file-import mr-2"></i>Bắt đầu import
+                </button>
+            </div>
+        </form>
+
+        <div class="mt-6 bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <h3 class="text-sm font-bold text-slate-900">Cấu trúc dữ liệu được đọc</h3>
+            <p class="mt-1 text-xs text-slate-600">Mỗi sheet năm được đọc theo đúng các cột của bảng “MỤC LỤC VĂN BẢN”:</p>
+            <div class="mt-3 overflow-x-auto">
+                <table class="min-w-full text-xs border border-slate-200 bg-white">
+                    <thead class="bg-slate-100 text-slate-700">
+                        <tr>
+                            <th class="px-3 py-2 border border-slate-200 text-left">Cột Excel</th>
+                            <th class="px-3 py-2 border border-slate-200 text-left">Dữ liệu</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-slate-600">
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">A</td><td class="px-3 py-1.5 border border-slate-200">Hộp số</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">B</td><td class="px-3 py-1.5 border border-slate-200">Hồ sơ số (giữ nguyên nhãn như 346/1, /A)</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">C</td><td class="px-3 py-1.5 border border-slate-200">STT / hồ sơ phụ</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">D</td><td class="px-3 py-1.5 border border-slate-200">Trích yếu; dòng nhóm, năm và loại hồ sơ</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">E</td><td class="px-3 py-1.5 border border-slate-200">Thời gian tài liệu</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">F</td><td class="px-3 py-1.5 border border-slate-200">Số ký hiệu văn bản</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">G</td><td class="px-3 py-1.5 border border-slate-200">Tờ số</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">H</td><td class="px-3 py-1.5 border border-slate-200">Ghi chú (thường trống)</td></tr>
+                        <tr><td class="px-3 py-1.5 border border-slate-200 font-mono">I</td><td class="px-3 py-1.5 border border-slate-200">Trích yếu gốc</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="mt-2 text-[11px] text-slate-500">
+                Mỗi dòng dữ liệu của ML tương ứng một hồ sơ. Các sheet in năm (K1 = BANG_IN_HANG_LOAT)
+                được quét theo block 9 dòng để bổ sung tác giả, ghi chú và tiêu đề in; hồ sơ chỉ có
+                trong ML vẫn được giữ lại và in được.
+            </p>
+        </div>
+    </section>
+
+    <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+        <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center"><i class="fa-solid fa-database"></i></span>
+            Dữ liệu hiện tại
+        </h2>
+
+        @if (Model.Data.Books.Count == 0)
+        {
+            <div class="mt-5 text-center py-8">
+                <i class="fa-regular fa-folder-open text-3xl text-slate-300"></i>
+                <p class="mt-3 text-sm font-semibold text-slate-700">Chưa có dữ liệu</p>
+                <p class="mt-1 text-xs text-slate-500">Hãy import file Excel ở bên trái.</p>
+            </div>
+        }
+        else
+        {
+            <div class="mt-4 space-y-2 text-sm">
+                <div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    <span class="text-slate-500 text-xs">File nguồn</span>
+                    <span class="font-semibold text-slate-900 text-xs text-right break-all">@Model.Data.SourceFileName</span>
+                </div>
+                <div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    <span class="text-slate-500 text-xs">Thời điểm import</span>
+                    <span class="font-semibold text-slate-900 text-xs">@(Model.Data.ImportedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-brand-50 border border-brand-100 rounded-lg px-3 py-2 text-center">
+                        <p class="text-[11px] text-brand-700 font-semibold">Số năm</p>
+                        <p class="text-xl font-extrabold text-brand-900">@Model.Data.Books.Count</p>
+                    </div>
+                    <div class="bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-center">
+                        <p class="text-[11px] text-emerald-700 font-semibold">Số hồ sơ</p>
+                        <p class="text-xl font-extrabold text-emerald-900">@Model.Data.TotalDossiers.ToString("N0")</p>
+                    </div>
+                    <div class="bg-violet-50 border border-violet-100 rounded-lg px-3 py-2 text-center">
+                        <p class="text-[11px] text-violet-700 font-semibold">Số loại</p>
+                        <p class="text-xl font-extrabold text-violet-900">@Model.Data.TotalTypes</p>
+                    </div>
+                    <div class="bg-sky-50 border border-sky-100 rounded-lg px-3 py-2 text-center">
+                        <p class="text-[11px] text-sky-700 font-semibold">Có bản in</p>
+                        <p class="text-xl font-extrabold text-sky-900">@Model.Data.TotalPrintReady.ToString("N0")</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 max-h-72 overflow-auto thin-scroll border border-slate-200 rounded-lg">
+                <table class="min-w-full text-xs">
+                    <thead class="bg-slate-50 text-slate-600 sticky top-0">
+                        <tr>
+                            <th class="px-3 py-2 text-left font-semibold border-b border-slate-200">Năm</th>
+                            <th class="px-3 py-2 text-right font-semibold border-b border-slate-200">Hồ sơ</th>
+                            <th class="px-3 py-2 text-right font-semibold border-b border-slate-200">Loại</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        @foreach (var b in Model.Data.Books)
+                        {
+                            <tr class="hover:bg-slate-50">
+                                <td class="px-3 py-2 font-semibold text-slate-800">@b.Year</td>
+                                <td class="px-3 py-2 text-right font-mono text-slate-600">@b.Count</td>
+                                <td class="px-3 py-2 text-right font-mono text-slate-600">@b.TypeCount</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 gap-2">
+                <a asp-page="/Statistics" class="inline-flex items-center justify-center px-4 py-2.5 rounded-lg border border-brand-200 bg-brand-50 hover:bg-brand-100 text-brand-800 text-xs font-bold transition">
+                    <i class="fa-solid fa-chart-column mr-1.5"></i>Xem thống kê &amp; kiểm tra dữ liệu
+                </a>
+            </div>
+
+            <form method="post" asp-page-handler="Clear" class="mt-4" onsubmit="return stpConfirmClear()">
+                <button type="submit" class="w-full inline-flex items-center justify-center px-4 py-2.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold transition">
+                    <i class="fa-solid fa-trash-can mr-1.5"></i>Xóa toàn bộ dữ liệu đã import
+                </button>
+            </form>
+        }
+    </section>
+</div>
+
+<section class="mt-5 bg-amber-50/80 border border-amber-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3.5">
+    <div class="w-9 h-9 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center shrink-0 text-sm font-bold">
+        <i class="fa-solid fa-lightbulb"></i>
+    </div>
+    <div class="space-y-1">
+        <h3 class="text-sm font-bold text-amber-950">Lưu ý khi import</h3>
+        <ul class="text-xs text-amber-900 space-y-1 list-disc list-inside leading-relaxed">
+            <li>File cần có sheet <strong>ML</strong> làm nguồn dữ liệu chính; các sheet năm có block in là phần bổ sung (không bắt buộc).</li>
+            <li>Toàn bộ dòng hồ sơ trong ML đều được import, kể cả hồ sơ chỉ có trong ML và các dòng tổng hợp.</li>
+            <li>Nhãn số hồ sơ đặc biệt như <span class="font-mono">346/1</span>, <span class="font-mono">350/1</span>, <span class="font-mono">/A</span> được giữ nguyên khi in.</li>
+            <li>Các sheet in bị chia nhỏ như <span class="font-mono">1999 (1)</span>, <span class="font-mono">1999 (2)</span> được gộp vào cùng năm; tên sổ gốc vẫn được lưu.</li>
+            <li>Không cần lưu file thành .xlsm hay bật macro; web đọc dữ liệu trực tiếp từ file .xlsx.</li>
+            <li>Mỗi lần import sẽ thay thế toàn bộ dữ liệu cũ.</li>
+        </ul>
+    </div>
+</section>

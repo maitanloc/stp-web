@@ -1,0 +1,160 @@
+@page
+@model PrintModel
+@{
+    Layout = "_PrintLayout";
+    ViewData["Title"] = "Bản in mục lục hồ sơ";
+    var book = Model.Book;
+    var backUrl = Url.Page("/Index", new
+    {
+        bookId = book?.Id,
+        type = Model.Type,
+        mode = Model.Mode,
+        from = Model.From,
+        to = Model.To,
+        custom = Model.Custom
+    });
+    var filterStatus = ViewData["FilterStatus"] as string;
+}
+
+<div class="print-toolbar no-print">
+    <div class="max-w-[1200px] mx-auto px-4 sm:px-6 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+            <a href="@backUrl" class="inline-flex items-center px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition shrink-0">
+                <i class="fa-solid fa-arrow-left mr-1.5"></i>Quay lại
+            </a>
+            <div class="min-w-0">
+                <p class="text-sm font-bold text-white truncate">
+                    <i class="fa-solid fa-print mr-1.5 text-teal-300"></i>
+                    Bản in @(book?.Name ?? "hồ sơ")
+                    @if (!string.IsNullOrWhiteSpace(Model.Type))
+                    {
+                        <span class="text-teal-200">· @Model.Type</span>
+                    }
+                </p>
+                <p class="text-[11px] text-slate-300">
+                    @Model.Dossiers.Count trang · mỗi hồ sơ 1 trang A4 dọc
+                    @if (Model.MlRow is > 0)
+                    {
+                        <span> · in riêng dòng ML @Model.MlRow</span>
+                    }
+                    @if (filterStatus is not null)
+                    {
+                        <span> · @filterStatus</span>
+                    }
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+            <span class="hidden lg:inline-flex items-center px-2.5 py-1.5 rounded-lg bg-white/10 text-[11px] text-slate-200">
+                <i class="fa-solid fa-circle-info mr-1.5 text-teal-300"></i>
+                Chọn A4 Portrait (dọc), tắt Headers and footers
+            </span>
+            <button type="button" onclick="window.print()"
+                    class="inline-flex items-center px-5 py-2.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-white text-sm font-extrabold shadow-md transition">
+                <i class="fa-solid fa-print mr-2"></i>In ngay / Lưu PDF
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Warning))
+    {
+        <div class="bg-amber-100 border-t border-amber-300 text-amber-900 text-xs px-4 sm:px-6 py-2 text-center font-semibold">
+            @Model.Warning
+        </div>
+    }
+</div>
+
+@if (Model.NoData)
+{
+    <div class="max-w-2xl mx-auto mt-16 bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <h1 class="mt-4 text-xl font-extrabold text-slate-900">Chưa có dữ liệu để in</h1>
+        <p class="mt-2 text-sm text-slate-600">Hãy quay lại trang chính và import file Excel trước.</p>
+        <a asp-page="/Import" class="mt-5 inline-flex items-center px-5 py-2.5 rounded-lg bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold transition">
+            <i class="fa-solid fa-file-import mr-2"></i>Import Excel
+        </a>
+    </div>
+}
+else if (Model.Dossiers.Count == 0)
+{
+    <div class="max-w-2xl mx-auto mt-16 bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-magnifying-glass"></i>
+        </div>
+        <h1 class="mt-4 text-xl font-extrabold text-slate-900">Không có hồ sơ nào để in</h1>
+        <p class="mt-2 text-sm text-slate-600">Bộ lọc hiện tại không trả về hồ sơ nào. Hãy quay lại và chọn lại phạm vi in.</p>
+        <a href="@backUrl" class="mt-5 inline-flex items-center px-5 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold transition">
+            <i class="fa-solid fa-arrow-left mr-2"></i>Quay lại chọn
+        </a>
+    </div>
+}
+else
+{
+    foreach (var dossier in Model.Dossiers)
+    {
+        <section class="sheet-page @dossier.PrintFitClass" data-number="@dossier.NumberDisplay" data-ml-row="@dossier.MlRow">
+            <h1 class="sheet-title">@dossier.Title</h1>
+            <div class="sheet-subtitle">Hồ sơ số: @dossier.NumberDisplay</div>
+
+            <table class="doc-table">
+                <colgroup>
+                    <col style="width: 6%" />
+                    <col style="width: 13%" />
+                    <col style="width: 12%" />
+                    <col style="width: 40%" />
+                    <col style="width: 16%" />
+                    <col style="width: 8%" />
+                    <col style="width: 5%" />
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Số ký hiệu văn bản</th>
+                        <th>Ngày, tháng, văn bản</th>
+                        <th>Trích yếu nội dung văn bản</th>
+                        <th>Tác giả Văn bản</th>
+                        <th>Tờ số</th>
+                        <th>Ghi chú</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (dossier.Documents.Count == 0)
+                    {
+                        <tr class="doc-row">
+                            <td class="cell-center">1</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                    }
+                    else
+                    {
+                        foreach (var document in dossier.Documents)
+                        {
+                            <tr class="doc-row">
+                                <td class="cell-center">@document.Stt</td>
+                                <td class="cell-wrap">@document.SoKyHieu</td>
+                                <td class="cell-center cell-wrap">@document.Ngay</td>
+                                <td class="cell-wrap">@document.TrichYeu</td>
+                                <td class="cell-wrap">@document.TacGia</td>
+                                <td class="cell-number">@document.ToSo</td>
+                                <td class="cell-wrap">@document.GhiChu</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="7" class="sheet-total">@dossier.TotalPagesText</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </section>
+    }
+}

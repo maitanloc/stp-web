@@ -1,0 +1,441 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Lọc & in hồ sơ";
+    var book = Model.Book;
+    var result = Model.Result;
+    var selectedType = Model.Type;
+    var hasType = !string.IsNullOrWhiteSpace(selectedType);
+}
+
+@if (Model.Data.Books.Count == 0)
+{
+    <section class="max-w-3xl mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-slate-200 p-8 sm:p-12 text-center">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-brand-50 text-brand-700 flex items-center justify-center text-2xl">
+            <i class="fa-solid fa-file-excel"></i>
+        </div>
+        <h1 class="mt-5 text-2xl font-extrabold text-slate-900">Chưa có dữ liệu hồ sơ</h1>
+        <p class="mt-2 text-sm text-slate-600 leading-relaxed">
+            Hãy import file Excel gốc (<strong>DK_KET_HON.xlsx</strong>) để hệ thống đọc toàn bộ sheet
+            <strong>ML</strong>, phân hồ sơ theo năm và loại, rồi sẵn sàng lọc – kiểm tra – in hàng loạt.
+        </p>
+        <a asp-page="/Import" class="mt-6 inline-flex items-center justify-center px-6 py-3 rounded-xl bg-brand-700 hover:bg-brand-800 text-white font-bold shadow-md transition">
+            <i class="fa-solid fa-file-import mr-2"></i>Import file Excel
+        </a>
+        <p class="mt-4 text-xs text-slate-500">Hỗ trợ .xlsx và .xlsm · Dữ liệu chỉ lưu trên máy chủ nội bộ</p>
+    </section>
+}
+else
+{
+    @if (TempData["ImportSuccess"] is string successMessage)
+    {
+        <div class="mb-4 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl px-4 py-3 text-sm flex items-start gap-2 shadow-sm">
+            <i class="fa-solid fa-circle-check mt-0.5"></i>
+            <span>@successMessage</span>
+        </div>
+    }
+
+    <div id="bookMeta" data-min="@Model.ScopeMin" data-max="@Model.ScopeMax" data-count="@Model.ScopeCount" class="hidden"></div>
+
+    <!-- Hero -->
+    <section class="bg-gradient-to-r from-teal-800 via-teal-700 to-emerald-800 rounded-2xl shadow-md p-5 sm:p-6 text-white border border-teal-900/30">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+            <div class="space-y-2 min-w-0">
+                <div class="inline-flex items-center gap-2 bg-teal-900/60 backdrop-blur-sm text-teal-100 text-[11px] px-2.5 py-1 rounded font-semibold uppercase tracking-wider">
+                    <i class="fa-solid fa-database"></i> Toàn bộ hồ sơ đã import
+                </div>
+                <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight text-white">
+                    CHỌN NĂM &amp; LOẠI HỒ SƠ ĐỂ IN
+                </h1>
+                <p class="text-teal-100 text-xs sm:text-sm opacity-90 max-w-2xl">
+                    Dữ liệu lấy từ sheet <strong>ML</strong>, phân theo năm và từng loại hồ sơ.
+                    Lọc theo số giống macro Excel, kiểm tra dữ liệu rồi in mỗi hồ sơ thành một trang A4 dọc.
+                </p>
+                <p class="text-[11px] text-teal-200/90">
+                    <i class="fa-regular fa-file-lines mr-1"></i>
+                    @Model.Data.SourceFileName
+                    @if (Model.Data.ImportedAt.HasValue)
+                    {
+                        <span> · import lúc @Model.Data.ImportedAt.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                    }
+                    <span> · @Model.Data.Books.Count năm · @Model.Data.TotalTypes loại · @Model.Data.TotalDossiers.ToString("N0") hồ sơ</span>
+                </p>
+            </div>
+
+            <div class="flex items-center gap-4 bg-white/10 backdrop-blur-md px-5 py-4 rounded-xl border border-white/20 self-start lg:self-auto shrink-0">
+                <div class="text-right">
+                    <p class="text-[11px] text-teal-200 font-medium">Năm đang chọn</p>
+                    <p class="text-lg font-extrabold text-white leading-tight">@book!.Name</p>
+                    <p class="text-xs text-teal-100">@book.Count hồ sơ · @book.TypeCount loại</p>
+                    <p class="text-[10px] text-teal-200/80 mt-0.5">@book.NumberRange</p>
+                </div>
+                <div class="w-11 h-11 rounded-full bg-white/20 flex items-center justify-center text-white">
+                    <i class="fa-solid fa-box-archive text-lg"></i>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Bộ lọc -->
+    <section class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden no-print">
+        <div class="bg-slate-50 border-b border-slate-200 px-5 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2 flex-wrap">
+                <span class="w-6 h-6 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold">1</span>
+                <span class="font-bold text-slate-800 text-sm sm:text-base">Chọn năm, loại và phạm vi hồ sơ cần in</span>
+                <span class="text-xs text-slate-500 italic">(có thể kết hợp)</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-xs text-slate-600 flex-wrap">
+                <span class="font-medium mr-1 text-slate-500">Chọn nhanh:</span>
+                <button type="button" onclick="stpSetPreset('all')" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-slate-700 font-medium transition">Cả năm / loại</button>
+                <button type="button" onclick="stpSetPreset('first50')" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-slate-700 font-medium transition">50 số đầu</button>
+                <button type="button" onclick="stpSetPreset('latest')" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-slate-700 font-medium transition">100 số gần nhất</button>
+            </div>
+        </div>
+
+        <div class="p-5 sm:p-6 space-y-5">
+            <form id="filterForm" method="get" asp-page="/Index" class="space-y-5">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                        <label for="bookSelect" class="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
+                            <i class="fa-solid fa-calendar-days mr-1 text-brand-600"></i>Chọn năm cần in
+                        </label>
+                        <select id="bookSelect" name="BookId" onchange="stpChangeBook()"
+                                class="w-full px-3 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-semibold text-slate-800">
+                            @foreach (var b in Model.Data.Books)
+                            {
+                                <option value="@b.Id" selected="@(b.Id == book.Id)">@b.Name — @b.Count hồ sơ · @b.TypeCount loại (@b.MinNumber–@b.MaxNumber)</option>
+                            }
+                        </select>
+                    </div>
+                    <div>
+                        <label for="typeSelect" class="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
+                            <i class="fa-solid fa-tags mr-1 text-brand-600"></i>Chọn loại hồ sơ
+                        </label>
+                        <select id="typeSelect" name="Type" onchange="this.form.submit()"
+                                class="w-full px-3 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-semibold text-slate-800">
+                            <option value="" selected="@(!hasType)">Tất cả loại (@book.TypeCount loại · @book.Count hồ sơ)</option>
+                            @foreach (var t in book.TypeStats)
+                            {
+                                <option value="@t.Type" selected="@(hasType && string.Equals(t.Type, selectedType, StringComparison.OrdinalIgnoreCase))">
+                                    @t.Type — @t.Count hồ sơ (@t.Range)
+                                </option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                <div class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+                    <i class="fa-solid fa-circle-info text-brand-600 mr-1"></i>
+                    Dữ liệu đọc trực tiếp từ sheet ML: hộp số, hồ sơ số, trích yếu, ngày, số ký hiệu, tờ số.
+                    Các hồ sơ có bản in Excel còn được bổ sung tác giả/ghi chú từ sheet năm tương ứng.
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="selection-mode-group">
+                    <label id="card-mode-all" class="selection-card relative flex flex-col p-4 rounded-xl cursor-pointer transition-custom @(Model.Mode == "all" ? "bg-blue-50/60 border-2 border-brand-600" : "bg-white border border-slate-300")">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex items-center gap-3">
+                                <input type="radio" name="Mode" value="all" checked="@(Model.Mode == "all")" onchange="stpModeChanged('all')"
+                                       class="w-4 h-4 text-brand-600 focus:ring-brand-500 border-slate-300" />
+                                <span class="font-bold text-slate-900 text-base">Cả năm / loại</span>
+                            </div>
+                            <span class="px-2 py-0.5 text-[10px] font-semibold bg-brand-100 text-brand-800 rounded whitespace-nowrap">Khuyên dùng</span>
+                        </div>
+                        <p class="mt-2 text-xs text-slate-600 leading-relaxed pl-7">
+                            Chọn toàn bộ <span class="font-semibold text-slate-900">@Model.ScopeCount hồ sơ</span>
+                            @if (hasType)
+                            {
+                                <span>thuộc loại <span class="font-semibold text-slate-900">@selectedType</span> trong năm @book.Name.</span>
+                            }
+                            else
+                            {
+                                <span>trong năm @book.Name.</span>
+                            }
+                        </p>
+                    </label>
+
+                    <label id="card-mode-range" class="selection-card relative flex flex-col p-4 rounded-xl cursor-pointer transition-custom @(Model.Mode == "range" ? "bg-blue-50/60 border-2 border-brand-600" : "bg-white border border-slate-300")">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex items-center gap-3">
+                                <input type="radio" name="Mode" value="range" checked="@(Model.Mode == "range")" onchange="stpModeChanged('range')"
+                                       class="w-4 h-4 text-brand-600 focus:ring-brand-500 border-slate-300" />
+                                <span class="font-bold text-slate-900 text-base">Từ số – Đến số</span>
+                            </div>
+                            <span class="text-xs text-slate-400"><i class="fa-solid fa-arrows-left-right"></i></span>
+                        </div>
+                        <p class="mt-2 text-xs text-slate-600 leading-relaxed pl-7">
+                            In một khoảng liên tục trong phạm vi năm/loại đang chọn. Hệ thống tự lọc đúng các hồ sơ có số nằm trong khoảng.
+                        </p>
+                    </label>
+
+                    <label id="card-mode-custom" class="selection-card relative flex flex-col p-4 rounded-xl cursor-pointer transition-custom @(Model.Mode == "custom" ? "bg-blue-50/60 border-2 border-brand-600" : "bg-white border border-slate-300")">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex items-center gap-3">
+                                <input type="radio" name="Mode" value="custom" checked="@(Model.Mode == "custom")" onchange="stpModeChanged('custom')"
+                                       class="w-4 h-4 text-brand-600 focus:ring-brand-500 border-slate-300" />
+                                <span class="font-bold text-slate-900 text-base">Các số tùy chọn</span>
+                            </div>
+                            <span class="text-xs text-slate-400"><i class="fa-solid fa-list-check"></i></span>
+                        </div>
+                        <p class="mt-2 text-xs text-slate-600 leading-relaxed pl-7">
+                            In các hồ sơ rời rạc. Ngăn cách bằng dấu phẩy hoặc gạch ngang, ví dụ <span class="font-mono">85, 90, 100-105</span>.
+                        </p>
+                    </label>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 sm:p-5">
+                    <div id="panel-all" class="@(Model.Mode == "all" ? "" : "hidden") flex items-center gap-3 text-slate-700">
+                        <div class="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                            <i class="fa-solid fa-circle-check text-lg"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-semibold text-slate-900">
+                                Đang bật chế độ in trọn bộ
+                                @if (hasType)
+                                {
+                                    <span>loại @selectedType trong năm @book.Name</span>
+                                }
+                                else
+                                {
+                                    <span>năm @book.Name</span>
+                                }
+                            </p>
+                            <p class="text-xs text-slate-500">Toàn bộ @Model.ScopeCount hồ sơ sẽ được đưa vào hàng đợi in. Bạn có thể xem danh sách bên dưới trước khi in.</p>
+                        </div>
+                    </div>
+
+                    <div id="panel-range" class="@(Model.Mode == "range" ? "" : "hidden") space-y-3">
+                        <div class="text-xs font-semibold text-slate-600 flex items-center gap-1.5 uppercase tracking-wide">
+                            <i class="fa-solid fa-sliders text-brand-600"></i> Cấu hình khoảng số hồ sơ cần in
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                            <div>
+                                <label for="input-from" class="block text-xs font-medium text-slate-700 mb-1">Từ số: <span class="text-red-500">*</span></label>
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 text-xs">№</span>
+                                    <input id="input-from" name="From" type="number" value="@Model.From" min="@Model.ScopeMin" max="@Model.ScopeMax" placeholder="@Model.ScopeMin"
+                                           class="w-full pl-8 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-semibold text-slate-800" />
+                                </div>
+                                <span class="text-[11px] text-slate-500 mt-1 block">Nhỏ nhất: @Model.ScopeMin</span>
+                            </div>
+                            <div>
+                                <label for="input-to" class="block text-xs font-medium text-slate-700 mb-1">Đến số: <span class="text-red-500">*</span></label>
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 text-xs">№</span>
+                                    <input id="input-to" name="To" type="number" value="@Model.To" min="@Model.ScopeMin" max="@Model.ScopeMax" placeholder="@Math.Min(Model.ScopeMax, Model.ScopeMin + 49)"
+                                           class="w-full pl-8 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-semibold text-slate-800" />
+                                </div>
+                                <span class="text-[11px] text-slate-500 mt-1 block">Lớn nhất: @Model.ScopeMax</span>
+                            </div>
+                            <div class="sm:col-span-2 flex items-center gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-xs text-amber-900">
+                                <i class="fa-solid fa-lightbulb text-amber-600 text-base shrink-0"></i>
+                                <span>Hệ thống tự lọc các hồ sơ liên tục từ số bắt đầu đến số kết thúc. Nếu nhập ngược, hệ thống tự đảo lại.</span>
+                            </div>
+                        </div>
+                        <div>
+                            <button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition">
+                                <i class="fa-solid fa-filter mr-1.5"></i>Áp dụng khoảng
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="panel-custom" class="@(Model.Mode == "custom" ? "" : "hidden") space-y-3">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <label for="input-custom-numbers" class="block text-xs font-semibold uppercase tracking-wide text-slate-700">Nhập danh sách các số hồ sơ cần in:</label>
+                            <span class="text-xs text-slate-500 italic">Ví dụ chuẩn: 85, 90, 100-105</span>
+                        </div>
+                        <div class="relative">
+                            <div class="absolute top-2.5 left-3 pointer-events-none text-slate-400"><i class="fa-solid fa-keyboard"></i></div>
+                            <input id="input-custom-numbers" name="Custom" type="text" value="@Model.Custom" placeholder="Nhập các số cách nhau bởi dấu phẩy..."
+                                   class="w-full pl-9 pr-3 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-medium text-slate-800" />
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition">
+                                <i class="fa-solid fa-check mr-1.5"></i>Áp dụng danh sách
+                            </button>
+                            <span class="text-[11px] text-slate-500">Hỗ trợ dấu phẩy, dấu chấm phẩy, khoảng cách và dấu gạch ngang.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pt-1 border-t border-slate-200">
+                    <div class="flex items-start gap-3 @(result.HasWarning ? "bg-amber-50 border border-amber-300" : "bg-emerald-50 border border-emerald-300") px-4 py-3 rounded-xl shadow-sm">
+                        <div class="w-9 h-9 rounded-full @(result.HasWarning ? "bg-amber-500" : "bg-emerald-600") text-white flex items-center justify-center text-base font-bold shrink-0">
+                            <i class="fa-solid @(result.HasWarning ? "fa-triangle-exclamation" : "fa-check")"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] font-semibold uppercase @(result.HasWarning ? "text-amber-800" : "text-emerald-800") tracking-wider">Trạng thái dữ liệu</span>
+                                <span class="inline-block w-1.5 h-1.5 rounded-full @(result.HasWarning ? "bg-amber-500" : "bg-emerald-500")"></span>
+                            </div>
+                            <p class="text-sm sm:text-base font-extrabold @(result.HasWarning ? "text-amber-950" : "text-emerald-950")" id="status-label">@result.StatusMessage</p>
+                            @if (result.HasWarning)
+                            {
+                                <p class="text-xs text-amber-800 mt-0.5">@result.Warning</p>
+                            }
+                            else
+                            {
+                                <p class="text-xs text-emerald-700">Dữ liệu đã sẵn sàng. Bấm xem trước để kiểm tra bản in A4.</p>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2.5 xl:justify-end">
+                        <a asp-page="/Index" asp-route-bookId="@book.Id" asp-route-mode="all"
+                           class="inline-flex items-center px-3.5 py-2.5 border border-slate-300 shadow-sm text-xs sm:text-sm font-medium rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition">
+                            <i class="fa-solid fa-arrow-rotate-left mr-1.5 text-slate-500"></i>Đặt lại
+                        </a>
+                        <a asp-page="/Statistics"
+                           class="inline-flex items-center px-3.5 py-2.5 border border-slate-300 shadow-sm text-xs sm:text-sm font-medium rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition">
+                            <i class="fa-solid fa-chart-column mr-1.5 text-brand-600"></i>Thống kê &amp; kiểm tra
+                        </a>
+                        <button type="submit" formaction="@Url.Page("/Print")" formtarget="_blank" formnovalidate
+                                class="inline-flex items-center px-3.5 py-2.5 border border-slate-300 shadow-sm text-xs sm:text-sm font-medium rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition">
+                            <i class="fa-regular fa-file-pdf mr-1.5 text-red-600"></i>Xuất PDF
+                        </button>
+                        <button type="submit" formaction="@Url.Page("/Print")" formtarget="_blank" formnovalidate
+                                class="inline-flex items-center justify-center px-6 py-3 border border-transparent text-sm sm:text-base font-bold rounded-lg text-white bg-brand-700 hover:bg-brand-800 shadow-md hover:shadow-lg transition">
+                            <i class="fa-solid fa-print text-lg mr-2"></i>
+                            <span>XEM TRƯỚC KHI IN</span>
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <!-- Bảng xem trước -->
+    <section class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden no-print">
+        <div class="px-5 sm:px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                    <span>Danh sách hồ sơ trong hàng đợi in</span>
+                    <span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200" id="table-count-badge">
+                        Hiển thị @result.Dossiers.Count / @result.Total hồ sơ
+                    </span>
+                </h2>
+                <p class="text-xs text-slate-500 mt-0.5">
+                    Kiểm tra thông tin trước khi gửi lệnh in. Mỗi hồ sơ sẽ in thành một trang A4 dọc riêng.
+                    @if (hasType)
+                    {
+                        <span>Đang xem loại <strong>@selectedType</strong>.</span>
+                    }
+                </p>
+            </div>
+            <div class="relative w-full sm:w-72">
+                <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 text-xs"><i class="fa-solid fa-magnifying-glass"></i></span>
+                <input id="table-search" type="text" placeholder="Tìm số hồ sơ, loại, số ký hiệu, trích yếu..."
+                       class="w-full pl-8 pr-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-brand-500 focus:border-brand-500" />
+            </div>
+        </div>
+
+        <div class="overflow-auto thin-scroll max-h-[65vh]">
+            <table class="min-w-full divide-y divide-slate-200 text-left text-sm" id="previewTable">
+                <thead class="bg-slate-50 text-slate-600 font-semibold text-[11px] uppercase tracking-wider sticky top-0 z-10">
+                    <tr>
+                        <th class="py-3 pl-5 pr-2 w-14 text-center" scope="col">STT</th>
+                        <th class="px-3 py-3 w-28" scope="col">Hồ sơ số</th>
+                        <th class="px-3 py-3 w-44" scope="col">Loại hồ sơ</th>
+                        <th class="px-3 py-3 w-36" scope="col">Số ký hiệu</th>
+                        <th class="px-3 py-3 w-28" scope="col">Ngày</th>
+                        <th class="px-3 py-3" scope="col">Trích yếu nội dung</th>
+                        <th class="px-3 py-3 w-24 text-center" scope="col">Tờ số</th>
+                        <th class="px-3 py-3 w-24 text-center" scope="col">Tổng tờ</th>
+                        <th class="px-3 py-3 w-32 text-center" scope="col">Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white font-medium text-slate-700 text-xs sm:text-sm">
+                    @{
+                        var index = 0;
+                    }
+                    @foreach (var dossier in result.Dossiers)
+                    {
+                        index++;
+                        var doc = dossier.Documents.FirstOrDefault();
+                        var searchText = $"{dossier.NumberDisplay} {dossier.Number} {dossier.Type} {dossier.Group} {doc?.SoKyHieu} {doc?.Ngay} {doc?.TrichYeu} {doc?.TacGia}";
+                        <tr class="hover:bg-slate-50/80 transition" data-search="@searchText">
+                            <td class="py-3 pl-5 pr-2 text-center font-bold text-slate-500">@index.ToString("00")</td>
+                            <td class="px-3 py-3 font-mono font-bold text-brand-700 whitespace-nowrap">
+                                <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@dossier.MlRow"
+                                   class="hover:underline" title="Xem chi tiết hồ sơ @dossier.NumberDisplay">@dossier.NumberDisplay</a>
+                                @if (dossier.HasPrintLayout)
+                                {
+                                    <span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 align-middle" title="Có bản in Excel gốc"></span>
+                                }
+                            </td>
+                            <td class="px-3 py-3">
+                                <span class="inline-block px-2 py-0.5 rounded bg-brand-50 border border-brand-100 text-brand-800 text-[10px] font-semibold leading-4">@dossier.TypeDisplay</span>
+                            </td>
+                            <td class="px-3 py-3 text-slate-700 break-words">@doc?.SoKyHieu</td>
+                            <td class="px-3 py-3 text-slate-500 whitespace-nowrap">@doc?.Ngay</td>
+                            <td class="px-3 py-3 text-slate-900">
+                                <div class="line-clamp-2 max-w-2xl" title="@doc?.TrichYeu">@doc?.TrichYeu</div>
+                                @if (dossier.IsAggregate)
+                                {
+                                    <span class="inline-block mt-1 text-[10px] font-semibold text-amber-700">Dòng tổng hợp</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(dossier.NumberNote))
+                                {
+                                    <span class="inline-block mt-1 text-[10px] font-semibold text-amber-700" title="@dossier.NumberNote">Số cần kiểm tra</span>
+                                }
+                            </td>
+                            <td class="px-3 py-3 text-center font-mono text-xs text-slate-600 break-words">@doc?.ToSo</td>
+                            <td class="px-3 py-3 text-center">
+                                <span class="inline-block bg-slate-100 px-2 py-0.5 rounded font-mono text-xs font-semibold text-slate-700">@dossier.TotalPages</span>
+                            </td>
+                            <td class="px-3 py-3 text-center">
+                                <div class="inline-flex items-center gap-1">
+                                    <a asp-page="/Dossier" asp-route-bookId="@book.Id" asp-route-mlRow="@dossier.MlRow"
+                                       class="inline-flex items-center px-2 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold transition"
+                                       title="Xem chi tiết hồ sơ @dossier.NumberDisplay">
+                                        <i class="fa-regular fa-eye"></i>
+                                    </a>
+                                    <a asp-page="/Print" asp-route-bookId="@book.Id" asp-route-mlRow="@dossier.MlRow" target="_blank"
+                                       class="inline-flex items-center px-2.5 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-brand-50 hover:border-brand-400 text-brand-700 text-[11px] font-bold transition"
+                                       title="In riêng hồ sơ @dossier.NumberDisplay">
+                                        <i class="fa-solid fa-print mr-1"></i>In
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                    <tr id="table-empty" class="hidden">
+                        <td colspan="9" class="py-12 text-center text-sm text-slate-500">
+                            <i class="fa-solid fa-magnifying-glass mr-2 text-slate-400"></i>Không tìm thấy hồ sơ phù hợp với từ khóa.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">
+            <div class="flex flex-wrap items-center gap-2 font-medium">
+                <span>Tổng số trang in ước tính: <strong class="text-slate-900 font-bold">@result.Dossiers.Count trang A4</strong></span>
+                <span class="text-slate-400">|</span>
+                <span>Khổ giấy: <strong class="text-slate-900">A4 dọc</strong></span>
+                <span class="text-slate-400">|</span>
+                <span>1 hồ sơ = 1 trang</span>
+            </div>
+            <a asp-page="/Import" class="inline-flex items-center gap-1.5 text-slate-500 hover:text-brand-700 font-semibold transition">
+                <i class="fa-solid fa-arrows-rotate"></i>Nhập lại dữ liệu Excel
+            </a>
+        </div>
+    </section>
+
+    <!-- Hướng dẫn nhanh -->
+    <section class="mt-5 bg-amber-50/80 border border-amber-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3.5 no-print">
+        <div class="w-9 h-9 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center shrink-0 text-sm font-bold">
+            <i class="fa-solid fa-bell"></i>
+        </div>
+        <div class="space-y-1">
+            <h3 class="text-sm font-bold text-amber-950">Lưu ý trước khi in số lượng lớn</h3>
+            <ul class="text-xs text-amber-900 space-y-1 list-disc list-inside leading-relaxed">
+                <li>Nạp đủ giấy A4 và chọn khổ <strong>Portrait (dọc)</strong> nếu máy in hỏi.</li>
+                <li>Mỗi hồ sơ được in trên một trang riêng, đúng bố cục “MỤC LỤC VĂN BẢN” như file Excel gốc.</li>
+                <li>Chọn <strong>Loại hồ sơ</strong> để chỉ in đúng loại cần dán; chọn “Tất cả loại” để in cả năm.</li>
+                <li>Nút <strong>XEM TRƯỚC KHI IN</strong> mở bản in ở tab mới; từ đó có thể in hoặc lưu PDF.</li>
+                <li>Trang <strong>Thống kê &amp; kiểm tra</strong> giúp xem mỗi năm có bao nhiêu loại, số lượng từng loại và các hồ sơ thiếu dữ liệu.</li>
+                <li>Khi chọn “Các số tùy chọn”, có thể nhập <span class="font-mono">85, 90, 100-105</span>; hệ thống báo nếu số nào không tồn tại.</li>
+            </ul>
+        </div>
+    </section>
+}

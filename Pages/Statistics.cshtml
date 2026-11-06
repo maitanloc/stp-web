@@ -1,0 +1,553 @@
+@page
+@model StatisticsModel
+@{
+    ViewData["Title"] = "Thống kê & kiểm tra";
+    var data = Model.Data;
+    var selectedBook = Model.SelectedBook;
+    var pageStart = Model.MatchingCount == 0 ? 0 : (Model.PageNumber - 1) * Model.PageSize + 1;
+    var pageEnd = Math.Min(Model.MatchingCount, Model.PageNumber * Model.PageSize);
+}
+
+@if (data.Books.Count == 0)
+{
+    <section class="max-w-3xl mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-slate-200 p-8 sm:p-12 text-center">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-brand-50 text-brand-700 flex items-center justify-center text-2xl">
+            <i class="fa-solid fa-chart-column"></i>
+        </div>
+        <h1 class="mt-5 text-2xl font-extrabold text-slate-900">Chưa có dữ liệu để thống kê</h1>
+        <p class="mt-2 text-sm text-slate-600 leading-relaxed">
+            Hãy import file Excel gốc (<strong>DK_KET_HON.xlsx</strong>) trước. Hệ thống sẽ đọc toàn bộ sheet
+            <strong>ML</strong>, phân hồ sơ theo năm và loại rồi hiển thị thống kê tại đây.
+        </p>
+        <a asp-page="/Import" class="mt-6 inline-flex items-center justify-center px-6 py-3 rounded-xl bg-brand-700 hover:bg-brand-800 text-white font-bold shadow-md transition">
+            <i class="fa-solid fa-file-import mr-2"></i>Import file Excel
+        </a>
+    </section>
+}
+else
+{
+    <section class="bg-gradient-to-r from-indigo-900 via-brand-800 to-teal-800 rounded-2xl shadow-md p-5 sm:p-6 text-white">
+        <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
+            <div class="space-y-2 min-w-0">
+                <div class="inline-flex items-center gap-2 bg-white/10 text-indigo-100 text-[11px] px-2.5 py-1 rounded font-semibold uppercase tracking-wider">
+                    <i class="fa-solid fa-chart-column"></i> Thống kê &amp; kiểm tra dữ liệu
+                </div>
+                <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">
+                    TOÀN BỘ HỒ SƠ THEO NĂM &amp; LOẠI
+                </h1>
+                <p class="text-indigo-100 text-xs sm:text-sm opacity-90 max-w-3xl leading-relaxed">
+                    Dữ liệu lấy từ toàn bộ sheet <strong>ML</strong>: @data.Books.Count năm,
+                    @data.TotalTypes loại hồ sơ, @data.TotalDossiers.ToString("N0") hồ sơ.
+                    Kiểm tra nhanh các dòng thiếu thông tin, dòng tổng hợp, số hồ sơ cần suy luận và xuất CSV đối chiếu.
+                </p>
+                <p class="text-[11px] text-indigo-200/90">
+                    <i class="fa-regular fa-file-lines mr-1"></i>
+                    @data.SourceFileName
+                    @if (data.ImportedAt.HasValue)
+                    {
+                        <span> · import lúc @data.ImportedAt.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                    }
+                    <span> · @data.TotalGroups nhóm lưu trữ</span>
+                </p>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
+                <div class="bg-white/10 border border-white/15 rounded-xl px-3 py-2.5 text-center min-w-[92px]">
+                    <p class="text-[10px] text-indigo-200 font-medium">Năm</p>
+                    <p class="text-xl font-extrabold">@data.Books.Count</p>
+                </div>
+                <div class="bg-white/10 border border-white/15 rounded-xl px-3 py-2.5 text-center min-w-[92px]">
+                    <p class="text-[10px] text-indigo-200 font-medium">Hồ sơ</p>
+                    <p class="text-xl font-extrabold">@data.TotalDossiers.ToString("N0")</p>
+                </div>
+                <div class="bg-white/10 border border-white/15 rounded-xl px-3 py-2.5 text-center min-w-[92px]">
+                    <p class="text-[10px] text-indigo-200 font-medium">Loại</p>
+                    <p class="text-xl font-extrabold">@data.TotalTypes</p>
+                </div>
+                <div class="bg-white/10 border border-white/15 rounded-xl px-3 py-2.5 text-center min-w-[92px]">
+                    <p class="text-[10px] text-indigo-200 font-medium">Có bản in</p>
+                    <p class="text-xl font-extrabold">@data.TotalPrintReady.ToString("N0")</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3">
+            <p class="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">Tổng số tờ</p>
+            <p class="mt-1 text-xl font-extrabold text-slate-900">@data.TotalPages.ToString("N0")</p>
+            <p class="text-[11px] text-slate-400">Theo cột G của ML</p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3">
+            <p class="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">Chỉ có trong ML</p>
+            <p class="mt-1 text-xl font-extrabold text-slate-900">@Model.MlOnlyCount.ToString("N0")</p>
+            <p class="text-[11px] text-slate-400">Chưa có block in Excel</p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3">
+            <p class="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">Năm có sheet in</p>
+            <p class="mt-1 text-xl font-extrabold text-slate-900">@Model.YearsWithPrintSheets</p>
+            <p class="text-[11px] text-slate-400">Các năm còn lại chỉ có ML</p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3">
+            <p class="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">Nhóm lưu trữ</p>
+            <p class="mt-1 text-xl font-extrabold text-slate-900">@data.TotalGroups</p>
+            <p class="text-[11px] text-slate-400">Theo dòng “I. Văn phòng”</p>
+        </div>
+    </div>
+
+    <section class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center"><i class="fa-solid fa-triangle-exclamation"></i></span>
+                    Kiểm tra nhanh dữ liệu
+                </h2>
+                <p class="mt-1 text-xs text-slate-500">
+                    Phạm vi: <strong>@Model.ScopeLabel</strong>. Bấm một ô để lọc danh sách kiểm tra bên dưới.
+                </p>
+            </div>
+            <span class="text-[11px] text-slate-400">@Model.ScopeCount hồ sơ trong phạm vi</span>
+        </div>
+
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <a href="@Url.Page("/Statistics", new { bookId = Model.BookId, type = Model.Type, issue = "all" })"
+               class="rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 px-4 py-3 transition">
+                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tất cả hồ sơ</p>
+                <p class="mt-1 text-2xl font-extrabold text-slate-900">@Model.ScopeCount.ToString("N0")</p>
+                <p class="text-[11px] text-slate-500">Trong phạm vi đang chọn</p>
+            </a>
+
+            @foreach (var issue in Model.Issues.Where(i => i.Key != "all"))
+            {
+                var tone = issue.Key switch
+                {
+                    "missing-date" => "border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-950",
+                    "missing-docno" => "border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-950",
+                    "zero-total" => "border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-950",
+                    "aggregate" => "border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-950",
+                    "number-note" => "border-yellow-200 bg-yellow-50 hover:bg-yellow-100 text-yellow-950",
+                    _ => "border-sky-200 bg-sky-50 hover:bg-sky-100 text-sky-950"
+                };
+                <a href="@Url.Page("/Statistics", new { bookId = Model.BookId, type = Model.Type, issue = issue.Key, search = Model.Search })"
+                   class="rounded-xl border px-4 py-3 transition @tone">
+                    <p class="text-[11px] font-semibold uppercase tracking-wide opacity-80">@issue.Label</p>
+                    <p class="mt-1 text-2xl font-extrabold">@Model.IssueCounts.GetValueOrDefault(issue.Key).ToString("N0")</p>
+                    <p class="text-[11px] opacity-80">@issue.Description</p>
+                </a>
+            }
+        </div>
+    </section>
+
+    <section class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="px-5 sm:px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center"><i class="fa-solid fa-calendar-days"></i></span>
+                    Tổng hợp theo năm
+                </h2>
+                <p class="mt-1 text-xs text-slate-500">
+                    Mỗi năm là một sổ; các sheet in bị chia nhỏ như <span class="font-mono">1999 (1)</span>,
+                    <span class="font-mono">1999 (2)</span> đã được gộp vào cùng năm.
+                </p>
+            </div>
+            <a asp-page="/Index" class="inline-flex items-center text-xs font-semibold text-brand-700 hover:text-brand-800">
+                <i class="fa-solid fa-arrow-right mr-1.5"></i>Đi tới lọc &amp; in
+            </a>
+        </div>
+
+        <div class="overflow-x-auto thin-scroll">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-600">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-semibold whitespace-nowrap">Năm</th>
+                        <th class="px-3 py-3 text-right font-semibold whitespace-nowrap">Hồ sơ</th>
+                        <th class="px-3 py-3 text-right font-semibold whitespace-nowrap">Số loại</th>
+                        <th class="px-4 py-3 text-left font-semibold">Các loại hồ sơ &amp; số lượng</th>
+                        <th class="px-4 py-3 text-left font-semibold">Sổ in gốc</th>
+                        <th class="px-4 py-3 text-center font-semibold whitespace-nowrap">Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    @foreach (var book in data.Books)
+                    {
+                        var isSelected = string.Equals(selectedBook?.Id, book.Id, StringComparison.OrdinalIgnoreCase);
+                        <tr class="@(isSelected ? "bg-brand-50/70" : "hover:bg-slate-50/80")">
+                            <td class="px-4 py-3 whitespace-nowrap">
+                                <a asp-page="/Statistics" asp-route-bookId="@book.Id" asp-route-issue="all"
+                                   class="font-extrabold text-slate-900 hover:text-brand-700">@book.Year</a>
+                                @if (isSelected)
+                                {
+                                    <span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-brand-600 align-middle" title="Đang chọn"></span>
+                                }
+                            </td>
+                            <td class="px-3 py-3 text-right font-mono font-bold text-slate-800">@book.Count.ToString("N0")</td>
+                            <td class="px-3 py-3 text-right font-mono text-slate-600">@book.TypeCount</td>
+                            <td class="px-4 py-3">
+                                <div class="flex flex-wrap gap-1.5">
+                                    @foreach (var typeStat in book.TypeStats)
+                                    {
+                                        <a asp-page="/Index" asp-route-bookId="@book.Id" asp-route-type="@typeStat.Type"
+                                           class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:border-brand-400 hover:bg-brand-50 transition"
+                                           title="Lọc năm @book.Year, loại @typeStat.Type — @typeStat.Count hồ sơ">
+                                            <span>@typeStat.Type</span>
+                                            <span class="font-mono font-bold text-brand-700">@typeStat.Count</span>
+                                        </a>
+                                    }
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 text-xs text-slate-500">
+                                @if (book.SourceVolumes.Count == 0)
+                                {
+                                    <span class="inline-flex items-center gap-1 text-sky-700">
+                                        <i class="fa-solid fa-database"></i>Chỉ có trong ML
+                                    </span>
+                                }
+                                else
+                                {
+                                    @(string.Join(", ", book.SourceVolumes))
+                                }
+                            </td>
+                            <td class="px-4 py-3 text-center whitespace-nowrap">
+                                <div class="inline-flex items-center gap-1">
+                                    <a asp-page="/Index" asp-route-bookId="@book.Id"
+                                       class="inline-flex items-center px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-[10px] font-bold"
+                                       title="Lọc hồ sơ năm @book.Year">
+                                        <i class="fa-solid fa-filter"></i>
+                                    </a>
+                                    <a asp-page="/Statistics" asp-route-bookId="@book.Id" asp-route-issue="all"
+                                       class="inline-flex items-center px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-[10px] font-bold"
+                                       title="Kiểm tra dữ liệu năm @book.Year">
+                                        <i class="fa-solid fa-magnifying-glass"></i>
+                                    </a>
+                                    <a asp-page="/Print" asp-route-bookId="@book.Id" asp-route-mode="all" target="_blank"
+                                       class="inline-flex items-center px-2 py-1 rounded border border-brand-200 bg-brand-50 hover:bg-brand-100 text-brand-700 text-[10px] font-bold"
+                                       title="In cả năm @book.Year">
+                                        <i class="fa-solid fa-print"></i>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot class="bg-slate-50 border-t-2 border-slate-200">
+                    <tr class="font-extrabold text-slate-900">
+                        <td class="px-4 py-3">Tổng</td>
+                        <td class="px-3 py-3 text-right font-mono">@data.TotalDossiers.ToString("N0")</td>
+                        <td class="px-3 py-3 text-right font-mono">@data.TotalTypes</td>
+                        <td class="px-4 py-3 text-xs font-medium text-slate-600">
+                            @data.Books.Count năm · @data.TotalPrintReady.ToString("N0") hồ sơ có bản in Excel
+                        </td>
+                        <td class="px-4 py-3 text-xs font-medium text-slate-600">@Model.YearsWithPrintSheets năm có sheet in</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </section>
+
+    <div class="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <section class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="px-5 sm:px-6 py-4 border-b border-slate-200">
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center"><i class="fa-solid fa-table-cells"></i></span>
+                    Ma trận năm × loại hồ sơ
+                </h2>
+                <p class="mt-1 text-xs text-slate-500">
+                    Số trong ô là số hồ sơ của loại đó trong năm. Bấm số để mở danh sách lọc tương ứng.
+                </p>
+            </div>
+            <div class="overflow-auto thin-scroll max-h-[70vh]">
+                <table class="min-w-full text-[11px] border-collapse">
+                    <thead class="sticky top-0 z-20 bg-slate-100 text-slate-700">
+                        <tr>
+                            <th class="sticky left-0 z-30 bg-slate-100 px-3 py-2.5 text-left font-bold border-b border-slate-300 min-w-[190px]">Loại hồ sơ</th>
+                            @foreach (var book in data.Books)
+                            {
+                                <th class="px-1.5 py-2.5 text-center font-semibold border-b border-slate-300 whitespace-nowrap">@book.Year</th>
+                            }
+                            <th class="px-2 py-2.5 text-center font-bold border-b border-l border-slate-300">Tổng</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        @foreach (var row in Model.MatrixRows)
+                        {
+                            <tr class="hover:bg-slate-50">
+                                <td class="sticky left-0 z-10 bg-white px-3 py-2 font-semibold text-slate-800">@row.Type</td>
+                                @foreach (var book in data.Books)
+                                {
+                                    var count = row.Counts.GetValueOrDefault(book.Id);
+                                    <td class="px-1.5 py-2 text-center">
+                                        @if (count > 0)
+                                        {
+                                            <a asp-page="/Index" asp-route-bookId="@book.Id" asp-route-type="@row.Type"
+                                               class="inline-flex min-w-[24px] justify-center rounded px-1 py-0.5 font-mono font-semibold text-brand-700 hover:bg-brand-50 hover:text-brand-900"
+                                               title="Năm @book.Year · @row.Type: @count hồ sơ">@count</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-slate-300">·</span>
+                                        }
+                                    </td>
+                                }
+                                <td class="px-2 py-2 text-center font-mono font-extrabold text-slate-900 border-l border-slate-200">@row.Total.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot class="bg-slate-50 border-t-2 border-slate-300">
+                        <tr class="font-extrabold text-slate-900">
+                            <td class="sticky left-0 z-10 bg-slate-50 px-3 py-2">Tổng theo năm</td>
+                            @foreach (var book in data.Books)
+                            {
+                                <td class="px-1.5 py-2 text-center font-mono">@book.Count</td>
+                            }
+                            <td class="px-2 py-2 text-center font-mono border-l border-slate-300">@data.TotalDossiers.ToString("N0")</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span class="w-8 h-8 rounded-lg bg-violet-50 text-violet-700 flex items-center justify-center"><i class="fa-solid fa-tags"></i></span>
+                Tổng hợp theo loại
+            </h2>
+            <p class="mt-1 text-xs text-slate-500">Số năm xuất hiện và khoảng số hồ sơ của từng loại.</p>
+            <div class="mt-4 space-y-2">
+                @foreach (var typeSummary in Model.TypeSummaries)
+                {
+                    <a asp-page="/Index" asp-route-bookId="@selectedBook?.Id" asp-route-type="@typeSummary.Type"
+                       class="block rounded-lg border border-slate-200 bg-slate-50 hover:bg-brand-50 hover:border-brand-300 px-3 py-2.5 transition">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold text-slate-900">@typeSummary.Type</p>
+                                <p class="text-[11px] text-slate-500">@typeSummary.Years năm · số @typeSummary.Range</p>
+                            </div>
+                            <span class="font-mono text-sm font-extrabold text-brand-700">@typeSummary.Count.ToString("N0")</span>
+                        </div>
+                        <div class="mt-2 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                            <div class="h-full rounded-full bg-brand-600" style="width: @(typeSummary.Count * 100 / Math.Max(1, data.TotalDossiers))%"></div>
+                        </div>
+                    </a>
+                }
+            </div>
+        </section>
+    </div>
+
+    <section class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="px-5 sm:px-6 py-4 border-b border-slate-200">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <span class="w-8 h-8 rounded-lg bg-sky-50 text-sky-700 flex items-center justify-center"><i class="fa-solid fa-magnifying-glass-chart"></i></span>
+                        Kiểm tra chi tiết &amp; xuất CSV
+                    </h2>
+                    <p class="mt-1 text-xs text-slate-500">
+                        Đang xem <strong>@Model.MatchingCount.ToString("N0")</strong> / @Model.ScopeCount.ToString("N0") hồ sơ
+                        · bộ lọc: <strong>@Model.SelectedIssueLabel</strong>
+                        · phạm vi: <strong>@Model.ScopeLabel</strong>
+                        @if (Model.Search is not null)
+                        {
+                            <span> · từ khóa: <strong>@Model.Search</strong></span>
+                        }
+                    </p>
+                </div>
+                <a href="@Url.Page("/Statistics", "Csv", new { bookId = Model.BookId, type = Model.Type, issue = Model.SelectedIssue, search = Model.Search })"
+                   class="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition shrink-0">
+                    <i class="fa-solid fa-file-csv mr-1.5"></i>Xuất CSV kết quả đang lọc
+                </a>
+            </div>
+
+            <form method="get" asp-page="/Statistics" class="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3 items-end">
+                <div class="xl:col-span-3">
+                    <label for="stat-book" class="block text-[11px] font-semibold text-slate-600 uppercase tracking-wide mb-1">Năm</label>
+                    <select id="stat-book" name="BookId" class="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-semibold text-slate-800">
+                        <option value="" selected="@(selectedBook is null)">Tất cả các năm (@data.Books.Count năm)</option>
+                        @foreach (var book in data.Books)
+                        {
+                            <option value="@book.Id" selected="@(string.Equals(selectedBook?.Id, book.Id, StringComparison.OrdinalIgnoreCase))">
+                                @book.Year — @book.Count hồ sơ · @book.TypeCount loại
+                            </option>
+                        }
+                    </select>
+                </div>
+                <div class="xl:col-span-3">
+                    <label for="stat-type" class="block text-[11px] font-semibold text-slate-600 uppercase tracking-wide mb-1">Loại hồ sơ</label>
+                    <select id="stat-type" name="Type" class="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-semibold text-slate-800">
+                        <option value="" selected="@(string.IsNullOrWhiteSpace(Model.Type))">Tất cả loại (@data.TotalTypes loại)</option>
+                        @foreach (var typeName in Model.AllTypes)
+                        {
+                            <option value="@typeName" selected="@(string.Equals(Model.Type, typeName, StringComparison.OrdinalIgnoreCase))">@typeName</option>
+                        }
+                    </select>
+                </div>
+                <div class="xl:col-span-3">
+                    <label for="stat-issue" class="block text-[11px] font-semibold text-slate-600 uppercase tracking-wide mb-1">Tình trạng dữ liệu</label>
+                    <select id="stat-issue" name="Issue" class="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 font-semibold text-slate-800">
+                        @foreach (var issue in Model.Issues)
+                        {
+                            <option value="@issue.Key" selected="@(string.Equals(Model.SelectedIssue, issue.Key, StringComparison.OrdinalIgnoreCase))">
+                                @issue.Label (@Model.IssueCounts.GetValueOrDefault(issue.Key))
+                            </option>
+                        }
+                    </select>
+                </div>
+                <div class="xl:col-span-3">
+                    <label for="stat-search" class="block text-[11px] font-semibold text-slate-600 uppercase tracking-wide mb-1">Tìm kiếm</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 text-xs"><i class="fa-solid fa-magnifying-glass"></i></span>
+                        <input id="stat-search" name="Search" type="text" value="@Model.Search" placeholder="Số hồ sơ, trích yếu, số ký hiệu..."
+                               class="w-full pl-8 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 text-slate-800" />
+                    </div>
+                </div>
+                <div class="xl:col-span-12 flex flex-wrap items-center gap-2 pt-1">
+                    <button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition">
+                        <i class="fa-solid fa-filter mr-1.5"></i>Áp dụng bộ lọc
+                    </button>
+                    <a asp-page="/Statistics" class="inline-flex items-center px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition">
+                        <i class="fa-solid fa-arrow-rotate-left mr-1.5"></i>Đặt lại
+                    </a>
+                    @if (selectedBook is not null && string.Equals(Model.SelectedIssue, "all", StringComparison.OrdinalIgnoreCase) && Model.Search is null)
+                    {
+                        <a asp-page="/Print" asp-route-bookId="@selectedBook.Id" asp-route-type="@Model.Type" asp-route-mode="all" target="_blank"
+                           class="inline-flex items-center px-3 py-2 rounded-lg border border-brand-300 bg-brand-50 hover:bg-brand-100 text-brand-800 text-xs font-semibold transition">
+                            <i class="fa-solid fa-print mr-1.5"></i>In phạm vi đang chọn
+                        </a>
+                    }
+                    <span class="text-[11px] text-slate-400">CSV xuất toàn bộ kết quả, không chỉ trang hiện tại.</span>
+                </div>
+            </form>
+        </div>
+
+        <div class="overflow-x-auto thin-scroll">
+            <table class="min-w-full text-xs sm:text-sm">
+                <thead class="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-600">
+                    <tr>
+                        <th class="px-3 py-3 text-left font-semibold whitespace-nowrap">Năm</th>
+                        <th class="px-3 py-3 text-left font-semibold whitespace-nowrap">Hồ sơ số</th>
+                        <th class="px-3 py-3 text-left font-semibold">Loại hồ sơ</th>
+                        <th class="px-3 py-3 text-left font-semibold">Số ký hiệu</th>
+                        <th class="px-3 py-3 text-left font-semibold whitespace-nowrap">Ngày</th>
+                        <th class="px-3 py-3 text-left font-semibold">Trích yếu nội dung</th>
+                        <th class="px-3 py-3 text-center font-semibold whitespace-nowrap">Tờ số</th>
+                        <th class="px-3 py-3 text-center font-semibold whitespace-nowrap">Tổng tờ</th>
+                        <th class="px-3 py-3 text-left font-semibold whitespace-nowrap">Dòng ML</th>
+                        <th class="px-3 py-3 text-center font-semibold whitespace-nowrap">Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    @if (Model.Rows.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="10" class="px-4 py-12 text-center text-sm text-slate-500">
+                                <i class="fa-solid fa-magnifying-glass mr-2 text-slate-400"></i>
+                                Không có hồ sơ phù hợp với bộ lọc hiện tại.
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var item in Model.Rows)
+                        {
+                            var dossier = item.Dossier;
+                            var document = dossier.Documents.FirstOrDefault();
+                            <tr class="hover:bg-slate-50/80">
+                                <td class="px-3 py-2.5 whitespace-nowrap">
+                                    <a asp-page="/Statistics" asp-route-bookId="@item.Book.Id" asp-route-issue="all"
+                                       class="font-bold text-slate-800 hover:text-brand-700">@item.Book.Year</a>
+                                </td>
+                                <td class="px-3 py-2.5 whitespace-nowrap">
+                                    <a asp-page="/Dossier" asp-route-bookId="@item.Book.Id" asp-route-mlRow="@dossier.MlRow"
+                                       class="font-mono font-bold text-brand-700 hover:underline" title="Xem chi tiết hồ sơ @dossier.NumberDisplay">@dossier.NumberDisplay</a>
+                                    <div class="mt-1 flex flex-wrap gap-1">
+                                        @if (dossier.IsAggregate)
+                                        {
+                                            <span class="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold text-violet-800" title="Dòng tổng hợp">HS</span>
+                                        }
+                                        @if (!dossier.HasPrintLayout)
+                                        {
+                                            <span class="rounded bg-sky-100 px-1 py-0.5 text-[9px] font-bold text-sky-800" title="Chưa có block in Excel">ML</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(dossier.NumberNote))
+                                        {
+                                            <span class="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800" title="@dossier.NumberNote">!</span>
+                                        }
+                                        @if (string.IsNullOrWhiteSpace(document?.Ngay))
+                                        {
+                                            <span class="rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-800" title="Thiếu ngày văn bản">N</span>
+                                        }
+                                        @if (string.IsNullOrWhiteSpace(document?.SoKyHieu))
+                                        {
+                                            <span class="rounded bg-orange-100 px-1 py-0.5 text-[9px] font-bold text-orange-800" title="Thiếu số ký hiệu">K</span>
+                                        }
+                                        @if (dossier.TotalPages <= 0)
+                                        {
+                                            <span class="rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-800" title="Không xác định tổng số tờ">T</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="px-3 py-2.5">
+                                    <span class="inline-block rounded bg-brand-50 border border-brand-100 px-2 py-0.5 text-[10px] font-semibold text-brand-800">@dossier.TypeDisplay</span>
+                                </td>
+                                <td class="px-3 py-2.5 text-slate-700 break-words">@document?.SoKyHieu</td>
+                                <td class="px-3 py-2.5 text-slate-500 whitespace-nowrap">@document?.Ngay</td>
+                                <td class="px-3 py-2.5 text-slate-900">
+                                    <div class="line-clamp-2 max-w-md" title="@document?.TrichYeu">@document?.TrichYeu</div>
+                                </td>
+                                <td class="px-3 py-2.5 text-center font-mono text-slate-600 text-[11px]">@document?.ToSo</td>
+                                <td class="px-3 py-2.5 text-center">
+                                    <span class="inline-block rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">@dossier.TotalPages</span>
+                                </td>
+                                <td class="px-3 py-2.5 text-[11px] text-slate-500 whitespace-nowrap">
+                                    <span class="font-mono">@dossier.MlRow</span>
+                                    @if (!string.IsNullOrWhiteSpace(dossier.SourceVolume))
+                                    {
+                                        <span class="block text-slate-400">@dossier.SourceVolume</span>
+                                    }
+                                </td>
+                                <td class="px-3 py-2.5 text-center whitespace-nowrap">
+                                    <div class="inline-flex items-center gap-1">
+                                        <a asp-page="/Dossier" asp-route-bookId="@item.Book.Id" asp-route-mlRow="@dossier.MlRow"
+                                           class="inline-flex items-center px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-[10px] font-bold"
+                                           title="Xem chi tiết hồ sơ @dossier.NumberDisplay">
+                                            <i class="fa-regular fa-eye"></i>
+                                        </a>
+                                        <a asp-page="/Print" asp-route-bookId="@item.Book.Id" asp-route-mlRow="@dossier.MlRow" target="_blank"
+                                           class="inline-flex items-center px-2 py-1 rounded border border-brand-200 bg-brand-50 hover:bg-brand-100 text-brand-700 text-[10px] font-bold"
+                                           title="In hồ sơ @dossier.NumberDisplay">
+                                            <i class="fa-solid fa-print"></i>
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">
+            <span>
+                Hiển thị <strong>@pageStart–@pageEnd</strong> trong <strong>@Model.MatchingCount.ToString("N0")</strong> hồ sơ phù hợp
+                · @Model.ScopeCount.ToString("N0") hồ sơ trong phạm vi.
+            </span>
+            <div class="flex items-center gap-1">
+                @if (Model.PageNumber > 1)
+                {
+                    <a href="@Url.Page("/Statistics", new { bookId = Model.BookId, type = Model.Type, issue = Model.SelectedIssue, search = Model.Search, pageNo = 1 })"
+                       class="px-2.5 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100 font-semibold">Đầu</a>
+                    <a href="@Url.Page("/Statistics", new { bookId = Model.BookId, type = Model.Type, issue = Model.SelectedIssue, search = Model.Search, pageNo = Model.PageNumber - 1 })"
+                       class="px-2.5 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100 font-semibold">Trước</a>
+                }
+                <span class="px-2 font-semibold text-slate-700">Trang @Model.PageNumber / @Model.PageCount</span>
+                @if (Model.PageNumber < Model.PageCount)
+                {
+                    <a href="@Url.Page("/Statistics", new { bookId = Model.BookId, type = Model.Type, issue = Model.SelectedIssue, search = Model.Search, pageNo = Model.PageNumber + 1 })"
+                       class="px-2.5 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100 font-semibold">Sau</a>
+                    <a href="@Url.Page("/Statistics", new { bookId = Model.BookId, type = Model.Type, issue = Model.SelectedIssue, search = Model.Search, pageNo = Model.PageCount })"
+                       class="px-2.5 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100 font-semibold">Cuối</a>
+                }
+            </div>
+        </div>
+    </section>
+}
