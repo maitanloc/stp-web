@@ -17,6 +17,24 @@ App_Data/*
 # Logs
 *.log
 
+# Runtime data, uploads, outputs, backups
+data/
+logs/
+artifacts/
+*.bak
+*.db
+*.sqlite
+
+# Node / SPA
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+
+# Clean Excel template may be committed (no personal data)
+!src/Stp.Infrastructure/Excel/Templates/*.xlsm
+
 # OS / editor
 .DS_Store
 Thumbs.db

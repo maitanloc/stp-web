@@ -1,0 +1,11 @@
+{
+  "workbookCodeName": "ThisWorkbook",
+  "sheets": [
+    {
+      "name": "Sheet1",
+      "codeName": "Sheet1"
+    }
+  ],
+  "note": "Donor sạch: ThisWorkbook chứa StpArchiveMacro.bas, một sheet module rỗng. Không chứa dữ liệu hồ sơ. Tạo lại bằng script scripts/New-VbaDonor.ps1 trên máy có Excel bản quyền.",
+  "macroLines": 223
+}
