@@ -133,6 +133,22 @@ và chạy song song cho đến khi SPA hoàn thiện.
 - Header/footer lấy từ `PrintPreset`.
 - Xuất PDF kiểm tra bằng `ExportAsFixedFormat` khi cần.
 
+### 5.6 Bổ sung trích yếu (giữ nguyên workbook gốc)
+
+- Công cụ chỉ sửa phần trong ngoặc cuối cột trích yếu (`ML!D`), không đụng phần
+  trước ngoặc và không tạo lại workbook.
+- Đọc workbook một lần, tách danh mục giấy tờ hiện có; danh mục gợi ý lấy từ
+  `ML!S4:AK4`, các mục đã gặp và bộ mặc định, chuẩn hoá không dấu/không phân biệt
+  hoa thường.
+- Khi xuất, mở ZIP gốc và chỉ thay `xl/worksheets/sheetN.xml` của sheet `ML`;
+  các part còn lại (sharedStrings, styles, drawings, comments, macro, web extension)
+  được copy nguyên byte.
+- Ô trích yếu ghi bằng `inlineStr` để không phải sửa `sharedStrings.xml`; giữ `s=`
+  của ô cũ. `xl/workbook.xml` bật `fullCalcOnLoad="1"` và `forceFullCalc="1"`.
+- Ngoặc cuối chỉ được coi là danh mục khi có ít nhất một mục khớp catalog, chứa
+  từ khoá giấy tờ hoặc là danh sách không phải tên riêng; ngoặc là bí danh người
+  (ví dụ `(NGUYỄN ĐỨC THÁI)`) được giữ nguyên và cảnh báo trên UI.
+
 ## 6. Đồng bộ hai chiều
 
 - Excel là bản chính.
@@ -184,6 +200,12 @@ POST   /api/sync                             # upload workbook, ML là nguồn c
 GET    /api/sync/sessions?take=
 GET    /api/sync/sessions/{id}
 
+POST   /api/summary/inspect                  # upload, tách cột trích yếu
+GET    /api/summary/{id}/rows?year=&type=&search=&onlyExisting=&page=&pageSize=
+POST   /api/summary/{id}/preview             # xem trước câu trích yếu
+POST   /api/summary/{id}/export              # tải workbook đã bổ sung
+DELETE /api/summary/{id}                     # đóng phiên, xoá upload tạm
+
 GET    /api/dev/auth/status
 POST   /api/dev/auth/setup                   # lần đầu, tạo mật khẩu PBKDF2
 POST   /api/dev/auth/login                   # -> JWT HS256
@@ -216,6 +238,7 @@ SPA nằm trong `src/Stp.Web`, dùng Vue 3 + TypeScript + Vite, `vue-router` và
 | `/` | Tổng quan: số hồ sơ, workbook, job, phiên đồng bộ |
 | `/chuyen-doi` | Chuyển đổi nhiều file, kiểm tra file đầu tiên, tuỳ chọn gốc/ZIP/GOP/macro |
 | `/gop-file` | Gộp nhiều workbook thành `GOP.xlsm` |
+| `/trich-yeu` | Bổ sung danh mục giấy tờ vào ngoặc cuối trích yếu, xuất lại workbook gốc |
 | `/dong-bo` | Upload workbook đã sửa, xem kết quả và lịch sử phiên đồng bộ |
 | `/kho` | Danh sách workbook |
 | `/kho/:id` | Hồ sơ theo năm/loại/từ khoá, phân trang |
@@ -230,6 +253,8 @@ SPA nằm trong `src/Stp.Web`, dùng Vue 3 + TypeScript + Vite, `vue-router` và
 - Kéo thả nhiều file, hiển thị dung lượng, kiểm tra nhanh loại workbook.
 - Trạng thái job rõ ràng, lỗi tiếng Việt, có nút thử lại/làm mới.
 - Bộ lọc năm/loại/từ khoá; bản in giữ 7 cột và ngưỡng font như bản web cũ.
+- Bổ sung trích yếu: upload workbook, lọc năm/loại/từ khoá, mở dropdown tích
+  nhiều giấy tờ, thêm mục tự nhập, xem trước rồi tải file gốc đã cập nhật.
 - Dark mode bằng `data-theme="dark"` trên `<html>`; lưu lựa chọn ở
   `localStorage["stp.theme"]`.
 

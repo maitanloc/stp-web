@@ -31,6 +31,15 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'trich-yeu',
+        name: 'summary',
+        component: () => import('./views/SummaryToolView.vue'),
+        meta: {
+          title: 'Bổ sung trích yếu',
+          subtitle: 'Tích giấy tờ cần thêm vào ngoặc cuối rồi xuất lại đúng workbook gốc',
+        },
+      },
+      {
         path: 'dong-bo',
         name: 'sync',
         component: () => import('./views/SyncView.vue'),

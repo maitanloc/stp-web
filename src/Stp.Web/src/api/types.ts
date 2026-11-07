@@ -327,3 +327,64 @@ export interface SystemInfoResponse {
   jobCount: number
   syncSessionCount: number
 }
+
+// Công cụ bổ sung trích yếu.
+
+export interface SummaryYearResponse {
+  year: number
+  count: number
+}
+
+export interface SummaryTypeResponse {
+  name: string
+  count: number
+}
+
+export interface SummaryInspectResponse {
+  sessionId: string
+  fileName: string
+  fileSizeBytes: number
+  sheetName: string
+  summaryColumn: string
+  summaryHeader: string | null
+  rowCount: number
+  existingListCount: number
+  brokenSummaryCount: number
+  formulaSummaryCount: number
+  catalog: string[]
+  years: SummaryYearResponse[]
+  types: SummaryTypeResponse[]
+}
+
+export interface SummaryRowResponse {
+  rowNumber: number
+  year: number | null
+  numberLabel: string
+  summary: string
+  baseSummary: string
+  items: string[]
+  hasDocumentList: boolean
+  hasFormula: boolean
+  isBrokenSummary: boolean
+  group: string | null
+  type: string | null
+}
+
+export interface SummaryRowsResponse {
+  items: SummaryRowResponse[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface SummaryChangeRequest {
+  rowNumber: number
+  items: string[]
+}
+
+export interface SummaryPreviewRowResponse {
+  rowNumber: number
+  summary: string
+  changed: boolean
+}
+
