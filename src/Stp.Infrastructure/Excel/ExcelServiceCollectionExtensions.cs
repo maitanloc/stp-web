@@ -2,6 +2,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Stp.Core.Excel;
+using Stp.Core.Macros;
+using Stp.Infrastructure.Macros;
 
 namespace Stp.Infrastructure.Excel;
 
@@ -32,6 +34,7 @@ public static class ExcelServiceCollectionExtensions
         services.AddSingleton<IMergedWorkbookService, MergedWorkbookService>();
         services.AddSingleton<IExcelConversionService, ComExcelEngine>();
         services.AddSingleton<MacroTemplateProvider>();
+        services.AddScoped<IMacroService, MacroService>();
         return services;
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Stp.Core.Domain;
 using Stp.Core.Excel;
 using Stp.Core.Jobs;
+using Stp.Core.Macros;
 using Stp.Core.Storage;
 using Stp.Infrastructure.Excel;
 using Stp.Infrastructure.Persistence;
@@ -20,7 +21,8 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
     private readonly IExcelInspector _inspector;
     private readonly IExcelConversionService _conversion;
     private readonly IMergedWorkbookService _merge;
-    private readonly MacroTemplateProvider _macroProvider;
+    private readonly IMacroService _macros;
+    private readonly MacroTemplateProvider _fallbackMacroProvider;
     private readonly IFileStorage _storage;
     private readonly ILogger<BatchJobProcessor> _logger;
 
@@ -29,7 +31,8 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
         IExcelInspector inspector,
         IExcelConversionService conversion,
         IMergedWorkbookService merge,
-        MacroTemplateProvider macroProvider,
+        IMacroService macros,
+        MacroTemplateProvider fallbackMacroProvider,
         IFileStorage storage,
         ILogger<BatchJobProcessor> logger)
     {
@@ -37,7 +40,8 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
         _inspector = inspector;
         _conversion = conversion;
         _merge = merge;
-        _macroProvider = macroProvider;
+        _macros = macros;
+        _fallbackMacroProvider = fallbackMacroProvider;
         _storage = storage;
         _logger = logger;
     }
@@ -64,6 +68,7 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
         }
 
         var options = ConversionJobOptions.FromJson(job.OptionsJson);
+        var macroCode = await ResolveMacroCodeAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -80,11 +85,11 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
 
             if (job.Type == BatchJobType.Merge)
             {
-                await ProcessMergeJobAsync(job, options, cancellationToken).ConfigureAwait(false);
+                await ProcessMergeJobAsync(job, options, macroCode, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                await ProcessConversionJobAsync(job, options, cancellationToken).ConfigureAwait(false);
+                await ProcessConversionJobAsync(job, options, macroCode, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -108,6 +113,7 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
     private async Task ProcessConversionJobAsync(
         BatchJob job,
         ConversionJobOptions options,
+        string macroCode,
         CancellationToken cancellationToken)
     {
         var outputDirectory = _storage.GetJobOutputDirectory(job.Id);
@@ -180,7 +186,7 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
                 {
                     InputPath = item.InputPath,
                     OutputPath = outputPath,
-                    MacroCode = _macroProvider.DefaultMacroCode,
+                    MacroCode = macroCode,
                     VerifyMacro = true,
                     ReplaceThisWorkbookCode = true,
                     InjectMacro = options.InjectMacro,
@@ -232,6 +238,7 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
                     succeeded.Sum(item => item.DossierCount),
                     outputDirectory,
                     options,
+                    macroCode,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -286,6 +293,7 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
     private async Task ProcessMergeJobAsync(
         BatchJob job,
         ConversionJobOptions options,
+        string macroCode,
         CancellationToken cancellationToken)
     {
         var outputDirectory = _storage.GetJobOutputDirectory(job.Id);
@@ -333,6 +341,7 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
                 dossierCount,
                 outputDirectory,
                 options,
+                macroCode,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -378,14 +387,12 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
         int dossierCount,
         string outputDirectory,
         ConversionJobOptions options,
+        string macroCode,
         CancellationToken cancellationToken)
     {
         var mergedXlsxPath = _storage.GetUniquePath(
             outputDirectory,
             $"GOP_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
-
-        AddLog(job, "Information", $"Bắt đầu gộp {inputPaths.Count} file.");
-        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         var merge = _merge.Merge(new MergeRequest
         {
@@ -426,7 +433,7 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
             {
                 InputPath = mergedXlsxPath,
                 OutputPath = mergedXlsmPath,
-                MacroCode = _macroProvider.DefaultMacroCode,
+                MacroCode = macroCode,
                 VerifyMacro = true,
                 ReplaceThisWorkbookCode = true,
                 InjectMacro = options.InjectMacro,
@@ -478,6 +485,21 @@ public sealed class BatchJobProcessor : IBatchJobProcessor
         return _storage.GetUniquePath(
             _storage.GetJobOutputDirectory(item.JobId),
             baseName + ".xlsm");
+    }
+
+    private async Task<string> ResolveMacroCodeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _macros.GetActiveCodeAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Không đọc được macro active trong DB; dùng macro mặc định trong assembly.");
+            return _fallbackMacroProvider.DefaultMacroCode;
+        }
     }
 
     private async Task<bool> IsCancelledAsync(Guid jobId, CancellationToken cancellationToken)
