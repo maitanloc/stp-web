@@ -15,7 +15,9 @@
 - [x] `PrintLayoutService` A4 dọc + test ngưỡng thu gọn.
 - [x] `Type2SheetGenerator` (ML-only) + test bằng workbook giả lập.
 - [x] Convert end-to-end file loại 2 bằng WPS + donor, PDF A4 dọc.
-- [ ] API batch/convert/merge/sync.
+- [x] API batch/convert/merge/jobs/download/sync + archive query.
+- [x] `MergedWorkbookService` + ZIP + sao lưu file gốc + job worker tuần tự.
+- [x] Đồng bộ Excel → SQL Server (thêm/sửa/xoá, last-write-wins, conflict log).
 - [ ] Vue 3 SPA non-tech.
 - [ ] Developer UI + macro version/diff.
 - [ ] Template engine không cần Excel.
@@ -58,16 +60,21 @@
 ## Phase 3 — Batch + API
 
 1. `FileStorage` (data/uploads, data/outputs, data/backups).
-2. `BatchJobQueue` + `BatchJobWorker`.
+2. `BatchJobQueue` + `BatchJobWorker` (chạy tuần tự, khôi phục job dở khi restart).
 3. API:
-   - `POST /api/workbooks/inspect`
-   - `POST /api/workbooks/convert`
-   - `POST /api/workbooks/merge`
-   - `GET /api/jobs/{id}`, `/download`
-4. ZIP + merged workbook.
+   - `POST /api/inspect`
+   - `POST /api/jobs/convert`
+   - `POST /api/jobs/merge`
+   - `GET /api/jobs`, `GET /api/jobs/{id}`, `GET /api/jobs/{id}/download`
+   - `POST /api/jobs/{id}/cancel`
+4. ZIP + merged workbook + chế độ file gốc (copy/in-place + backup/output folder).
 5. Sync:
-   - `POST /api/sync/upload`
+   - `POST /api/sync`
+   - `GET /api/sync/sessions`, `GET /api/sync/sessions/{id}`
    - đọc ML, cập nhật DB, ghi `SyncSession`/`SyncChange`.
+6. Archive:
+   - `GET /api/workbooks`, `/years`, `/types`, `/dossiers`
+   - `GET /api/dossiers/{id}`.
 6. Dossiers/years API cho SPA.
 
 **Done khi**: upload 3 file, nhận ZIP + workbook gộp, job log đầy đủ; upload lại `.xlsm` cập nhật DB.

@@ -353,7 +353,9 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
 
         if (!outcome.Generated)
         {
-            TryDelete(outcome.OutputPath);
+            // Generator trả lại chính file nguồn khi không cần sinh; chỉ xoá
+            // file tạm mà mình đã đặt tên, tuyệt đối không xoá file upload gốc.
+            TryDelete(stagedPath);
         }
 
         return outcome;

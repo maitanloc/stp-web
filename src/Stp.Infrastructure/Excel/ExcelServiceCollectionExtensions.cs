@@ -29,6 +29,7 @@ public static class ExcelServiceCollectionExtensions
         services.AddSingleton(sp => new PrintLayoutService(
             sp.GetRequiredService<IOptions<PrintLayoutOptions>>().Value));
         services.AddSingleton<IPrintSheetGenerator, Type2SheetGenerator>();
+        services.AddSingleton<IMergedWorkbookService, MergedWorkbookService>();
         services.AddSingleton<IExcelConversionService, ComExcelEngine>();
         services.AddSingleton<MacroTemplateProvider>();
         return services;

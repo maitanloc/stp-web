@@ -244,10 +244,13 @@ Kiểm chứng end-to-end (workbook ML-only giả lập 2 năm, 3 hồ sơ):
 
 ## 7. File gộp
 
-- Một sheet mỗi năm.
-- Cột thêm `Nguồn file` (cột H hoặc cột ẩn).
-- Giữ tất cả hồ sơ trùng; báo cáo trùng trong `JobLog`.
-- Với file gộp, sheet in cần thêm dòng nguồn dưới tiêu đề hoặc cột ẩn.
+- `MergedWorkbookService` ghi workbook trung gian `.xlsx` gồm:
+  - Sheet `ML`: giữ nguyên toàn bộ hồ sơ, thêm cột `Nguồn file` (cột J).
+  - Sheet `GOP`: bảng nguồn file, số năm, số hồ sơ, loại file, số hồ sơ trùng.
+- Sau đó `Type2SheetGenerator` sinh sheet in năm (`1990`, `1991`, ...) và `DS`.
+- Hồ sơ trùng (cùng năm + nhãn số) vẫn giữ tất cả; `GOP` báo số trùng.
+- `ComExcelEngine` chuyển file gộp sang `.xlsm` + donor macro.
+- Khi không chuyển được sang `.xlsm`, job giữ lại file `.xlsx` và ghi cảnh báo.
 
 ## 8. Kiểm thử tối thiểu
 
@@ -258,9 +261,11 @@ Kiểm chứng end-to-end (workbook ML-only giả lập 2 năm, 3 hồ sơ):
 | Convert 1 file loại 1 bằng WPS | `.xlsm` mở được, có `vbaProject.bin` 25.600 byte | Đạt (23,5 giây) |
 | Mở file convert bằng Microsoft Excel | 41 sheet, 42 VBA components, `SelfTest RUN OK` | Đạt |
 | Convert file loại 2 bằng WPS + donor | 4 sheet (`ML`, `DS`, 2 năm), macro 223 dòng | Đạt (6,1 giây) |
-| Convert 10 file | ZIP đủ 10 file, job success | Chưa làm |
-| Merge 3 file | 36 sheet năm, có cột nguồn, không mất hồ sơ | Chưa làm |
+| Convert 2 file qua API | job Completed, ZIP đủ 2 `.xlsm`, 1 file gộp | Đạt |
+| Merge 2 file qua API | 2 năm, 6 hồ sơ, 3 trùng, `ML`+`GOP`+`DS`+2 sheet năm | Đạt |
 | Print setup | PDF A4 dọc 595×842pt, 1 hồ sơ/trang | Đạt (2 hồ sơ = 2 trang) |
-| Unit test layout | Ngưỡng fit, chiều cao dòng, cỡ chữ, print area | Đạt (25 test) |
-| Sync upload | cập nhật đúng ML, tạo SyncSession/SyncChange | Chưa làm |
+| Unit test layout/storage/merge | Ngưỡng fit, in ấn, lưu file an toàn, gộp | Đạt (34 test) |
+| Sync workbook thật | 22.567 hồ sơ, 36 năm, 8 loại, 22,4 giây | Đạt |
+| Sync lần 2 cùng file | không thêm/sửa/xoá, 7,9 giây | Đạt |
+| Sync có xung đột | `LastWriteWins`, `SyncChange.IsConflict = true` | Đạt |
 | Macro version/diff | lưu version, diff đúng, activate đúng | Chưa làm |

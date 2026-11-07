@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Stp.Core.Sync;
 
 namespace Stp.Infrastructure.Persistence;
 
@@ -22,6 +23,7 @@ public static class PersistenceServiceCollectionExtensions
                 sql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(5), null);
             }));
 
+        services.AddScoped<IArchiveSyncService, ArchiveSyncService>();
         return services;
     }
 }
