@@ -1,0 +1,329 @@
+// DTOs mirror Stp.Contracts (camelCase JSON).
+
+export interface HealthResponse {
+  status: string
+  database: string
+  databaseName: string
+  utc: string
+}
+
+export type WorkbookKind =
+  | 'Unknown'
+  | 'StandardWithPrintSheets'
+  | 'MlOnly'
+  | 'Other'
+
+export type JobStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'
+
+export type JobType = 'Convert' | 'Merge' | 'Sync' | 'ExportPdf'
+
+export type OriginalFileMode = 'Copy' | 'InPlaceWithBackup' | 'OutputFolder'
+
+export interface SheetInspectionResponse {
+  name: string
+  isMl: boolean
+  isPrint: boolean
+  year: number | null
+  lastRow: number
+  lastColumn: number
+  blockCount: number
+}
+
+export interface YearInspectionResponse {
+  year: number
+  sheetName: string
+  dossierCount: number
+  minNumber: number
+  maxNumber: number
+  hasPrintSheet: boolean
+  sourceSheets: string[]
+}
+
+export interface InspectionResponse {
+  fileName: string
+  fileSizeBytes: number
+  kind: WorkbookKind
+  hasMlSheet: boolean
+  mlSheetName: string | null
+  hasPrintSheets: boolean
+  hasMacro: boolean
+  sheetCount: number
+  yearCount: number
+  dossierCount: number
+  printReadyCount: number
+  totalPages: number
+  types: string[]
+  years: YearInspectionResponse[]
+  sheets: SheetInspectionResponse[]
+  warnings: string[]
+}
+
+export interface WorkbookResponse {
+  id: string
+  name: string
+  sourceFileName: string
+  kind: WorkbookKind
+  importedAt: string
+  lastSyncedAt: string | null
+  version: number
+  isMaster: boolean
+  notes: string | null
+  yearCount: number
+  dossierCount: number
+}
+
+export interface YearResponse {
+  id: string
+  year: number
+  sheetName: string
+  dossierCount: number
+}
+
+export interface DossierSummaryResponse {
+  id: string
+  year: number
+  mlRow: number
+  number: number
+  numberLabel: string
+  type: string
+  group: string
+  boxNumber: string
+  originalSummary: string
+  hasPrintLayout: boolean
+  isAggregate: boolean
+  totalPages: number
+  documentCount: number
+}
+
+export interface DocumentLineResponse {
+  stt: number
+  soKyHieu: string
+  ngay: string
+  trichYeu: string
+  tacGia: string
+  toSo: string
+  ghiChu: string
+}
+
+export interface DossierResponse {
+  id: string
+  workbookId: string
+  year: number
+  mlRow: number
+  number: number
+  numberLabel: string
+  title: string
+  group: string
+  type: string
+  boxNumber: string
+  subNumber: string
+  originalSummary: string
+  numberNote: string
+  sourceVolume: string
+  hasPrintLayout: boolean
+  isAggregate: boolean
+  totalPages: number
+  fullText: string | null
+  note: string | null
+  rowVersion: string
+  updatedAt: string
+  documents: DocumentLineResponse[]
+}
+
+export interface PagedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface ConversionOptionsResponse {
+  originalFileMode: OriginalFileMode
+  createZip: boolean
+  mergeOutput: boolean
+  mergeOnly: boolean
+  generatePrintSheets: boolean
+  injectMacro: boolean
+  headerText: string | null
+  footerText: string | null
+}
+
+export interface JobSummaryResponse {
+  id: string
+  type: JobType
+  status: JobStatus
+  totalItems: number
+  succeededItems: number
+  failedItems: number
+  errorMessage: string | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  outputFileName: string | null
+  canDownload: boolean
+}
+
+export interface JobItemResponse {
+  id: string
+  inputFileName: string
+  status: JobStatus
+  workbookKind: WorkbookKind
+  dossierCount: number
+  errorMessage: string | null
+  startedAt: string | null
+  completedAt: string | null
+  canDownload: boolean
+}
+
+export interface JobLogResponse {
+  timestamp: string
+  level: string
+  message: string
+  details: string | null
+}
+
+export interface JobDetailResponse {
+  summary: JobSummaryResponse
+  options: ConversionOptionsResponse
+  items: JobItemResponse[]
+  logs: JobLogResponse[]
+}
+
+export interface JobCreatedResponse {
+  id: string
+  status: string
+  message: string
+}
+
+export interface SyncResponse {
+  success: boolean
+  syncSessionId: string
+  workbookId: string | null
+  addedCount: number
+  updatedCount: number
+  deletedCount: number
+  conflictCount: number
+  errorMessage: string | null
+}
+
+export interface SyncSessionSummaryResponse {
+  id: string
+  workbookId: string | null
+  sourceFileName: string
+  uploadedAt: string
+  status: string
+  addedCount: number
+  updatedCount: number
+  deletedCount: number
+  conflictCount: number
+  errorMessage: string | null
+}
+
+export interface SyncChangeResponse {
+  id: string
+  entityType: string
+  entityKey: string
+  changeType: string
+  isConflict: boolean
+  resolution: string | null
+  oldValueJson: string | null
+  newValueJson: string | null
+}
+
+export interface SyncSessionDetailResponse {
+  summary: SyncSessionSummaryResponse
+  changes: SyncChangeResponse[]
+}
+
+export interface OverviewResponse {
+  workbookCount: number
+  dossierCount: number
+  yearCount: number
+  typeCount: number
+  jobCount: number
+  runningJobCount: number
+  syncSessionCount: number
+  lastSyncAt: string | null
+  excelHost: string
+  excelPath: string | null
+  excelAvailable: boolean
+  databaseConnected: boolean
+  serverTime: string
+  recentJobs: JobSummaryResponse[]
+  recentWorkbooks: WorkbookResponse[]
+}
+
+// ---------------------------- Developer ----------------------------
+
+export interface DeveloperAuthStatusResponse {
+  setupRequired: boolean
+  configured: boolean
+  source: 'AppSettings' | 'LocalFile' | 'None' | string
+}
+
+export interface DeveloperSessionResponse {
+  token: string
+  expiresAt: string
+  username: string
+}
+
+export interface DeveloperMeResponse {
+  username: string
+  role: string
+  expiresAt: string | null
+}
+
+export interface MacroVersionSummaryResponse {
+  id: string
+  name: string
+  versionNumber: number
+  codeHash: string
+  changeNote: string | null
+  createdBy: string
+  createdAt: string
+  isActive: boolean
+  parentVersionId: string | null
+  lineCount: number
+}
+
+export interface MacroVersionDetailResponse extends MacroVersionSummaryResponse {
+  code: string
+}
+
+export interface MacroValidationResponse {
+  isValid: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+export interface MacroDiffLineResponse {
+  kind: 'same' | 'added' | 'removed'
+  oldLineNumber: number | null
+  newLineNumber: number | null
+  text: string
+}
+
+export interface MacroDiffResponse {
+  newVersionId: string
+  oldVersionId: string | null
+  added: number
+  removed: number
+  unchanged: number
+  lines: MacroDiffLineResponse[]
+}
+
+export interface SystemInfoResponse {
+  appVersion: string
+  environment: string
+  serverTime: string
+  storageRoot: string
+  excelHost: string
+  excelPath: string | null
+  excelAvailable: boolean
+  databaseConnected: boolean
+  activeMacro: MacroVersionSummaryResponse | null
+  workbookCount: number
+  dossierCount: number
+  jobCount: number
+  syncSessionCount: number
+}
