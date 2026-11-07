@@ -18,8 +18,8 @@
 - [x] API batch/convert/merge/jobs/download/sync + archive query.
 - [x] `MergedWorkbookService` + ZIP + sao lưu file gốc + job worker tuần tự.
 - [x] Đồng bộ Excel → SQL Server (thêm/sửa/xoá, last-write-wins, conflict log).
-- [ ] Vue 3 SPA non-tech.
-- [ ] Developer UI + macro version/diff.
+- [x] Vue 3 SPA non-tech.
+- [x] Developer UI + macro version/diff + auth JWT.
 - [ ] Template engine không cần Excel.
 - [ ] CI/CD.
 
@@ -81,28 +81,26 @@
 
 ## Phase 4 — SPA non-tech
 
-1. Vue 3 + TS + Vite + Tailwind.
-2. Layout teal/indigo, dark mode.
-3. Trang:
-   - Tổng quan.
-   - Xuất Excel (3 bước).
-   - Hồ sơ / lọc / in.
-   - Job của tôi.
-   - Hướng dẫn.
-4. API client, trạng thái loading/error rõ ràng.
-5. Responsive, keyboard, aria-label.
+1. Vue 3 + TS + Vite, `vue-router`, `@lucide/vue`; design system teal/indigo tự viết.
+2. Dark mode `data-theme` + lưu `localStorage`.
+3. Trang: Tổng quan, Chuyển đổi, Gộp file, Đồng bộ, Kho hồ sơ, Chi tiết hồ sơ,
+   Bản in A4, Tiến độ job, trang 404.
+4. API client có `ApiError`, JWT developer, trạng thái loading/error/rỗng rõ ràng.
+5. Responsive, aria-label, phím tắt cơ bản.
 
-**Done khi**: người không rành kỹ thuật tự upload và tải file trong < 5 phút.
+**Đã xong**: dashboard đọc `/api/overview`; convert/merge/sync chạy end-to-end qua UI;
+bản in `/in/:id` đúng A4 dọc và ngưỡng font cũ.
 
 ## Phase 5 — Developer UI
 
-1. Trang `/developer` có login.
-2. Inspector workbook.
-3. Macro editor + version + diff + activate.
-4. Job log, raw JSON, SQL/Excel health.
-5. Audit log.
+1. `/developer` standalone và `/nang-cao` nhúng trong SPA, cùng một component.
+2. Cổng đăng nhập: setup lần đầu, login, JWT, tự xử lý 401.
+3. Inspector workbook.
+4. Macro editor + version + kiểm tra tĩnh + diff + activate + tải `.bas`.
+5. Job log, chi tiết từng file, tải kết quả; phiên đồng bộ và thay đổi/xung đột.
+6. Thông tin hệ thống: WPS/Excel, SQL, storage, macro active.
 
-**Done khi**: xem/sửa/khôi phục macro, xem log job, không lộ dữ liệu nhạy cảm.
+**Đã xong**: đăng nhập, tạo v5 từ UI rồi kích hoạt lại v1, diff và validate hoạt động.
 
 ## Phase 6 — Template engine + CI/CD
 

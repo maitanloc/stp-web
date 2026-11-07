@@ -29,8 +29,7 @@ và chạy song song cho đến khi SPA hoàn thiện.
     Stp.Infrastructure/   EF Core SQL Server, Excel engine, job worker, storage
   tests/
     Stp.Tests/            Unit + integration tests
-  web/
-    stp-spa/              Vue 3 + TypeScript + Vite
+  src/Stp.Web/            Vue 3 + TypeScript + Vite SPA
   docs/
   data/                   File upload/xuất/backup (gitignored)
   Pages/, Models/, Services/, StpWeb.csproj   Bản Razor Pages cũ (legacy)
@@ -160,57 +159,105 @@ và chạy song song cho đến khi SPA hoàn thiện.
    - Hoặc workbook gộp: một sheet mỗi năm, thêm cột `Nguồn file`.
 6. Job có log, trạng thái, retry, download.
 
-## 8. API sơ bộ
+## 8. API
 
 ```text
 GET    /api/health
-POST   /api/workbooks/inspect
-POST   /api/workbooks/convert
-POST   /api/workbooks/merge
-GET    /api/jobs
+GET    /api/overview                         # dashboard non-tech
+POST   /api/inspect                          # kiểm tra 1 workbook
+
+POST   /api/jobs/convert                     # nhiều file -> .xlsm (+ ZIP, GOP)
+POST   /api/jobs/merge                       # gộp nhiều file -> GOP.xlsm
+GET    /api/jobs?page=&pageSize=&status=     # danh sách job
 GET    /api/jobs/{id}
-GET    /api/jobs/{id}/download
-POST   /api/sync/upload
-GET    /api/dossiers
-GET    /api/years
-GET    /api/print-presets
-POST   /api/print-presets
-POST   /api/developer/login
-GET    /api/developer/me
-GET    /api/macros
-GET    /api/macros/{id}
-POST   /api/macros
-GET    /api/macros/{id}/diff/{otherId}
-POST   /api/macros/{id}/activate
+POST   /api/jobs/{id}/cancel
+GET    /api/jobs/{id}/download               # ZIP hoặc .xlsm
+GET    /api/jobs/{id}/files/{itemId}         # từng file kết quả
+
+GET    /api/workbooks
+GET    /api/workbooks/{id}/years
+GET    /api/workbooks/{id}/types
+GET    /api/workbooks/{id}/dossiers?year=&type=&search=&page=&pageSize=
+GET    /api/dossiers/{id}
+
+POST   /api/sync                             # upload workbook, ML là nguồn chính
+GET    /api/sync/sessions?take=
+GET    /api/sync/sessions/{id}
+
+GET    /api/dev/auth/status
+POST   /api/dev/auth/setup                   # lần đầu, tạo mật khẩu PBKDF2
+POST   /api/dev/auth/login                   # -> JWT HS256
+GET    /api/dev/auth/me
+GET    /api/dev/system
+GET    /api/dev/macros
+POST   /api/dev/macros                       # tạo phiên bản mới
+GET    /api/dev/macros/{id}
+POST   /api/dev/macros/{id}/activate
+POST   /api/dev/macros/validate              # kiểm tra tĩnh
+GET    /api/dev/macros/{id}/diff             # so với phiên bản trước
 ```
+
+- Job chạy tuần tự qua `IBatchJobQueue` + `BackgroundService`; output nằm trong
+  `data/outputs/{jobId}` (upload `data/uploads/{jobId}`, backup `data/backups/{jobId}`).
+- `GET /api/jobs/{id}/download` trả ZIP khi job có nhiều file hoặc khi bật `CreateZip`;
+  job gộp trả trực tiếp `GOP_*.xlsm`.
+- Sync trả `SyncResponse` kèm số thêm/sửa/xoá/xung đột và mã phiên để tra cứu.
 
 ## 9. UI
 
+SPA nằm trong `src/Stp.Web`, dùng Vue 3 + TypeScript + Vite, `vue-router` và
+`@lucide/vue`. Không dùng Bootstrap/Tailwind; toàn bộ design system nằm trong
+`src/style.css` (teal/indigo, biến CSS cho light/dark).
+
+### Route chính
+
+| Route | Màn hình |
+|---|---|
+| `/` | Tổng quan: số hồ sơ, workbook, job, phiên đồng bộ |
+| `/chuyen-doi` | Chuyển đổi nhiều file, kiểm tra file đầu tiên, tuỳ chọn gốc/ZIP/GOP/macro |
+| `/gop-file` | Gộp nhiều workbook thành `GOP.xlsm` |
+| `/dong-bo` | Upload workbook đã sửa, xem kết quả và lịch sử phiên đồng bộ |
+| `/kho` | Danh sách workbook |
+| `/kho/:id` | Hồ sơ theo năm/loại/từ khoá, phân trang |
+| `/ho-so/:id` | Chi tiết hồ sơ, văn bản, toàn văn, ghi chú |
+| `/in/:id` | Bản in A4 dọc, đúng bố cục `sheet-page` cũ |
+| `/job/:id` | Tiến độ, từng file, log, tải kết quả, huỷ |
+| `/nang-cao` | Developer workspace nhúng trong `AppShell` |
+| `/developer` | Developer workspace độc lập, có khóa |
+
 ### Non-tech
 
-- Trang chủ: chọn file, kéo thả nhiều file, nhận diện loại, xem trước số hồ sơ.
-- Luồng 3 bước: `Chọn file` → `Kiểm tra & tùy chọn` → `Xuất & tải về`.
-- Trạng thái job rõ ràng, lỗi bằng tiếng Việt, có hướng dẫn sửa.
-- Bộ lọc năm/loại/khoảng số/từng số giống web hiện tại.
-- Dark mode bằng class `dark` trên `<html>`.
+- Kéo thả nhiều file, hiển thị dung lượng, kiểm tra nhanh loại workbook.
+- Trạng thái job rõ ràng, lỗi tiếng Việt, có nút thử lại/làm mới.
+- Bộ lọc năm/loại/từ khoá; bản in giữ 7 cột và ngưỡng font như bản web cũ.
+- Dark mode bằng `data-theme="dark"` trên `<html>`; lưu lựa chọn ở
+  `localStorage["stp.theme"]`.
 
 ### Developer
 
-- Trang `/developer` có khóa, hoặc tab `Nâng cao` trong màn hình xuất.
-- Inspector workbook: sheet, loại, số dòng, block, macro, page setup.
-- Macro editor: version, diff, activate, tải `.bas`.
-- Job log, raw JSON, SQL health, Excel COM health, đường dẫn file.
-- Không hiển thị mật khẩu/token.
+- `/developer` (standalone) và `/nang-cao` (embedded) dùng chung
+  `DeveloperWorkspace.vue`.
+- Cổng đăng nhập: lần đầu tạo mật khẩu, các lần sau đăng nhập; JWT lưu ở
+  `localStorage["stp.dev.token"]`, tự gắn header cho request `/api/dev`.
+- Tab: Hệ thống, Phiên bản macro, Job & nhật ký, Đồng bộ, Kiểm tra file.
+- Macro editor: tải `.bas`, sao chép, kiểm tra tĩnh, lưu phiên bản mới (kích hoạt ngay),
+  kích hoạt phiên bản cũ, diff theo dòng.
+- Không hiển thị mật khẩu/token; 401 tự xoá phiên và quay về cổng đăng nhập.
 
 ## 10. Bảo mật
 
 - Không login user thường khi chạy nội bộ.
-- Developer password hash PBKDF2 trong `appsettings` hoặc biến môi trường
-  `STP_DEVELOPER_PASSWORD_HASH`.
-- JWT ngắn hạn cho developer; không lưu token trong localStorage nếu có thể,
-  ưu tiên memory + refresh cookie sau này.
+- Developer password hash PBKDF2-SHA256 (210.000 vòng lặp) trong `appsettings`
+  (`DeveloperAuth:PasswordHash`) hoặc biến môi trường; nếu chưa có, lần đầu chạy
+  tạo `data/runtime/developer-auth.json` (hash + Base64 JWT key cục bộ).
+- JWT HS256, issuer `StpArchive.Developer`, audience `StpArchive.DeveloperUi`,
+  thời hạn 480 phút; khóa ký lấy từ cấu hình/state file.
+- Đăng nhập sai bị chặn tạm: 5 lần / 10 phút cho mỗi client.
+- SPA giữ token trong localStorage (tiện dụng nội bộ); có thể chuyển sang memory +
+  refresh cookie khi triển khai ngoài mạng nội bộ.
 - Macro chỉ yêu cầu `Enable Content`; không ký số, không Trusted Location.
-- Không commit dữ liệu hồ sơ, file Excel nguồn, file xuất, log chứa dữ liệu.
+- Không commit dữ liệu hồ sơ, file Excel nguồn, file xuất, log chứa dữ liệu,
+  `data/runtime`, token hay mật khẩu.
 
 ## 11. Lộ trình
 
