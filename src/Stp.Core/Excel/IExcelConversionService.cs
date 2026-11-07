@@ -20,6 +20,31 @@ public sealed class ConversionRequest
     /// và trả cảnh báo thay vì làm hỏng file.
     /// </summary>
     public bool InjectMacro { get; init; } = true;
+
+    /// <summary>
+    /// Tự sinh sheet in năm bằng ClosedXML khi file chỉ có ML (loại 2).
+    /// File loại 1 đã có sheet in sẽ được giữ nguyên.
+    /// </summary>
+    public bool GeneratePrintSheets { get; init; } = true;
+
+    /// <summary>Thư mục làm việc cho file tạm; mặc định cạnh file kết quả.</summary>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>Tạo bản sao yêu cầu với đường dẫn đầu vào khác (dùng cho file tạm).</summary>
+    public ConversionRequest WithInputPath(string inputPath)
+    {
+        return new ConversionRequest
+        {
+            InputPath = inputPath,
+            OutputPath = OutputPath,
+            MacroCode = MacroCode,
+            VerifyMacro = VerifyMacro,
+            ReplaceThisWorkbookCode = ReplaceThisWorkbookCode,
+            InjectMacro = InjectMacro,
+            GeneratePrintSheets = GeneratePrintSheets,
+            WorkingDirectory = WorkingDirectory
+        };
+    }
 }
 
 public sealed class ConversionOutcome
@@ -39,6 +64,11 @@ public sealed class ConversionOutcome
     public string? ErrorMessage { get; init; }
 
     public string? Warning { get; init; }
+
+    /// <summary>Các năm đã được sinh sheet in trong lần chuyển này.</summary>
+    public IReadOnlyList<int> GeneratedPrintYears { get; init; } = Array.Empty<int>();
+
+    public int PrintSheetsGenerated => GeneratedPrintYears.Count;
 }
 
 /// <summary>

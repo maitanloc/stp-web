@@ -12,8 +12,9 @@
 - [x] `ExcelInspector` + `ExcelArchiveParser` trên file thật.
 - [x] `ComExcelEngine` WPS-first + convert `.xlsx` → `.xlsm`.
 - [x] `VbaProjectInjector` (OpenXML) + donor sạch + test.
-- [ ] `PrintLayoutService` A4 dọc.
-- [ ] `Type2SheetGenerator` (ML-only).
+- [x] `PrintLayoutService` A4 dọc + test ngưỡng thu gọn.
+- [x] `Type2SheetGenerator` (ML-only) + test bằng workbook giả lập.
+- [x] Convert end-to-end file loại 2 bằng WPS + donor, PDF A4 dọc.
 - [ ] API batch/convert/merge/sync.
 - [ ] Vue 3 SPA non-tech.
 - [ ] Developer UI + macro version/diff.

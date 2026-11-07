@@ -49,6 +49,7 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
     private readonly ILogger<ComExcelEngine> _logger;
     private readonly ExcelComOptions _options;
     private readonly VbaProjectInjector _vbaProjectInjector;
+    private readonly IPrintSheetGenerator? _printSheetGenerator;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ExcelSession? _session;
     private bool _disposed;
@@ -57,9 +58,19 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
         IOptions<ExcelComOptions> options,
         VbaProjectInjector vbaProjectInjector,
         ILogger<ComExcelEngine> logger)
+        : this(options, vbaProjectInjector, printSheetGenerator: null, logger)
+    {
+    }
+
+    public ComExcelEngine(
+        IOptions<ExcelComOptions> options,
+        VbaProjectInjector vbaProjectInjector,
+        IPrintSheetGenerator? printSheetGenerator,
+        ILogger<ComExcelEngine> logger)
     {
         _options = options.Value;
         _vbaProjectInjector = vbaProjectInjector;
+        _printSheetGenerator = printSheetGenerator;
         _logger = logger;
 
         var (path, kind) = ResolveHost(_options);
@@ -180,20 +191,48 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var session = await GetSessionAsync(cancellationToken).ConfigureAwait(false);
             var stopwatch = Stopwatch.StartNew();
+            string? stagedInput = null;
+            PrintGenerationOutcome? printOutcome = null;
 
             try
             {
+                var effectiveRequest = request;
+
+                if (request.GeneratePrintSheets && _printSheetGenerator is not null)
+                {
+                    printOutcome = await PreparePrintSheetsAsync(request, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (printOutcome.Generated
+                        && !string.Equals(
+                            printOutcome.OutputPath,
+                            request.InputPath,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        stagedInput = printOutcome.OutputPath;
+                        effectiveRequest = request.WithInputPath(stagedInput);
+                        _logger.LogInformation(
+                            "Đã sinh {Count} sheet in cho {Input}; chuyển tiếp file tạm {Staged}",
+                            printOutcome.GeneratedSheetCount,
+                            request.InputPath,
+                            stagedInput);
+                    }
+                }
+
+                var session = await GetSessionAsync(cancellationToken).ConfigureAwait(false);
+
                 var outcome = await Task.Run(
-                    () => session.Convert(request),
+                    () => session.Convert(effectiveRequest),
                     cancellationToken).ConfigureAwait(false);
 
                 var macroLines = outcome.MacroLines;
                 var macroVerified = outcome.MacroVerified;
-                var warning = outcome.Warning;
+                var warning = CombineWarnings(
+                    outcome.Warning,
+                    BuildPrintGenerationWarning(printOutcome));
 
-                if (outcome.Success && request.InjectMacro && HostKind == ExcelHostKind.Wps)
+                if (outcome.Success && effectiveRequest.InjectMacro && HostKind == ExcelHostKind.Wps)
                 {
                     try
                     {
@@ -203,7 +242,9 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
 
                         macroLines = injection.MacroLines;
                         macroVerified = false;
-                        warning = BuildWpsInjectionWarning(injection);
+                        warning = CombineWarnings(
+                            BuildWpsInjectionWarning(injection),
+                            BuildPrintGenerationWarning(printOutcome));
                         _logger.LogInformation(
                             "Đã chèn VBA vào {Output}: donor {DonorSheets} module, gắn {Mapped}, " +
                             "{Without} sheet không module",
@@ -228,13 +269,16 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
                             MacroVerified = false,
                             Duration = stopwatch.Elapsed,
                             ErrorMessage = "Không chèn được macro VBA: " + ex.Message,
-                            Warning = "File đã được tạo nhưng chưa có macro chuẩn."
+                            Warning = "File đã được tạo nhưng chưa có macro chuẩn.",
+                            GeneratedPrintYears = printOutcome?.GeneratedYears ?? Array.Empty<int>()
                         };
                     }
                 }
-                else if (!request.InjectMacro)
+                else if (!effectiveRequest.InjectMacro)
                 {
-                    warning = "Không chèn macro VBA theo yêu cầu.";
+                    warning = CombineWarnings(
+                        warning,
+                        "Không chèn macro VBA theo yêu cầu.");
                 }
 
                 stopwatch.Stop();
@@ -247,7 +291,8 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
                     MacroVerified = macroVerified,
                     Duration = stopwatch.Elapsed,
                     ErrorMessage = outcome.ErrorMessage,
-                    Warning = warning
+                    Warning = warning,
+                    GeneratedPrintYears = printOutcome?.GeneratedYears ?? Array.Empty<int>()
                 };
             }
             catch
@@ -256,10 +301,113 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
                 await ResetSessionAsync().ConfigureAwait(false);
                 throw;
             }
+            finally
+            {
+                TryDelete(stagedInput);
+            }
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    private async Task<PrintGenerationOutcome> PreparePrintSheetsAsync(
+        ConversionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var workingDirectory = request.WorkingDirectory;
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            workingDirectory = Path.GetDirectoryName(Path.GetFullPath(request.OutputPath));
+        }
+
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            workingDirectory = Path.GetTempPath();
+        }
+
+        Directory.CreateDirectory(workingDirectory);
+
+        var extension = Path.GetExtension(request.InputPath);
+        if (!string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".xlsm", StringComparison.OrdinalIgnoreCase))
+        {
+            extension = ".xlsx";
+        }
+
+        var stagedPath = Path.Combine(
+            workingDirectory,
+            $"~stp-print-{Guid.NewGuid():N}{extension}");
+
+        var generationRequest = new PrintGenerationRequest
+        {
+            InputPath = request.InputPath,
+            OutputPath = stagedPath,
+            Overwrite = true
+        };
+
+        var outcome = await Task.Run(
+            () => _printSheetGenerator!.Generate(generationRequest, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!outcome.Generated)
+        {
+            TryDelete(outcome.OutputPath);
+        }
+
+        return outcome;
+    }
+
+    private static string? BuildPrintGenerationWarning(PrintGenerationOutcome? outcome)
+    {
+        if (outcome is null || !outcome.Generated)
+        {
+            return null;
+        }
+
+        var years = string.Join(", ", outcome.GeneratedYears.OrderBy(y => y));
+        var text = $"Đã sinh {outcome.GeneratedSheetCount} sheet in từ ML cho các năm: {years}.";
+        if (outcome.Warnings.Count > 0)
+        {
+            text += " " + string.Join(" ", outcome.Warnings);
+        }
+
+        return text;
+    }
+
+    private static string? CombineWarnings(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(first))
+        {
+            return string.IsNullOrWhiteSpace(second) ? null : second;
+        }
+
+        if (string.IsNullOrWhiteSpace(second))
+        {
+            return first;
+        }
+
+        return first + " " + second;
+    }
+
+    private static void TryDelete(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Bỏ qua file tạm không xóa được.
         }
     }
 

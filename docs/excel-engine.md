@@ -175,25 +175,34 @@ Header = preset.HeaderText
 Footer = preset.FooterText
 ```
 
-### 5.2 Cột
+### 5.2 Cột và cỡ chữ
 
-| Cột | Nội dung | Tỷ lệ web | Gợi ý độ rộng Excel |
-|---|---|---|---|
-| A | STT | 6% | 4.5 |
-| B | Số ký hiệu | 13% | 9 |
-| C | Ngày tháng | 12% | 9 |
-| D | Trích yếu | 40% | 38 |
-| E | Tác giả | 16% | 14 |
-| F | Tờ số | 8% | 6 |
-| G | Ghi chú | 5% | 5 |
+Độ rộng cột lấy theo tỷ lệ bản in web (A4 dọc, 7 cột):
 
-- Wrap text, vertical top, horizontal left (trừ STT/Tờ số căn giữa).
-- Font 9pt; nếu text dài, giảm còn 8pt/7pt theo ngưỡng giống web:
-  - `>= 550` ký tự hoặc `>= 4` dòng → compact
-  - `>= 850` hoặc `>= 8` dòng → tight
-  - `>= 1200` hoặc `>= 12` dòng → tiny
-- Mỗi block 9 dòng, page break sau mỗi block.
-- Nếu block vượt 1 trang, giảm font trước, không cắt dữ liệu.
+| Cột | Nội dung | Độ rộng Excel |
+|---|---|---|
+| A | STT | 5,5 |
+| B | Số ký hiệu | 12,5 |
+| C | Ngày tháng | 11,5 |
+| D | Trích yếu | 40 |
+| E | Tác giả | 15,5 |
+| F | Tờ số | 7,5 |
+| G | Ghi chú | 4,5 |
+
+- Wrap text, căn giữa, font Times New Roman.
+- Cỡ chữ theo ngưỡng giống web:
+  - `< 550` ký tự và `< 4` dòng → normal (bảng 9,5pt, tiêu đề 15pt).
+  - `>= 550` hoặc `>= 4` dòng → compact (9pt / 15pt).
+  - `>= 850` hoặc `>= 8` dòng → tight (8,5pt / 14pt).
+  - `>= 1200` hoặc `>= 12` dòng → tiny (8pt / 13pt).
+- Chiều cao dòng dữ liệu ước lượng theo số dòng wrap. Nếu cả block vượt
+  `PrintLayout:MaxBlockHeightPoints` (mặc định 740pt), cỡ chữ tiếp tục giảm
+  theo bước 0,5pt đến sàn 6pt; không cắt dữ liệu.
+- Mỗi block 9 dòng, page break trước mỗi block kể từ block thứ 2.
+- Tiêu đề `D8`, phụ đề `D9` (công thức trỏ `ML!$B<row>`), header bảng dòng 10,
+  dữ liệu dòng 11, tổng số tờ dòng 12, 4 dòng trống.
+- Vùng in `A8:G<last>`, `PagesWide = 1`, `PagesTall = 0`, lề trái/phải 0,4",
+  trên/dưới 0,5", header/footer 0,3", căn giữa ngang.
 
 ### 5.3 Kiểm tra
 
@@ -204,24 +213,34 @@ Footer = preset.FooterText
 
 ## 6. Sinh sheet in cho file loại 2
 
-File loại 2 chỉ có `ML`. Cần sinh sheet in theo năm:
+File loại 2 chỉ có `ML`. `Type2SheetGenerator` sinh sheet in bằng ClosedXML,
+không cần Excel:
 
 ```text
 Với mỗi năm trong ML:
   - Tạo sheet tên năm (hoặc "1999 (1)" nếu trùng).
-  - K1 = BANG_IN_HANG_LOAT.
-  - D8 = "MỤC LỤC VĂN BẢN".
-  - D9 = "Hồ sơ số: " & ML!$B<row>
-  - Header 7 cột tại dòng 10.
-  - Dòng 11 là công thức trỏ ML!B/E/F/G.
-  - Dòng 12 tổng số tờ.
-  - 4 dòng trống.
-  - Lặp block 9 dòng cho mỗi hồ sơ.
-  - PageSetup A4 dọc, print area A8:G<last>.
+  - K1 = BANG_IN_HANG_LOAT; K2:K4 = danh sách cách chọn; K6 = số hồ sơ;
+    K7 = COUNTIF(D8:Dlast,"Hồ sơ số:*"); K10:K13 = thông báo;
+    K15/K16 = số nhỏ nhất/lớn nhất; L7 = LOC; L8... = 1 cho từng dòng block.
+  - D8 = "MỤC LỤC VĂN BẢN"; D9 = công thức "Hồ sơ số: " & ML!$B<row>.
+  - Header 7 cột tại dòng 10; dòng 11 là công thức trỏ ML!B/E/F/G; dòng 12 tổng số tờ.
+  - 4 dòng trống; lặp block 9 dòng cho mỗi hồ sơ.
+  - PageSetup A4 dọc, print area A8:G<last>, page break trước mỗi block.
+  - Ẩn cột H:L (cột trợ giúp K/L vẫn có dữ liệu cho macro).
+  - Hyperlink E3 trỏ về chính sheet; dropdown A3 (K2:K4) và E5 (DS!A1:A<count>).
 ```
 
-Có thể dùng COM để tạo sheet và copy style từ template; hoặc ClosedXML + template
-khi không có Excel.
+- Tạo sheet `DS` (ẩn) chứa danh sách tên sheet năm để dropdown E5 hoạt động.
+- Nếu file đã có sheet in, generator giữ nguyên bố cục và báo `Generated = false`.
+- Nếu file không có ML, trả `Success = false` kèm cảnh báo tiếng Việt.
+- `ComExcelEngine` gọi generator trước khi mở COM; file tạm được xoá sau khi
+  convert xong.
+
+Kiểm chứng end-to-end (workbook ML-only giả lập 2 năm, 3 hồ sơ):
+- WPS chuyển `.xlsx` → `.xlsm` trong ~6 giây, chèn donor 25.600 byte, 223 dòng macro.
+- File kết quả có 4 sheet (`ML`, `DS`, `1990`, `1991`), loại 1, macro = true.
+- PDF từng sheet: `1990` = 2 trang, `1991` = 1 trang, MediaBox 595,44 × 841,68 pt
+  (A4 dọc), đúng một hồ sơ một trang.
 
 ## 7. File gộp
 
@@ -235,11 +254,13 @@ khi không có Excel.
 | Test | Kỳ vọng | Trạng thái |
 |---|---|---|
 | Inspect `DK_KET_HON.xlsx` | 41 sheet, 36 năm, 22.567 hồ sơ, loại 1 | Đạt |
-| Inspect file ML-only giả lập | loại 2, 36 năm, 22.567 hồ sơ, 0 sheet in | Chưa có mẫu |
+| Inspect file ML-only giả lập | loại 2, đúng số năm/hồ sơ, 0 sheet in | Đạt (test `Type2SheetGeneratorTests`) |
 | Convert 1 file loại 1 bằng WPS | `.xlsm` mở được, có `vbaProject.bin` 25.600 byte | Đạt (23,5 giây) |
 | Mở file convert bằng Microsoft Excel | 41 sheet, 42 VBA components, `SelfTest RUN OK` | Đạt |
+| Convert file loại 2 bằng WPS + donor | 4 sheet (`ML`, `DS`, 2 năm), macro 223 dòng | Đạt (6,1 giây) |
 | Convert 10 file | ZIP đủ 10 file, job success | Chưa làm |
 | Merge 3 file | 36 sheet năm, có cột nguồn, không mất hồ sơ | Chưa làm |
-| Print setup | PDF A4 dọc, 1 hồ sơ/trang | Chưa làm |
+| Print setup | PDF A4 dọc 595×842pt, 1 hồ sơ/trang | Đạt (2 hồ sơ = 2 trang) |
+| Unit test layout | Ngưỡng fit, chiều cao dòng, cỡ chữ, print area | Đạt (25 test) |
 | Sync upload | cập nhật đúng ML, tạo SyncSession/SyncChange | Chưa làm |
 | Macro version/diff | lưu version, diff đúng, activate đúng | Chưa làm |
