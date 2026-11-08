@@ -2909,6 +2909,7 @@ pre,
   flex: 1;
   min-height: 120px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
 }
 

@@ -125,18 +125,36 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') close()
 }
 
+/**
+ * Chỉ đóng khi trang phía sau cuộn. Cuộn bên trong danh sách giấy tờ
+ * (chuột lăn, kéo thanh cuộn) phải giữ popover mở.
+ */
+function onScroll(event: Event): void {
+  if (!open.value) return
+
+  const target = event.target as Node | null
+  if (
+    target &&
+    (popoverRef.value?.contains(target) || triggerRef.value?.contains(target))
+  ) {
+    return
+  }
+
+  close()
+}
+
 onMounted(() => {
   document.addEventListener('pointerdown', onPointerDown)
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('resize', close)
-  document.addEventListener('scroll', close, true)
+  document.addEventListener('scroll', onScroll, true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onPointerDown)
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', close)
-  document.removeEventListener('scroll', close, true)
+  document.removeEventListener('scroll', onScroll, true)
 })
 </script>
 
