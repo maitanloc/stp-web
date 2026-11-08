@@ -197,7 +197,7 @@ const scopeLabel = computed(() => {
   }
 
   if (onlyNeedsNormalization.value) {
-    parts.push('cần chuẩn hoá tiền tố')
+    parts.push('sai mở đầu câu')
   }
 
   return parts.length > 0 ? parts.join(' · ') : 'toàn bộ workbook'
@@ -376,7 +376,7 @@ function saveSummaryEditor(row: SummaryRowResponse): void {
 
 function resetEdits(): void {
   if (edits.value.size === 0) return
-  if (!window.confirm('Hoàn tác toàn bộ thay đổi chưa xuất?')) return
+  if (!window.confirm('Bỏ toàn bộ thay đổi chưa xuất?')) return
   edits.value = new Map()
   closeSummaryEditor()
   selected.value = new Set()
@@ -449,7 +449,7 @@ function applyBulk(): void {
 /** Đưa các dòng đang chọn về đúng tiền tố chuẩn, giữ nguyên danh mục giấy tờ. */
 function normalizeSelected(): void {
   if (selectedNormalizableCount.value === 0) {
-    toast.info('Không có dòng cần chuẩn hoá', 'Các dòng đang chọn đã dùng đúng tiền tố.')
+    toast.info('Không có dòng sai mở đầu', 'Các dòng đang chọn đã đúng mẫu.')
     return
   }
 
@@ -478,8 +478,8 @@ function normalizeSelected(): void {
 
   edits.value = next
   toast.success(
-    'Đã chuẩn hoá tiền tố',
-    `${formatNumber(applied)} dòng đang chọn đã được đưa về câu chuẩn.`,
+    'Đã sửa mở đầu đúng mẫu',
+    `${formatNumber(applied)} dòng đang chọn đã về đúng mẫu.`,
   )
 }
 
@@ -538,7 +538,7 @@ async function inspect(): Promise<void> {
 
     toast.success(
       'Đã đọc workbook',
-      `${formatNumber(data.rowCount)} hồ sơ · ${formatNumber(data.missingSheetNumberCount)} dòng thiếu số tờ · ${formatNumber(data.normalizableCount)} dòng cần chuẩn hoá tiền tố.`,
+      `${formatNumber(data.rowCount)} hồ sơ · ${formatNumber(data.missingSheetNumberCount)} dòng thiếu số tờ · ${formatNumber(data.normalizableCount)} dòng sai mở đầu.`,
     )
 
     restoreDraft(data.fileName)
@@ -1063,7 +1063,7 @@ onBeforeUnmount(() => {
             <h1 class="page-title" style="font-size: 20px">Bổ sung trích yếu và số tờ</h1>
             <p class="page-subtitle" style="margin-top: 4px">
               Chọn workbook, sửa trích yếu hoặc bổ sung số tờ còn thiếu, rồi xuất lại đúng file
-              gốc. Hồ sơ đăng ký kết hôn được chuẩn hoá tiền tố tự động khi xuất.
+              gốc. Mở đầu câu hồ sơ đăng ký kết hôn sẽ tự sửa đúng mẫu khi xuất.
             </p>
           </div>
         </div>
@@ -1123,6 +1123,9 @@ onBeforeUnmount(() => {
                 {{ formatNumber(session.rowCount) }} hồ sơ · {{ formatNumber(session.catalog.length) }} loại giấy tờ ·
                 {{ formatNumber(session.missingSheetNumberCount) }} dòng thiếu số tờ
               </div>
+              <div class="hint" style="margin-top: 2px">
+                Mở đầu câu trích yếu sai sẽ tự sửa về đúng mẫu khi xuất file, không cần gõ tay.
+              </div>
             </div>
           </div>
 
@@ -1151,14 +1154,14 @@ onBeforeUnmount(() => {
           <span class="summary-guide-index">2</span>
           <div>
             <strong>Sửa dữ liệu</strong>
-            <span>Sửa trích yếu, bổ sung số tờ, gán giấy tờ hàng loạt.</span>
+            <span>Sửa trích yếu, bổ sung số tờ, gán giấy tờ nhiều dòng cùng lúc.</span>
           </div>
         </div>
         <div class="summary-guide-step">
           <span class="summary-guide-index">3</span>
           <div>
             <strong>Xem trước</strong>
-            <span>Đối chiếu trước/sau và số dòng chuẩn hoá.</span>
+            <span>Đối chiếu file gốc với file sẽ xuất.</span>
           </div>
         </div>
         <div class="summary-guide-step">
@@ -1187,9 +1190,9 @@ onBeforeUnmount(() => {
         </div>
         <div class="card summary-stat">
           <div class="card-body">
-            <span class="summary-stat-label">Cần chuẩn hoá</span>
+            <span class="summary-stat-label">Sai mở đầu câu</span>
             <strong class="summary-stat-value">{{ formatNumber(session.normalizableCount) }}</strong>
-            <span class="hint">Tự động sửa tiền tố khi xuất</span>
+            <span class="hint">Sẽ tự sửa khi xuất</span>
           </div>
         </div>
         <div class="card summary-stat">
@@ -1206,8 +1209,8 @@ onBeforeUnmount(() => {
           <div>
             <div class="card-title">Sửa trích yếu và số tờ</div>
             <div class="card-subtitle">
-              Bấm vào ô giấy tờ để chọn danh mục, sửa trực tiếp ô số tờ, hoặc mở “Sửa toàn bộ” để
-              chỉnh cả câu trích yếu.
+              Sửa ô số tờ ngay tại chỗ, bấm “Sửa toàn bộ” để gõ lại câu, hoặc tích đầu dòng để gán
+              giấy tờ cho nhiều dòng cùng lúc.
             </div>
           </div>
           <button class="btn btn-ghost btn-sm" type="button" :disabled="loadingRows" @click="fetchRows">
@@ -1239,7 +1242,7 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="field summary-search">
-              <span class="label">Tìm kiếm nâng cao</span>
+              <span class="label">Tìm trong trích yếu</span>
               <span class="search-box">
                 <Search :size="15" />
                 <input
@@ -1260,7 +1263,9 @@ onBeforeUnmount(() => {
             </label>
           </div>
 
-          <div class="summary-number-filters">
+          <details class="summary-advanced">
+            <summary class="summary-advanced-title">Lọc nâng cao: theo số hồ sơ và khoảng năm</summary>
+            <div class="summary-number-filters">
             <label class="field">
               <span class="label">Lọc theo số hồ sơ</span>
               <select v-model="numberMode" class="select">
@@ -1300,7 +1305,8 @@ onBeforeUnmount(() => {
               Số hồ sơ lấy từ phần đầu cột B (ví dụ “36A” tính là 36). Bản lọc chỉ giữ sheet ML và
               các hồ sơ trong phạm vi.
             </div>
-          </div>
+            </div>
+          </details>
 
           <div class="summary-missing-filters">
             <label class="checkbox">
@@ -1330,8 +1336,8 @@ onBeforeUnmount(() => {
             <label class="checkbox">
               <input v-model="onlyNeedsNormalization" type="checkbox" />
               <span class="checkbox-text">
-                <span class="checkbox-title">Chỉ dòng cần chuẩn hoá</span>
-                <span class="checkbox-desc">{{ formatNumber(session.normalizableCount) }} dòng tiền tố cũ</span>
+                <span class="checkbox-title">Chỉ dòng sai mở đầu câu</span>
+                <span class="checkbox-desc">{{ formatNumber(session.normalizableCount) }} dòng</span>
               </span>
             </label>
 
@@ -1348,7 +1354,7 @@ onBeforeUnmount(() => {
             <div class="summary-scope-info">
               <Info :size="15" />
               <span>
-                Phạm vi: <strong>{{ scopeLabel }}</strong>
+                Đang xem: <strong>{{ scopeLabel }}</strong>
                 <template v-if="scopeReady">
                   · <strong>{{ formatNumber(total) }}</strong> hồ sơ
                 </template>
@@ -1374,9 +1380,14 @@ onBeforeUnmount(() => {
                 <Download :size="14" />
                 Xuất bản lọc
               </button>
-              <button class="btn btn-accent btn-sm" type="button" @click="openPreview">
+              <button
+                class="btn btn-accent btn-sm"
+                type="button"
+                :disabled="loadingRows || exporting || total === 0"
+                @click="openPreview"
+              >
                 <FilePenLine :size="14" />
-                Xem trước &amp; xuất toàn bộ
+                Xem trước rồi xuất toàn bộ
               </button>
             </div>
           </div>
@@ -1400,6 +1411,9 @@ onBeforeUnmount(() => {
           </div>
 
           <template v-else>
+            <div class="summary-table-hint hint">
+              Muốn sửa nhiều dòng cùng lúc: tích ô ở đầu dòng rồi chọn giấy tờ ở thanh trên.
+            </div>
             <div v-if="selected.size > 0" class="summary-bulkbar">
               <div class="row wrap" style="gap: 8px; align-items: center">
                 <span class="badge badge-brand">{{ formatNumber(selected.size) }} dòng đã chọn</span>
@@ -1419,7 +1433,7 @@ onBeforeUnmount(() => {
                   @click="normalizeSelected"
                 >
                   <CircleCheck :size="14" />
-                  Chuẩn hoá tiền tố ({{ formatNumber(selectedNormalizableCount) }})
+                  Sửa mở đầu đúng mẫu ({{ formatNumber(selectedNormalizableCount) }})
                 </button>
               </div>
               <button class="btn btn-ghost btn-sm" type="button" @click="clearSelection">
@@ -1503,10 +1517,10 @@ onBeforeUnmount(() => {
                           <span
                             v-if="row.needsNormalization"
                             class="badge badge-success"
-                            :title="`Tự động đổi tiền tố khi xuất. Trước: ${row.summary}`"
+                            :title="`Mở đầu câu sẽ tự sửa về đúng mẫu khi xuất. File gốc: ${row.summary}`"
                           >
                             <CircleCheck :size="12" />
-                            Tự chuẩn hoá
+                            Sẽ tự sửa mở đầu
                           </span>
                           <button
                             class="btn btn-ghost btn-sm summary-edit-summary"
@@ -1546,7 +1560,7 @@ onBeforeUnmount(() => {
                           <div v-if="row.needsNormalization" class="alert alert-info" style="margin: 0">
                             <Info :size="15" />
                             <div class="grow">
-                              Dòng này sẽ tự động đổi sang tiền tố
+                              Mở đầu câu này sẽ tự sửa về đúng mẫu
                               “Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với
                               người nước ngoài của…” khi xuất file.
                             </div>
@@ -1629,7 +1643,7 @@ onBeforeUnmount(() => {
         <div class="row wrap" style="gap: 8px">
           <button class="btn btn-ghost btn-sm" type="button" @click="resetEdits">
             <Eraser :size="14" />
-            Hoàn tác tất cả
+            Bỏ thay đổi
           </button>
           <button
             class="btn btn-secondary"
@@ -1642,7 +1656,7 @@ onBeforeUnmount(() => {
           </button>
           <button class="btn btn-accent" type="button" @click="openPreview">
             <FilePenLine :size="16" />
-            Xem trước &amp; xuất toàn bộ
+            Xem trước rồi xuất toàn bộ
           </button>
         </div>
       </div>
@@ -1654,14 +1668,14 @@ onBeforeUnmount(() => {
           <div class="modal-header">
             <div>
               <div class="card-title">
-                {{ previewMode === 'filtered' ? 'Xem trước bản xuất lọc' : 'Xem trước thay đổi trích yếu và số tờ' }}
+                {{ previewMode === 'filtered' ? 'Xem trước bản xuất lọc' : 'Kiểm tra trước khi xuất file' }}
               </div>
               <div class="card-subtitle">
                 <template v-if="previewMode === 'filtered'">
                   Chỉ giữ sheet ML và các hồ sơ trong phạm vi hiện tại; xoá mọi sheet và hồ sơ còn lại.
                 </template>
                 <template v-else>
-                  Hiển thị trước/sau từng dòng. Hồ sơ đăng ký kết hôn được chuẩn hoá tiền tố tự động.
+                  Bên trái là file gốc, bên phải là file sẽ tải về. Không có gì thay đổi trước khi bạn bấm Xuất.
                 </template>
               </div>
             </div>
@@ -1690,7 +1704,7 @@ onBeforeUnmount(() => {
                   {{ formatNumber(filteredPreview.changedRows) }} dòng cập nhật
                 </span>
                 <span v-if="filteredPreview.normalizedRows > 0" class="badge badge-info">
-                  {{ formatNumber(filteredPreview.normalizedRows) }} dòng chuẩn hoá
+                  {{ formatNumber(filteredPreview.normalizedRows) }} dòng sửa mở đầu
                 </span>
                 <span v-if="filteredPreview.ignoredChanges > 0" class="badge badge-warning">
                   {{ formatNumber(filteredPreview.ignoredChanges) }} thay đổi ngoài phạm vi bị bỏ qua
@@ -1721,14 +1735,15 @@ onBeforeUnmount(() => {
 
                   <div class="summary-diff">
                     <div class="summary-diff-col">
-                      <div class="summary-preview-label">Trước</div>
+                      <div class="summary-preview-label">File gốc</div>
                       <p class="summary-preview-text muted">{{ row.originalSummary }}</p>
                       <p v-if="row.sheetNumberChanged" class="summary-preview-text muted">
                         Số tờ: {{ row.originalSheetNumber || '(trống)' }}
                       </p>
                     </div>
+                    <ArrowRight class="summary-diff-arrow" :size="20" aria-hidden="true" />
                     <div class="summary-diff-col">
-                      <div class="summary-preview-label">Sau</div>
+                      <div class="summary-preview-label">File sẽ tải về</div>
                       <p class="summary-preview-text">{{ row.summary }}</p>
                       <p v-if="row.sheetNumberChanged" class="summary-preview-text">
                         Số tờ: {{ row.sheetNumber || '(xoá)' }}
