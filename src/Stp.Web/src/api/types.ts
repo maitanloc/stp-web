@@ -428,6 +428,12 @@ export interface SummaryPreviewRowResponse {
 export interface SummaryExportRequest {
   changes: SummaryChangeRequest[]
   outputFileName?: string | null
+  onlyRowNumbers?: number[] | null
+}
+
+export interface SummaryPreviewRequest {
+  changes: SummaryChangeRequest[]
+  onlyRowNumbers?: number[] | null
 }
 
 export type SummaryNumberMode = 'all' | 'range' | 'single'

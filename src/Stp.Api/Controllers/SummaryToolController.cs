@@ -141,7 +141,7 @@ public sealed class SummaryToolController : ControllerBase
                 .ToList();
 
             var preview = _summary
-                .Preview(sessionId, changes)
+                .Preview(sessionId, changes, request.OnlyRowNumbers)
                 .Select(ToResponse)
                 .ToList();
 
@@ -180,7 +180,8 @@ public sealed class SummaryToolController : ControllerBase
                 sessionId,
                 changes,
                 cancellationToken,
-                request.OutputFileName);
+                request.OutputFileName,
+                request.OnlyRowNumbers);
             return File(result.Content, result.ContentType, result.FileName);
         }
         catch (KeyNotFoundException ex)

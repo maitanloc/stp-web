@@ -67,7 +67,9 @@ public sealed record SummaryChangeRequest(
     string? DocumentNumber = null,
     string? NumberLabel = null);
 
-public sealed record SummaryPreviewRequest(IReadOnlyList<SummaryChangeRequest> Changes);
+public sealed record SummaryPreviewRequest(
+    IReadOnlyList<SummaryChangeRequest> Changes,
+    IReadOnlyList<int>? OnlyRowNumbers = null);
 
 public sealed record SummaryPreviewRowResponse(
     int RowNumber,
@@ -87,7 +89,8 @@ public sealed record SummaryPreviewRowResponse(
 
 public sealed record SummaryExportRequest(
     IReadOnlyList<SummaryChangeRequest> Changes,
-    string? OutputFileName = null);
+    string? OutputFileName = null,
+    IReadOnlyList<int>? OnlyRowNumbers = null);
 
 /// <summary>Phạm vi lọc dùng cho danh sách và bản xuất lọc.</summary>
 public sealed record SummaryScopeRequest(

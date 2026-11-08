@@ -131,7 +131,8 @@ public sealed class SummaryToolService : ISummaryToolService
 
     public IReadOnlyList<SummaryPreviewRow> Preview(
         Guid sessionId,
-        IReadOnlyList<SummaryChange> changes)
+        IReadOnlyList<SummaryChange> changes,
+        IReadOnlyList<int>? onlyRowNumbers = null)
     {
         var session = RequireSession(sessionId);
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
@@ -150,10 +151,19 @@ public sealed class SummaryToolService : ISummaryToolService
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
 
-        // Xuất toàn bộ luôn chuẩn hoá mọi dòng đăng ký kết hôn, nên bản xem trước
-        // phải bao gồm cả các dòng chỉ được chuẩn hoá mà người dùng không sửa tay.
+        var allowed = onlyRowNumbers is null || onlyRowNumbers.Count == 0
+            ? null
+            : onlyRowNumbers.ToHashSet();
+
+        // Xuất toàn bộ luôn chuẩn hoá mọi dòng đăng ký kết hôn, trừ khi người dùng
+        // chỉ định "chỉ xử lý dòng đã chọn" thì chỉ quét các dòng đó.
         foreach (var row in session.Rows)
         {
+            if (allowed is not null && !allowed.Contains(row.RowNumber))
+            {
+                continue;
+            }
+
             changeMap.TryGetValue(row.RowNumber, out var change);
             var plan = CreatePlan(row, change, session.Catalog);
             if (plan.SummaryChanged || plan.SheetNumberChanged || plan.DocumentNumberChanged || plan.NumberLabelChanged)
@@ -229,7 +239,8 @@ public sealed class SummaryToolService : ISummaryToolService
         Guid sessionId,
         IReadOnlyList<SummaryChange> changes,
         CancellationToken cancellationToken = default,
-        string? outputFileName = null)
+        string? outputFileName = null,
+        IReadOnlyList<int>? onlyRowNumbers = null)
     {
         var session = RequireSession(sessionId);
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
@@ -249,11 +260,19 @@ public sealed class SummaryToolService : ISummaryToolService
         var patches = new List<SummaryCellPatch>();
         var changedRows = new HashSet<int>();
         var normalizedRows = 0;
+        var allowed = onlyRowNumbers is null || onlyRowNumbers.Count == 0
+            ? null
+            : onlyRowNumbers.ToHashSet();
 
         // Xuất toàn bộ: chuẩn hoá mọi dòng đăng ký kết hôn thuộc workbook,
-        // đồng thời áp dụng các thay đổi người dùng đã chọn.
+        // trừ khi người dùng chọn "chỉ dòng đã chọn" thì chỉ quét các dòng đó.
         foreach (var row in session.Rows)
         {
+            if (allowed is not null && !allowed.Contains(row.RowNumber))
+            {
+                continue;
+            }
+
             changeMap.TryGetValue(row.RowNumber, out var change);
             var plan = CreatePlan(row, change, session.Catalog);
 

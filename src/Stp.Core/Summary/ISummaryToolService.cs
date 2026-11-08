@@ -227,7 +227,8 @@ public interface ISummaryToolService
 
     IReadOnlyList<SummaryPreviewRow> Preview(
         Guid sessionId,
-        IReadOnlyList<SummaryChange> changes);
+        IReadOnlyList<SummaryChange> changes,
+        IReadOnlyList<int>? onlyRowNumbers = null);
 
     /// <summary>Xem trước bản xuất lọc theo phạm vi hiện tại.</summary>
     SummaryFilteredPreview PreviewFiltered(
@@ -240,7 +241,8 @@ public interface ISummaryToolService
         Guid sessionId,
         IReadOnlyList<SummaryChange> changes,
         CancellationToken cancellationToken = default,
-        string? outputFileName = null);
+        string? outputFileName = null,
+        IReadOnlyList<int>? onlyRowNumbers = null);
 
     /// <summary>
     /// Xuất một workbook nhẹ: chỉ giữ sheet trích yếu và các hồ sơ trong phạm vi,

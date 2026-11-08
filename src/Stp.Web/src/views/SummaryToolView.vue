@@ -115,6 +115,11 @@ const exporting = ref(false)
 const filteredExporting = ref(false)
 const exportingIssues = ref(false)
 
+// Chỉ xuất các dòng đã tích (tránh xuất thừa)
+const onlySelectedRows = ref(false)
+
+const selectedRowNumbers = computed(() => [...selected.value].sort((a, b) => a - b))
+
 // A3: đổi tên file xuất
 const exportNameOpen = ref(false)
 const exportName = ref('')
@@ -827,9 +832,13 @@ async function openPreview(): Promise<void> {
   filteredPreview.value = null
 
   try {
+    const only =
+      onlySelectedRows.value && selectedRowNumbers.value.length > 0
+        ? selectedRowNumbers.value
+        : undefined
     const result = await request<SummaryPreviewRowResponse[]>(
       `/api/summary/${active.sessionId}/preview`,
-      { method: 'POST', body: { changes: allChanges.value } },
+      { method: 'POST', body: { changes: allChanges.value, onlyRowNumbers: only } },
     )
 
     previewRows.value = result
@@ -917,9 +926,17 @@ async function doExportFull(): Promise<void> {
 
   exporting.value = true
   try {
+    const only =
+      onlySelectedRows.value && selectedRowNumbers.value.length > 0
+        ? selectedRowNumbers.value
+        : undefined
     const result = await download(`/api/summary/${active.sessionId}/export`, {
       method: 'POST',
-      body: { changes: allChanges.value, outputFileName: exportName.value.trim() || undefined },
+      body: {
+        changes: allChanges.value,
+        outputFileName: exportName.value.trim() || undefined,
+        onlyRowNumbers: only,
+      },
     })
 
     saveBlob(result.blob, result.fileName)
@@ -1210,6 +1227,12 @@ watch(edits, () => {
   if (!session.value) return
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
   autosaveTimer = window.setTimeout(saveDraft, 700)
+})
+
+watch(onlySelectedRows, () => {
+  if (previewOpen.value && previewMode.value === 'full') {
+    void openPreview()
+  }
 })
 
 watch([year, yearFrom, yearTo, type, onlyExisting, onlyMissingSheetNumber, onlyMissingDocumentNumber, onlyMissingNumber, onlyNeedsNormalization, missingSheetNumberFirst], () => {
@@ -1619,7 +1642,8 @@ onBeforeUnmount(() => {
 
           <template v-else>
             <div class="summary-table-hint hint">
-              Muốn sửa nhiều dòng cùng lúc: tích ô ở đầu dòng rồi chọn giấy tờ ở thanh trên.
+              Tích ô ở đầu dòng để sửa nhiều dòng cùng lúc; muốn chỉ xuất đúng các dòng đã tích, bật
+              “Chỉ các dòng đã chọn” ở bước xem trước.
             </div>
             <div v-if="selected.size > 0" class="summary-bulkbar">
               <div class="row wrap" style="gap: 8px; align-items: center">
@@ -1954,7 +1978,16 @@ onBeforeUnmount(() => {
             <Download :size="16" />
             Xuất bản lọc
           </button>
-          <button class="btn btn-accent" type="button" @click="openPreview">
+          <button
+            v-if="selectedRowNumbers.length > 0"
+            class="btn btn-secondary"
+            type="button"
+            @click="onlySelectedRows = true; openPreview()"
+          >
+            <FilePenLine :size="16" />
+            Xem trước chỉ dòng đã chọn ({{ formatNumber(selectedRowNumbers.length) }})
+          </button>
+          <button class="btn btn-accent" type="button" @click="onlySelectedRows = false; openPreview()">
             <FilePenLine :size="16" />
             Xem trước rồi xuất toàn bộ
           </button>
@@ -1996,6 +2029,17 @@ onBeforeUnmount(() => {
             </div>
 
             <template v-else>
+              <div v-if="previewMode === 'full' && selectedRowNumbers.length > 0" class="alert alert-info" style="margin: 0 0 12px">
+                <Info :size="15" />
+                <div class="grow">
+                  <strong>Không xuất thừa:</strong> chỉ ghi đúng {{ formatNumber(selectedRowNumbers.length) }} dòng bạn đã tích.
+                </div>
+                <label class="checkbox">
+                  <input v-model="onlySelectedRows" type="checkbox" />
+                  <span class="checkbox-title">Chỉ các dòng đã chọn</span>
+                </label>
+              </div>
+
               <div v-if="previewMode === 'filtered' && filteredPreview" class="summary-scope-stats">
                 <span class="badge badge-brand">
                   {{ formatNumber(filteredPreview.totalRows) }} hồ sơ được giữ
