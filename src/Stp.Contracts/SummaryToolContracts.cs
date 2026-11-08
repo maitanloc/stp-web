@@ -48,3 +48,24 @@ public sealed record SummaryPreviewRequest(IReadOnlyList<SummaryChangeRequest> C
 public sealed record SummaryPreviewRowResponse(int RowNumber, string Summary, bool Changed);
 
 public sealed record SummaryExportRequest(IReadOnlyList<SummaryChangeRequest> Changes);
+
+/// <summary>Phạm vi lọc dùng cho danh sách và bản xuất lọc.</summary>
+public sealed record SummaryScopeRequest(
+    int? Year,
+    string? Type,
+    string? Search,
+    bool OnlyExisting,
+    string? NumberMode,
+    int? NumberFrom,
+    int? NumberTo,
+    int? Number);
+
+public sealed record SummaryFilteredExportRequest(
+    IReadOnlyList<SummaryChangeRequest>? Changes,
+    SummaryScopeRequest? Scope);
+
+public sealed record SummaryFilteredPreviewResponse(
+    int TotalRows,
+    int ChangedRows,
+    int IgnoredChanges,
+    IReadOnlyList<SummaryPreviewRowResponse> Items);

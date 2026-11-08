@@ -388,3 +388,28 @@ export interface SummaryPreviewRowResponse {
   changed: boolean
 }
 
+export type SummaryNumberMode = 'all' | 'range' | 'single'
+
+export interface SummaryScopeRequest {
+  year: number | null
+  type: string | null
+  search: string | null
+  onlyExisting: boolean
+  numberMode: SummaryNumberMode
+  numberFrom: number | null
+  numberTo: number | null
+  number: number | null
+}
+
+export interface SummaryFilteredExportRequest {
+  changes: SummaryChangeRequest[]
+  scope: SummaryScopeRequest
+}
+
+export interface SummaryFilteredPreviewResponse {
+  totalRows: number
+  changedRows: number
+  ignoredChanges: number
+  items: SummaryPreviewRowResponse[]
+}
+

@@ -68,19 +68,31 @@ public sealed class SummaryToolController : ControllerBase
         [FromQuery] string? type,
         [FromQuery] string? search,
         [FromQuery] bool onlyExisting = false,
+        [FromQuery] string? numberMode = null,
+        [FromQuery] int? numberFrom = null,
+        [FromQuery] int? numberTo = null,
+        [FromQuery] int? number = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
-        try
-        {
-            var rows = _summary.GetRows(
-                sessionId,
+        if (!TryCreateScope(
                 year,
                 type,
                 search,
                 onlyExisting,
-                page,
-                pageSize);
+                numberMode,
+                numberFrom,
+                numberTo,
+                number,
+                out var scope,
+                out var scopeError))
+        {
+            return InvalidProblem(scopeError!);
+        }
+
+        try
+        {
+            var rows = _summary.GetRows(sessionId, scope, page, pageSize);
 
             return Ok(new SummaryRowsResponse(
                 rows.Items.Select(ToResponse).ToList(),
@@ -113,7 +125,7 @@ public sealed class SummaryToolController : ControllerBase
 
             var preview = _summary
                 .Preview(sessionId, changes)
-                .Select(row => new SummaryPreviewRowResponse(row.RowNumber, row.Summary, row.Changed))
+                .Select(ToResponse)
                 .ToList();
 
             return Ok(preview);
@@ -166,6 +178,96 @@ public sealed class SummaryToolController : ControllerBase
         }
     }
 
+    /// <summary>Xem trước bản xuất lọc: số hồ sơ trong phạm vi và các thay đổi được áp dụng.</summary>
+    [HttpPost("{sessionId:guid}/export-filtered/preview")]
+    public ActionResult<SummaryFilteredPreviewResponse> PreviewFiltered(
+        Guid sessionId,
+        [FromBody] SummaryFilteredExportRequest request)
+    {
+        var changes = request.Changes ?? Array.Empty<SummaryChangeRequest>();
+        if (ValidateChanges(changes, allowEmpty: true) is { } validationError)
+        {
+            return validationError;
+        }
+
+        if (!TryCreateScope(request.Scope, out var scope, out var scopeError))
+        {
+            return InvalidProblem(scopeError!);
+        }
+
+        try
+        {
+            var preview = _summary.PreviewFiltered(
+                sessionId,
+                changes.Select(change => new SummaryChange(change.RowNumber, change.Items)).ToList(),
+                scope);
+
+            return Ok(new SummaryFilteredPreviewResponse(
+                preview.TotalRows,
+                preview.ChangedRows,
+                preview.IgnoredChanges,
+                preview.Items.Select(ToResponse).ToList()));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFoundProblem(ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return InvalidProblem(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Xuất bản lọc: chỉ giữ sheet trích yếu và các hồ sơ trong phạm vi,
+    /// áp dụng các thay đổi thuộc phạm vi rồi xoá phần còn lại.
+    /// </summary>
+    [HttpPost("{sessionId:guid}/export-filtered")]
+    public async Task<IActionResult> ExportFiltered(
+        Guid sessionId,
+        [FromBody] SummaryFilteredExportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var changes = request.Changes ?? Array.Empty<SummaryChangeRequest>();
+        if (ValidateChanges(changes, allowEmpty: true) is { } validationError)
+        {
+            return validationError;
+        }
+
+        if (!TryCreateScope(request.Scope, out var scope, out var scopeError))
+        {
+            return InvalidProblem(scopeError!);
+        }
+
+        try
+        {
+            var result = await _summary.ExportFilteredAsync(
+                sessionId,
+                changes.Select(change => new SummaryChange(change.RowNumber, change.Items)).ToList(),
+                scope,
+                cancellationToken);
+
+            Response.Headers["X-Summary-Total-Rows"] =
+                result.TotalRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Response.Headers["X-Summary-Changed-Rows"] =
+                result.ChangedRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Response.Headers["X-Summary-Ignored-Changes"] =
+                result.IgnoredChanges.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            return File(result.Content, result.ContentType, result.FileName);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFoundProblem(ex.Message);
+        }
+        catch (Exception ex) when (ex is ArgumentException
+                                       or InvalidOperationException
+                                       or InvalidDataException)
+        {
+            return InvalidProblem(ex.Message);
+        }
+    }
+
     /// <summary>Kết thúc phiên làm việc và xoá file upload tạm.</summary>
     [HttpDelete("{sessionId:guid}")]
     public IActionResult Delete(Guid sessionId)
@@ -175,11 +277,13 @@ public sealed class SummaryToolController : ControllerBase
             : NotFoundProblem("Phiên làm việc không tồn tại hoặc đã hết hạn.");
     }
 
-    private ActionResult? ValidateChanges(IReadOnlyList<SummaryChangeRequest>? changes)
+    private ActionResult? ValidateChanges(
+        IReadOnlyList<SummaryChangeRequest>? changes,
+        bool allowEmpty = false)
     {
         if (changes is null || changes.Count == 0)
         {
-            return InvalidProblem("Chưa có thay đổi nào.");
+            return allowEmpty ? null : InvalidProblem("Chưa có thay đổi nào.");
         }
 
         if (changes.Count > MaxChanges)
@@ -208,6 +312,102 @@ public sealed class SummaryToolController : ControllerBase
         }
 
         return null;
+    }
+
+    private static bool TryCreateScope(
+        int? year,
+        string? type,
+        string? search,
+        bool onlyExisting,
+        string? numberMode,
+        int? numberFrom,
+        int? numberTo,
+        int? number,
+        out SummaryScope scope,
+        out string? error) =>
+        TryCreateScope(
+            new SummaryScopeRequest(
+                year,
+                type,
+                search,
+                onlyExisting,
+                numberMode,
+                numberFrom,
+                numberTo,
+                number),
+            out scope,
+            out error);
+
+    private static bool TryCreateScope(
+        SummaryScopeRequest? request,
+        out SummaryScope scope,
+        out string? error)
+    {
+        scope = SummaryScope.All;
+        error = null;
+
+        if (request is null)
+        {
+            return true;
+        }
+
+        if (request.Year.HasValue && request.Year.Value is < 1900 or > 2200)
+        {
+            error = "Năm lọc không hợp lệ.";
+            return false;
+        }
+
+        var mode = SummaryNumberMode.All;
+        if (!string.IsNullOrWhiteSpace(request.NumberMode)
+            && !Enum.TryParse(request.NumberMode, ignoreCase: true, out mode))
+        {
+            error = "Kiểu lọc số hồ sơ không hợp lệ.";
+            return false;
+        }
+
+        if (mode == SummaryNumberMode.Range)
+        {
+            if (!request.NumberFrom.HasValue && !request.NumberTo.HasValue)
+            {
+                error = "Nhập ít nhất một đầu của khoảng số hồ sơ.";
+                return false;
+            }
+
+            if ((request.NumberFrom.HasValue && request.NumberFrom.Value <= 0)
+                || (request.NumberTo.HasValue && request.NumberTo.Value <= 0))
+            {
+                error = "Số hồ sơ phải lớn hơn 0.";
+                return false;
+            }
+
+            if (request.NumberFrom.HasValue
+                && request.NumberTo.HasValue
+                && request.NumberFrom.Value > request.NumberTo.Value)
+            {
+                error = "Số bắt đầu không được lớn hơn số kết thúc.";
+                return false;
+            }
+        }
+        else if (mode == SummaryNumberMode.Single)
+        {
+            if (!request.Number.HasValue || request.Number.Value <= 0)
+            {
+                error = "Nhập số hồ sơ cần lọc.";
+                return false;
+            }
+        }
+
+        scope = new SummaryScope(
+            request.Year,
+            request.Type,
+            request.Search,
+            request.OnlyExisting,
+            mode,
+            mode == SummaryNumberMode.Range ? request.NumberFrom : null,
+            mode == SummaryNumberMode.Range ? request.NumberTo : null,
+            mode == SummaryNumberMode.Single ? request.Number : null);
+
+        return true;
     }
 
     private ObjectResult InvalidProblem(string detail) =>
@@ -245,6 +445,9 @@ public sealed class SummaryToolController : ControllerBase
             workbook.Types
                 .Select(item => new SummaryTypeResponse(item.Name, item.Count))
                 .ToList());
+
+    private static SummaryPreviewRowResponse ToResponse(SummaryPreviewRow row) =>
+        new(row.RowNumber, row.Summary, row.Changed);
 
     private static SummaryRowResponse ToResponse(SummaryRow row) =>
         new(

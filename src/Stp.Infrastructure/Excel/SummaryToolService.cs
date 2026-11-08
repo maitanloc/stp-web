@@ -110,45 +110,12 @@ public sealed class SummaryToolService : ISummaryToolService
 
     public SummaryPage GetRows(
         Guid sessionId,
-        int? year,
-        string? type,
-        string? search,
-        bool onlyExisting,
+        SummaryScope scope,
         int page,
         int pageSize)
     {
         var session = RequireSession(sessionId);
-        IEnumerable<SummaryRow> query = session.Rows;
-
-        if (year.HasValue)
-        {
-            query = query.Where(row => row.Year == year.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(type))
-        {
-            query = query.Where(row =>
-                string.Equals(row.Type, type.Trim(), StringComparison.CurrentCultureIgnoreCase));
-        }
-
-        if (onlyExisting)
-        {
-            query = query.Where(row => row.HasDocumentList);
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim();
-            query = query.Where(row =>
-                row.NumberLabel.Contains(term, StringComparison.CurrentCultureIgnoreCase)
-                || row.OriginalSummary.Contains(term, StringComparison.CurrentCultureIgnoreCase)
-                || row.Items.Any(item =>
-                    item.Contains(term, StringComparison.CurrentCultureIgnoreCase))
-                || (row.Type?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
-                || (row.Group?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false));
-        }
-
-        var filtered = query.ToList();
+        var filtered = FilterRows(session.Rows, scope);
         var total = filtered.Count;
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -184,6 +151,46 @@ public sealed class SummaryToolService : ISummaryToolService
         }
 
         return result;
+    }
+
+    public SummaryFilteredPreview PreviewFiltered(
+        Guid sessionId,
+        IReadOnlyList<SummaryChange> changes,
+        SummaryScope scope)
+    {
+        var session = RequireSession(sessionId);
+        var scopedRows = FilterRows(session.Rows, scope);
+        var allowed = scopedRows.Select(row => row.RowNumber).ToHashSet();
+        var byRow = session.Rows.ToDictionary(row => row.RowNumber);
+        var result = new List<SummaryPreviewRow>();
+        var ignored = 0;
+
+        foreach (var change in changes)
+        {
+            if (!byRow.TryGetValue(change.RowNumber, out var row))
+            {
+                throw new ArgumentException(
+                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
+            }
+
+            if (!allowed.Contains(change.RowNumber))
+            {
+                ignored++;
+                continue;
+            }
+
+            var summary = BuildSummary(row, change.Items, session.Catalog);
+            if (!string.Equals(summary, row.OriginalSummary, StringComparison.Ordinal))
+            {
+                result.Add(new SummaryPreviewRow(row.RowNumber, summary, true));
+            }
+        }
+
+        return new SummaryFilteredPreview(
+            scopedRows.Count,
+            result.Count,
+            ignored,
+            result);
     }
 
     public async Task<SummaryExportResult> ExportAsync(
@@ -257,6 +264,93 @@ public sealed class SummaryToolService : ISummaryToolService
         }
     }
 
+    public async Task<SummaryFilteredExportResult> ExportFilteredAsync(
+        Guid sessionId,
+        IReadOnlyList<SummaryChange> changes,
+        SummaryScope scope,
+        CancellationToken cancellationToken = default)
+    {
+        var session = RequireSession(sessionId);
+        var scopedRows = FilterRows(session.Rows, scope);
+        if (scopedRows.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Phạm vi xuất không có hồ sơ nào. Hãy nới điều kiện lọc trước khi xuất.");
+        }
+
+        var allowed = scopedRows.Select(row => row.RowNumber).ToHashSet();
+        var byRow = session.Rows.ToDictionary(row => row.RowNumber);
+        var patches = new List<SummaryCellPatch>(changes.Count);
+        var ignored = 0;
+
+        foreach (var change in changes)
+        {
+            if (!byRow.TryGetValue(change.RowNumber, out var row))
+            {
+                throw new ArgumentException(
+                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
+            }
+
+            if (!allowed.Contains(change.RowNumber))
+            {
+                ignored++;
+                continue;
+            }
+
+            var summary = BuildSummary(row, change.Items, session.Catalog);
+            if (!string.Equals(summary, row.OriginalSummary, StringComparison.Ordinal))
+            {
+                patches.Add(new SummaryCellPatch(row.RowNumber, summary));
+            }
+        }
+
+        var outputDirectory = _storage.GetJobOutputDirectory(sessionId);
+        Directory.CreateDirectory(outputDirectory);
+
+        var extension = Path.GetExtension(session.FileName);
+        var outputName = Path.GetFileNameWithoutExtension(session.FileName)
+            + "_loc"
+            + ScopeSuffix(scope)
+            + extension;
+        var outputPath = _storage.GetUniquePath(outputDirectory, outputName);
+
+        try
+        {
+            SummaryXlsxPatcher.ApplyFiltered(
+                session.FilePath,
+                outputPath,
+                session.SheetName,
+                session.SummaryColumn,
+                session.HeaderRow,
+                allowed,
+                patches);
+
+            var content = await File
+                .ReadAllBytesAsync(outputPath, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Xuất bản lọc {FileName}: {Rows} hồ sơ, {Count} dòng sửa, {Ignored} thay đổi ngoài phạm vi, {Bytes} byte.",
+                session.FileName,
+                scopedRows.Count,
+                patches.Count,
+                ignored,
+                content.Length);
+
+            return new SummaryFilteredExportResult(
+                content,
+                Path.GetFileName(outputPath),
+                ContentTypeFor(extension),
+                patches.Count,
+                scopedRows.Count,
+                ignored);
+        }
+        finally
+        {
+            TryDelete(outputPath);
+        }
+    }
+
     public bool DeleteSession(Guid sessionId)
     {
         if (!_sessions.TryRemove(sessionId, out _))
@@ -316,6 +410,7 @@ public sealed class SummaryToolService : ISummaryToolService
             {
                 RowNumber = raw.RowNumber,
                 Year = raw.Year,
+                Number = ParseNumberLabel(raw.NumberLabel),
                 NumberLabel = raw.NumberLabel,
                 OriginalSummary = raw.Text,
                 BaseSummary = baseSummary,
@@ -342,6 +437,7 @@ public sealed class SummaryToolService : ISummaryToolService
             FileName = fileName,
             FileSizeBytes = fileSizeBytes,
             SheetName = sheet.Name,
+            HeaderRow = headerRow,
             SummaryColumn = summaryColumnLetter,
             SummaryHeader = summaryHeader,
             Catalog = catalog,
@@ -839,6 +935,124 @@ public sealed class SummaryToolService : ISummaryToolService
             .ThenBy(item => item.Index)
             .Select(item => item.Value)
             .ToList();
+    }
+
+    private static List<SummaryRow> FilterRows(
+        IReadOnlyList<SummaryRow> rows,
+        SummaryScope scope)
+    {
+        IEnumerable<SummaryRow> query = rows;
+
+        if (scope.Year.HasValue)
+        {
+            query = query.Where(row => row.Year == scope.Year.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(scope.Type))
+        {
+            query = query.Where(row =>
+                string.Equals(row.Type, scope.Type.Trim(), StringComparison.CurrentCultureIgnoreCase));
+        }
+
+        if (scope.OnlyExisting)
+        {
+            query = query.Where(row => row.HasDocumentList);
+        }
+
+        if (!string.IsNullOrWhiteSpace(scope.Search))
+        {
+            var term = scope.Search.Trim();
+            query = query.Where(row =>
+                row.NumberLabel.Contains(term, StringComparison.CurrentCultureIgnoreCase)
+                || row.OriginalSummary.Contains(term, StringComparison.CurrentCultureIgnoreCase)
+                || row.Items.Any(item =>
+                    item.Contains(term, StringComparison.CurrentCultureIgnoreCase))
+                || (row.Type?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
+                || (row.Group?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false));
+        }
+
+        switch (scope.NumberMode)
+        {
+            case SummaryNumberMode.Range:
+                if (scope.NumberFrom.HasValue)
+                {
+                    query = query.Where(row =>
+                        row.Number.HasValue && row.Number.Value >= scope.NumberFrom.Value);
+                }
+
+                if (scope.NumberTo.HasValue)
+                {
+                    query = query.Where(row =>
+                        row.Number.HasValue && row.Number.Value <= scope.NumberTo.Value);
+                }
+
+                break;
+
+            case SummaryNumberMode.Single:
+                if (scope.Number.HasValue)
+                {
+                    query = query.Where(row => row.Number == scope.Number.Value);
+                }
+
+                break;
+        }
+
+        return query.ToList();
+    }
+
+    private static int? ParseNumberLabel(string label)
+    {
+        var match = Regex.Match(label, @"^\s*(\d{1,9})", RegexOptions.CultureInvariant);
+        return match.Success
+            && int.TryParse(
+                match.Groups[1].Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var number)
+            ? number
+            : null;
+    }
+
+    private static string ScopeSuffix(SummaryScope scope)
+    {
+        var parts = new List<string>();
+
+        if (scope.Year.HasValue)
+        {
+            parts.Add(scope.Year.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        switch (scope.NumberMode)
+        {
+            case SummaryNumberMode.Range:
+                if (scope.NumberFrom.HasValue && scope.NumberTo.HasValue)
+                {
+                    parts.Add(
+                        scope.NumberFrom.Value.ToString(CultureInfo.InvariantCulture)
+                        + "-"
+                        + scope.NumberTo.Value.ToString(CultureInfo.InvariantCulture));
+                }
+                else if (scope.NumberFrom.HasValue)
+                {
+                    parts.Add("tu" + scope.NumberFrom.Value.ToString(CultureInfo.InvariantCulture));
+                }
+                else if (scope.NumberTo.HasValue)
+                {
+                    parts.Add("den" + scope.NumberTo.Value.ToString(CultureInfo.InvariantCulture));
+                }
+
+                break;
+
+            case SummaryNumberMode.Single:
+                if (scope.Number.HasValue)
+                {
+                    parts.Add("so" + scope.Number.Value.ToString(CultureInfo.InvariantCulture));
+                }
+
+                break;
+        }
+
+        return parts.Count == 0 ? string.Empty : "_" + string.Join("_", parts);
     }
 
     private SummaryWorkbook RequireSession(Guid sessionId) =>

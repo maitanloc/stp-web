@@ -15,10 +15,13 @@ import {
 } from '@lucide/vue'
 import { download, queryString, request, saveBlob } from '../api/client'
 import type {
+  SummaryFilteredPreviewResponse,
   SummaryInspectResponse,
+  SummaryNumberMode,
   SummaryPreviewRowResponse,
   SummaryRowResponse,
   SummaryRowsResponse,
+  SummaryScopeRequest,
 } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { formatBytes, formatNumber } from '../lib/format'
@@ -50,15 +53,89 @@ const year = ref<number | ''>('')
 const type = ref('')
 const search = ref('')
 const onlyExisting = ref(false)
+const numberMode = ref<SummaryNumberMode>('all')
+const numberFrom = ref<number | ''>('')
+const numberTo = ref<number | ''>('')
+const singleNumber = ref<number | ''>('')
 
 const edits = ref(new Map<number, RowEdit>())
 const changedCount = computed(() => edits.value.size)
 
 const previewOpen = ref(false)
+const previewMode = ref<'full' | 'filtered'>('full')
 const previewLoading = ref(false)
 const previewRows = ref<SummaryPreviewRowResponse[]>([])
 const previewError = ref<string | null>(null)
+const filteredPreview = ref<SummaryFilteredPreviewResponse | null>(null)
 const exporting = ref(false)
+const filteredExporting = ref(false)
+
+const scopeReady = computed(() => {
+  if (numberMode.value === 'range') {
+    return numberFrom.value !== '' || numberTo.value !== ''
+  }
+
+  if (numberMode.value === 'single') {
+    return singleNumber.value !== ''
+  }
+
+  return true
+})
+
+const scopeRequest = computed<SummaryScopeRequest>(() => ({
+  year: year.value === '' ? null : Number(year.value),
+  type: type.value || null,
+  search: search.value.trim() || null,
+  onlyExisting: onlyExisting.value,
+  numberMode: numberMode.value,
+  numberFrom:
+    numberMode.value === 'range' && numberFrom.value !== '' ? Number(numberFrom.value) : null,
+  numberTo: numberMode.value === 'range' && numberTo.value !== '' ? Number(numberTo.value) : null,
+  number:
+    numberMode.value === 'single' && singleNumber.value !== ''
+      ? Number(singleNumber.value)
+      : null,
+}))
+
+const scopeLabel = computed(() => {
+  const parts: string[] = []
+
+  if (year.value !== '') {
+    parts.push(`năm ${year.value}`)
+  }
+
+  if (numberMode.value === 'range') {
+    if (numberFrom.value !== '' && numberTo.value !== '') {
+      parts.push(`hồ sơ ${numberFrom.value}–${numberTo.value}`)
+    } else if (numberFrom.value !== '') {
+      parts.push(`hồ sơ từ ${numberFrom.value}`)
+    } else if (numberTo.value !== '') {
+      parts.push(`hồ sơ đến ${numberTo.value}`)
+    }
+  } else if (numberMode.value === 'single' && singleNumber.value !== '') {
+    parts.push(`hồ sơ số ${singleNumber.value}`)
+  }
+
+  if (type.value) {
+    parts.push(`loại ${type.value}`)
+  }
+
+  if (search.value.trim()) {
+    parts.push(`từ khoá “${search.value.trim()}”`)
+  }
+
+  if (onlyExisting.value) {
+    parts.push('chỉ dòng đã có danh mục')
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : 'toàn bộ workbook'
+})
+
+const allChanges = computed(() =>
+  [...edits.value.values()]
+    .sort((left, right) => left.row.rowNumber - right.row.rowNumber)
+    .map((edit) => ({ rowNumber: edit.row.rowNumber, items: edit.items })),
+)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const rangeStart = computed(() => (total.value === 0 ? 0 : (page.value - 1) * pageSize.value + 1))
@@ -83,6 +160,7 @@ const exportChanges = computed(() =>
 )
 
 let searchTimer: number | undefined
+let numberTimer: number | undefined
 
 function itemsFor(row: SummaryRowResponse): string[] {
   return edits.value.get(row.rowNumber)?.items ?? row.items
@@ -145,10 +223,16 @@ async function inspect(): Promise<void> {
     edits.value = new Map()
     previewRows.value = []
     previewOpen.value = false
+    previewMode.value = 'full'
+    filteredPreview.value = null
     year.value = ''
     type.value = ''
     search.value = ''
     onlyExisting.value = false
+    numberMode.value = 'all'
+    numberFrom.value = ''
+    numberTo.value = ''
+    singleNumber.value = ''
     page.value = 1
     files.value = []
 
@@ -179,6 +263,15 @@ async function fetchRows(): Promise<void> {
         type: type.value || undefined,
         search: search.value.trim() || undefined,
         onlyExisting: onlyExisting.value || undefined,
+        numberMode: numberMode.value === 'all' ? undefined : numberMode.value,
+        numberFrom:
+          numberMode.value === 'range' && numberFrom.value !== '' ? numberFrom.value : undefined,
+        numberTo:
+          numberMode.value === 'range' && numberTo.value !== '' ? numberTo.value : undefined,
+        number:
+          numberMode.value === 'single' && singleNumber.value !== ''
+            ? singleNumber.value
+            : undefined,
         page: page.value,
         pageSize: pageSize.value,
       })}`,
@@ -224,6 +317,8 @@ function closeSession(): void {
   edits.value = new Map()
   previewRows.value = []
   previewOpen.value = false
+  previewMode.value = 'full'
+  filteredPreview.value = null
   inspectError.value = null
 }
 
@@ -238,19 +333,19 @@ async function openPreview(): Promise<void> {
   const active = session.value
   if (!active) return
 
-  const changes = [...edits.value.values()]
-    .sort((left, right) => left.row.rowNumber - right.row.rowNumber)
-    .map((edit) => ({ rowNumber: edit.row.rowNumber, items: edit.items }))
+  const changes = allChanges.value
 
   if (changes.length === 0) {
     toast.info('Chưa có thay đổi', 'Chọn giấy tờ cho ít nhất một hồ sơ trước khi xem trước.')
     return
   }
 
+  previewMode.value = 'full'
   previewOpen.value = true
   previewLoading.value = true
   previewError.value = null
   previewRows.value = []
+  filteredPreview.value = null
 
   try {
     const result = await request<SummaryPreviewRowResponse[]>(
@@ -261,6 +356,45 @@ async function openPreview(): Promise<void> {
     previewRows.value = result
     if (result.every((row) => !row.changed)) {
       previewError.value = 'Các lựa chọn trùng với nội dung hiện có, không có gì để xuất.'
+    }
+  } catch (caught) {
+    previewError.value = errorMessage(caught)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function openFilteredPreview(): Promise<void> {
+  const active = session.value
+  if (!active) return
+
+  if (!scopeReady.value) {
+    toast.warning(
+      'Phạm vi chưa đủ',
+      'Nhập khoảng số hồ sơ hoặc số hồ sơ chỉ định trước khi xuất bản lọc.',
+    )
+    return
+  }
+
+  previewMode.value = 'filtered'
+  previewOpen.value = true
+  previewLoading.value = true
+  previewError.value = null
+  previewRows.value = []
+  filteredPreview.value = null
+
+  try {
+    const result = await request<SummaryFilteredPreviewResponse>(
+      `/api/summary/${active.sessionId}/export-filtered/preview`,
+      { method: 'POST', body: { changes: allChanges.value, scope: scopeRequest.value } },
+    )
+
+    filteredPreview.value = result
+    previewRows.value = result.items
+
+    if (result.totalRows === 0) {
+      previewError.value =
+        'Phạm vi hiện tại không có hồ sơ nào. Hãy nới điều kiện lọc trước khi xuất.'
     }
   } catch (caught) {
     previewError.value = errorMessage(caught)
@@ -293,6 +427,32 @@ async function exportFile(): Promise<void> {
   }
 }
 
+async function exportFilteredFile(): Promise<void> {
+  const active = session.value
+  if (!active || !scopeReady.value) return
+
+  filteredExporting.value = true
+  try {
+    const result = await download(`/api/summary/${active.sessionId}/export-filtered`, {
+      method: 'POST',
+      body: { changes: allChanges.value, scope: scopeRequest.value },
+    })
+
+    saveBlob(result.blob, result.fileName)
+    const keptRows = filteredPreview.value?.totalRows ?? total.value
+    const changedRows = filteredPreview.value?.changedRows ?? 0
+    toast.success(
+      'Đã xuất bản lọc',
+      `${result.fileName} · ${formatNumber(keptRows)} hồ sơ được giữ · ${formatNumber(changedRows)} dòng được cập nhật.`,
+    )
+    previewOpen.value = false
+  } catch (caught) {
+    toast.error('Không xuất được bản lọc', errorMessage(caught))
+  } finally {
+    filteredExporting.value = false
+  }
+}
+
 watch([year, type, onlyExisting], () => {
   if (!session.value) return
   page.value = 1
@@ -308,8 +468,18 @@ watch(search, () => {
   }, 350)
 })
 
+watch([numberMode, numberFrom, numberTo, singleNumber], () => {
+  if (!session.value) return
+  if (numberTimer) window.clearTimeout(numberTimer)
+  numberTimer = window.setTimeout(() => {
+    page.value = 1
+    void fetchRows()
+  }, 350)
+})
+
 onBeforeUnmount(() => {
   if (searchTimer) window.clearTimeout(searchTimer)
+  if (numberTimer) window.clearTimeout(numberTimer)
   if (session.value) {
     void deleteSessionSilent(session.value.sessionId)
   }
@@ -485,6 +655,78 @@ onBeforeUnmount(() => {
             </label>
           </div>
 
+          <div class="summary-number-filters">
+            <label class="field">
+              <span class="label">Lọc theo số hồ sơ</span>
+              <select v-model="numberMode" class="select">
+                <option value="all">Tất cả số</option>
+                <option value="range">Từ số – đến số</option>
+                <option value="single">Số chỉ định</option>
+              </select>
+            </label>
+
+            <template v-if="numberMode === 'range'">
+              <label class="field">
+                <span class="label">Từ số</span>
+                <input
+                  v-model.number="numberFrom"
+                  class="input"
+                  type="number"
+                  min="1"
+                  placeholder="VD: 36"
+                />
+              </label>
+              <label class="field">
+                <span class="label">Đến số</span>
+                <input
+                  v-model.number="numberTo"
+                  class="input"
+                  type="number"
+                  min="1"
+                  placeholder="VD: 40"
+                />
+              </label>
+            </template>
+
+            <label v-else-if="numberMode === 'single'" class="field">
+              <span class="label">Số hồ sơ</span>
+              <input
+                v-model.number="singleNumber"
+                class="input"
+                type="number"
+                min="1"
+                placeholder="VD: 38"
+              />
+            </label>
+
+            <div class="summary-number-hint hint">
+              Số hồ sơ lấy từ phần đầu cột B (ví dụ “36A” tính là 36). Bản lọc chỉ giữ sheet ML và
+              các hồ sơ trong phạm vi.
+            </div>
+          </div>
+
+          <div class="summary-scope">
+            <div class="summary-scope-info">
+              <Info :size="15" />
+              <span>
+                Phạm vi: <strong>{{ scopeLabel }}</strong>
+                <template v-if="scopeReady">
+                  · <strong>{{ formatNumber(total) }}</strong> hồ sơ
+                </template>
+                <template v-else> · nhập số hồ sơ để tiếp tục</template>
+              </span>
+            </div>
+            <button
+              class="btn btn-secondary btn-sm"
+              type="button"
+              :disabled="!scopeReady || total === 0 || loadingRows"
+              @click="openFilteredPreview"
+            >
+              <Download :size="14" />
+              Xuất bản lọc
+            </button>
+          </div>
+
           <div v-if="rowsError" class="alert alert-danger">
             <TriangleExclamationPoint :size="17" />
             <div class="grow">{{ rowsError }}</div>
@@ -499,7 +741,7 @@ onBeforeUnmount(() => {
           <div v-else-if="rows.length === 0" class="table-wrap">
             <EmptyState
               title="Không có hồ sơ phù hợp"
-              description="Thử bỏ bộ lọc năm, loại hồ sơ hoặc từ khoá tìm kiếm."
+              description="Thử bỏ bộ lọc năm, loại hồ sơ, số hồ sơ hoặc từ khoá tìm kiếm."
             />
           </div>
 
@@ -610,9 +852,18 @@ onBeforeUnmount(() => {
             <Eraser :size="14" />
             Hoàn tác tất cả
           </button>
+          <button
+            class="btn btn-secondary"
+            type="button"
+            :disabled="!scopeReady || total === 0"
+            @click="openFilteredPreview"
+          >
+            <Download :size="16" />
+            Xuất bản lọc
+          </button>
           <button class="btn btn-accent" type="button" @click="openPreview">
             <FilePenLine :size="16" />
-            Xem trước &amp; xuất
+            Xem trước &amp; xuất toàn bộ
           </button>
         </div>
       </div>
@@ -623,9 +874,16 @@ onBeforeUnmount(() => {
         <div class="modal summary-preview-modal">
           <div class="modal-header">
             <div>
-              <div class="card-title">Xem trước thay đổi trích yếu</div>
+              <div class="card-title">
+                {{ previewMode === 'filtered' ? 'Xem trước bản xuất lọc' : 'Xem trước thay đổi trích yếu' }}
+              </div>
               <div class="card-subtitle">
-                Chỉ phần trong ngoặc cuối thay đổi. Phần trích yếu phía trước giữ nguyên từng ký tự.
+                <template v-if="previewMode === 'filtered'">
+                  Chỉ giữ sheet ML và các hồ sơ trong phạm vi hiện tại; xoá mọi sheet và hồ sơ còn lại.
+                </template>
+                <template v-else>
+                  Chỉ phần trong ngoặc cuối thay đổi. Phần trích yếu phía trước giữ nguyên từng ký tự.
+                </template>
               </div>
             </div>
             <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="previewOpen = false">
@@ -644,36 +902,79 @@ onBeforeUnmount(() => {
               <div class="grow">{{ previewError }}</div>
             </div>
 
-            <div v-else class="summary-preview-list">
-              <article v-for="row in previewItems" :key="row.rowNumber" class="summary-preview-item">
-                <header class="row-between wrap">
-                  <div class="row" style="gap: 8px">
-                    <span class="badge badge-brand">Dòng {{ row.rowNumber }}</span>
-                    <span class="hint">Hồ sơ {{ row.edit?.row.numberLabel }}</span>
-                    <span v-if="row.edit?.row.year" class="hint">Năm {{ row.edit.row.year }}</span>
-                  </div>
-                  <span class="badge badge-success">Sẽ cập nhật</span>
-                </header>
+            <template v-else>
+              <div v-if="previewMode === 'filtered' && filteredPreview" class="summary-scope-stats">
+                <span class="badge badge-brand">
+                  {{ formatNumber(filteredPreview.totalRows) }} hồ sơ được giữ
+                </span>
+                <span class="badge badge-success">
+                  {{ formatNumber(filteredPreview.changedRows) }} dòng cập nhật
+                </span>
+                <span v-if="filteredPreview.ignoredChanges > 0" class="badge badge-warning">
+                  {{ formatNumber(filteredPreview.ignoredChanges) }} thay đổi ngoài phạm vi bị bỏ qua
+                </span>
+                <span class="badge badge-neutral">Chỉ còn sheet ML</span>
+              </div>
 
-                <div class="summary-preview-label">Trích yếu gốc</div>
-                <p class="summary-preview-text muted">{{ row.edit?.row.summary }}</p>
-
-                <div class="summary-preview-label">Sau khi bổ sung</div>
-                <p class="summary-preview-text">{{ row.summary }}</p>
-
-                <div v-if="row.edit" class="summary-chips">
-                  <span v-for="item in row.edit.items" :key="item" class="chip">{{ item }}</span>
+              <div
+                v-if="previewMode === 'filtered' && previewItems.length === 0"
+                class="alert alert-info"
+              >
+                <Info :size="17" />
+                <div class="grow">
+                  Không có thay đổi nội dung trong phạm vi. Bản lọc chỉ giữ
+                  {{ formatNumber(filteredPreview?.totalRows ?? total) }} hồ sơ.
                 </div>
-              </article>
-            </div>
+              </div>
+
+              <div v-else class="summary-preview-list">
+                <article v-for="row in previewItems" :key="row.rowNumber" class="summary-preview-item">
+                  <header class="row-between wrap">
+                    <div class="row" style="gap: 8px">
+                      <span class="badge badge-brand">Dòng {{ row.rowNumber }}</span>
+                      <span class="hint">Hồ sơ {{ row.edit?.row.numberLabel }}</span>
+                      <span v-if="row.edit?.row.year" class="hint">Năm {{ row.edit.row.year }}</span>
+                    </div>
+                    <span class="badge badge-success">Sẽ cập nhật</span>
+                  </header>
+
+                  <div class="summary-preview-label">Trích yếu gốc</div>
+                  <p class="summary-preview-text muted">{{ row.edit?.row.summary }}</p>
+
+                  <div class="summary-preview-label">Sau khi bổ sung</div>
+                  <p class="summary-preview-text">{{ row.summary }}</p>
+
+                  <div v-if="row.edit" class="summary-chips">
+                    <span v-for="item in row.edit.items" :key="item" class="chip">{{ item }}</span>
+                  </div>
+                </article>
+              </div>
+            </template>
           </div>
 
           <div class="modal-footer">
             <span class="hint grow">
-              {{ formatNumber(exportChanges.length) }} dòng sẽ được ghi. Các phần khác của workbook giữ nguyên.
+              <template v-if="previewMode === 'filtered'">
+                Giữ {{ formatNumber(filteredPreview?.totalRows ?? total) }} hồ sơ · ghi
+                {{ formatNumber(filteredPreview?.changedRows ?? 0) }} dòng · chỉ còn sheet ML.
+              </template>
+              <template v-else>
+                {{ formatNumber(exportChanges.length) }} dòng sẽ được ghi. Các phần khác của workbook giữ nguyên.
+              </template>
             </span>
             <button class="btn btn-secondary" type="button" @click="previewOpen = false">Quay lại</button>
             <button
+              v-if="previewMode === 'filtered'"
+              class="btn btn-accent"
+              type="button"
+              :disabled="filteredExporting || !filteredPreview || filteredPreview.totalRows === 0"
+              @click="exportFilteredFile"
+            >
+              <Download :size="16" />
+              {{ filteredExporting ? 'Đang xuất bản lọc...' : 'Xuất bản lọc' }}
+            </button>
+            <button
+              v-else
               class="btn btn-accent"
               type="button"
               :disabled="exporting || exportChanges.length === 0"

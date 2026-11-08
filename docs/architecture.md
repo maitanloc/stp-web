@@ -148,6 +148,19 @@ và chạy song song cho đến khi SPA hoàn thiện.
 - Ngoặc cuối chỉ được coi là danh mục khi có ít nhất một mục khớp catalog, chứa
   từ khoá giấy tờ hoặc là danh sách không phải tên riêng; ngoặc là bí danh người
   (ví dụ `(NGUYỄN ĐỨC THÁI)`) được giữ nguyên và cảnh báo trên UI.
+- **Xuất bản lọc**: ngoài bản xuất đầy đủ, người dùng có thể giới hạn theo năm,
+  khoảng số hồ sơ (`từ`–`đến`) hoặc một số hồ sơ chỉ định (lấy phần đầu cột B).
+  Bản lọc chỉ giữ worksheet `ML`, các dòng tiêu đề phía trên và các hồ sơ trong
+  phạm vi; mọi worksheet/dòng khác bị xoá để file nhẹ.
+- Bản lọc áp dụng các thay đổi thuộc phạm vi, bỏ qua thay đổi ngoài phạm vi và
+  dựng lại `sharedStrings.xml` chỉ với chuỗi còn dùng. Quan hệ workbook, content
+  types và các part không còn được tham chiếu được lọc lại; `calcChain.xml` bị
+  xoá và workbook bật tính toán đầy đủ khi mở.
+- Comment/VML của `ML` cũng được lọc theo phạm vi để không kéo dài vùng dữ liệu;
+  khi không còn comment nào, part comments, VML, quan hệ worksheet tương ứng và
+  thẻ `legacyDrawing` đều bị xoá.
+- Bản xuất đầy đủ vẫn giữ nguyên byte các part không sửa, phù hợp khi cần giữ
+  toàn bộ sheet, định dạng và macro.
 
 ## 6. Đồng bộ hai chiều
 
@@ -201,9 +214,11 @@ GET    /api/sync/sessions?take=
 GET    /api/sync/sessions/{id}
 
 POST   /api/summary/inspect                  # upload, tách cột trích yếu
-GET    /api/summary/{id}/rows?year=&type=&search=&onlyExisting=&page=&pageSize=
+GET    /api/summary/{id}/rows?year=&type=&search=&onlyExisting=&numberMode=&numberFrom=&numberTo=&number=&page=&pageSize=
 POST   /api/summary/{id}/preview             # xem trước câu trích yếu
-POST   /api/summary/{id}/export              # tải workbook đã bổ sung
+POST   /api/summary/{id}/export              # tải workbook đã bổ sung (đầy đủ)
+POST   /api/summary/{id}/export-filtered/preview  # xem trước bản lọc
+POST   /api/summary/{id}/export-filtered     # tải bản lọc chỉ còn sheet ML
 DELETE /api/summary/{id}                     # đóng phiên, xoá upload tạm
 
 GET    /api/dev/auth/status
@@ -253,8 +268,9 @@ SPA nằm trong `src/Stp.Web`, dùng Vue 3 + TypeScript + Vite, `vue-router` và
 - Kéo thả nhiều file, hiển thị dung lượng, kiểm tra nhanh loại workbook.
 - Trạng thái job rõ ràng, lỗi tiếng Việt, có nút thử lại/làm mới.
 - Bộ lọc năm/loại/từ khoá; bản in giữ 7 cột và ngưỡng font như bản web cũ.
-- Bổ sung trích yếu: upload workbook, lọc năm/loại/từ khoá, mở dropdown tích
-  nhiều giấy tờ, thêm mục tự nhập, xem trước rồi tải file gốc đã cập nhật.
+- Bổ sung trích yếu: upload workbook, lọc năm/loại/số hồ sơ/từ khoá, mở dropdown
+  tích nhiều giấy tờ, thêm mục tự nhập, xem trước rồi tải file gốc đã cập nhật;
+  có thêm bản lọc nhẹ chỉ giữ sheet `ML` và phạm vi hồ sơ đã chọn.
 - Dark mode bằng `data-theme="dark"` trên `<html>`; lưu lựa chọn ở
   `localStorage["stp.theme"]`.
 

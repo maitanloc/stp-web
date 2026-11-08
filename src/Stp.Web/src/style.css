@@ -2619,6 +2619,58 @@ pre,
   white-space: nowrap;
 }
 
+.summary-number-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.summary-number-filters .field {
+  width: 160px;
+}
+
+.summary-number-filters .field:first-child {
+  width: 220px;
+}
+
+.summary-number-hint {
+  flex: 1 1 280px;
+  align-self: center;
+}
+
+.summary-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.summary-scope-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.summary-scope-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
 .summary-table td {
   vertical-align: top;
 }
@@ -2960,6 +3012,11 @@ pre,
 @media (max-width: 760px) {
   .summary-filters {
     grid-template-columns: 1fr;
+  }
+
+  .summary-number-filters .field,
+  .summary-number-filters .field:first-child {
+    width: 100%;
   }
 
   .summary-actionbar {
