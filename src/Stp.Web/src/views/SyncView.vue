@@ -20,6 +20,7 @@ import type {
 } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { formatDateTime, formatNumber } from '../lib/format'
+import AppSelect from '../components/AppSelect.vue'
 import EmptyState from '../components/EmptyState.vue'
 import FilePicker from '../components/FilePicker.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -42,6 +43,15 @@ const sessionLoading = ref(false)
 const selectedWorkbook = computed(() =>
   workbooks.value.find((workbook) => workbook.id === workbookId.value) ?? null,
 )
+
+const workbookOptions = computed(() => [
+  { value: '', label: 'Tự nhận diện / tạo workbook mới' },
+  ...workbooks.value.map((book) => ({
+    value: book.id,
+    label: `${book.name} · v${book.version}`,
+    countLabel: `${formatNumber(book.dossierCount)} hồ sơ`,
+  })),
+])
 
 function changeTone(changeType: string): string {
   switch (changeType) {
@@ -171,12 +181,11 @@ onMounted(() => {
 
             <label class="field" style="margin-top: 14px">
               <span class="label">Áp vào workbook nào?</span>
-              <select v-model="workbookId" class="select">
-                <option value="">Tự nhận diện / tạo workbook mới</option>
-                <option v-for="book in workbooks" :key="book.id" :value="book.id">
-                  {{ book.name }} · v{{ book.version }} · {{ formatNumber(book.dossierCount) }} hồ sơ
-                </option>
-              </select>
+              <AppSelect
+                v-model="workbookId"
+                :options="workbookOptions"
+                aria-label="Chọn workbook áp dụng"
+              />
               <span class="hint">
                 Chọn đúng workbook để kiểm tra phiên bản. Nếu để trống, hệ thống tìm theo tên file nguồn
                 hoặc tạo workbook mới.

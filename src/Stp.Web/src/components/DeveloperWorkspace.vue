@@ -41,6 +41,7 @@ import type {
   SyncSessionSummaryResponse,
   SystemInfoResponse,
 } from '../api/types'
+import AppSelect from '../components/AppSelect.vue'
 import { useDevAuth } from '../composables/useDevAuth'
 import { useToast } from '../composables/useToast'
 import { errorMessage } from '../lib/errors'
@@ -330,6 +331,14 @@ async function copyMacro(): Promise<void> {
 const jobs = ref<JobSummaryResponse[]>([])
 const jobsLoading = ref(false)
 const jobStatusFilter = ref('')
+const jobStatusOptions = [
+  { value: '', label: 'Tất cả trạng thái' },
+  { value: 'Queued', label: 'Đang chờ' },
+  { value: 'Running', label: 'Đang xử lý' },
+  { value: 'Completed', label: 'Hoàn tất' },
+  { value: 'Failed', label: 'Thất bại' },
+  { value: 'Cancelled', label: 'Đã huỷ' },
+]
 const selectedJobId = ref<string | null>(null)
 const jobDetail = ref<JobDetailResponse | null>(null)
 const jobDetailLoading = ref(false)
@@ -1025,14 +1034,15 @@ onMounted(async () => {
                 <div class="card-subtitle">Chuyển đổi, gộp file và nhật ký xử lý</div>
               </div>
               <div class="row">
-                <select v-model="jobStatusFilter" class="select" style="max-width: 180px" @change="loadJobs">
-                  <option value="">Tất cả trạng thái</option>
-                  <option value="Queued">Đang chờ</option>
-                  <option value="Running">Đang xử lý</option>
-                  <option value="Completed">Hoàn tất</option>
-                  <option value="Failed">Thất bại</option>
-                  <option value="Cancelled">Đã huỷ</option>
-                </select>
+                <div style="width: 180px">
+                  <AppSelect
+                    v-model="jobStatusFilter"
+                    :options="jobStatusOptions"
+                    :searchable="false"
+                    aria-label="Lọc trạng thái job"
+                    @change="loadJobs"
+                  />
+                </div>
                 <button class="btn btn-secondary btn-sm" type="button" :disabled="jobsLoading" @click="loadJobs">
                   <RefreshCw :size="14" />
                   Làm mới

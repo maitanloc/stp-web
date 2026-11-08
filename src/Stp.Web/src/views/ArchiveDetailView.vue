@@ -20,6 +20,7 @@ import type {
 } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { formatDateTime, formatNumber, numberDisplay } from '../lib/format'
+import AppSelect from '../components/AppSelect.vue'
 import EmptyState from '../components/EmptyState.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 
@@ -43,6 +44,20 @@ const listError = ref<string | null>(null)
 const yearFilter = ref('')
 const typeFilter = ref('')
 const search = ref('')
+
+const yearOptions = computed(() => [
+  { value: '', label: 'Tất cả các năm' },
+  ...years.value.map((year) => ({
+    value: String(year.year),
+    label: String(year.year),
+    countLabel: formatNumber(year.dossierCount),
+  })),
+])
+
+const typeOptions = computed(() => [
+  { value: '', label: 'Tất cả loại hồ sơ' },
+  ...types.value.map((type) => ({ value: type, label: type })),
+])
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const pageNumbers = computed(() => {
@@ -221,16 +236,22 @@ onMounted(reload)
                 placeholder="Tìm theo số hồ sơ, trích yếu, hộp, nội dung văn bản..."
               />
             </div>
-            <select v-model="yearFilter" class="select" style="max-width: 150px" @change="applyFilters">
-              <option value="">Tất cả các năm</option>
-              <option v-for="year in years" :key="year.year" :value="String(year.year)">
-                {{ year.year }} ({{ formatNumber(year.dossierCount) }})
-              </option>
-            </select>
-            <select v-model="typeFilter" class="select" style="max-width: 210px" @change="applyFilters">
-              <option value="">Tất cả loại hồ sơ</option>
-              <option v-for="type in types" :key="type" :value="type">{{ type }}</option>
-            </select>
+            <div style="width: 170px">
+              <AppSelect
+                v-model="yearFilter"
+                :options="yearOptions"
+                aria-label="Lọc theo năm"
+                @change="applyFilters"
+              />
+            </div>
+            <div style="width: 210px">
+              <AppSelect
+                v-model="typeFilter"
+                :options="typeOptions"
+                aria-label="Lọc theo loại hồ sơ"
+                @change="applyFilters"
+              />
+            </div>
             <button class="btn btn-primary" type="submit">
               <Search :size="15" />
               Tìm

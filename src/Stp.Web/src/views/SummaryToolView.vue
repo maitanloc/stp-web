@@ -30,6 +30,7 @@ import type {
 import { errorMessage } from '../lib/errors'
 import { formatBytes, formatNumber } from '../lib/format'
 import EmptyState from '../components/EmptyState.vue'
+import AppSelect from '../components/AppSelect.vue'
 import FilePicker from '../components/FilePicker.vue'
 import SummaryItemPicker from '../components/SummaryItemPicker.vue'
 import { useToast } from '../composables/useToast'
@@ -229,6 +230,35 @@ const selectedNormalizableCount = computed(
   () =>
     rows.value.filter((row) => selected.value.has(row.rowNumber) && row.needsNormalization).length,
 )
+
+const yearOptions = computed(() => [
+  { value: '', label: 'Tất cả các năm' },
+  ...(session.value?.years ?? []).map((item) => ({
+    value: String(item.year),
+    label: String(item.year),
+    countLabel: formatNumber(item.count),
+  })),
+])
+
+const typeOptions = computed(() => [
+  { value: '', label: 'Tất cả loại' },
+  ...(session.value?.types ?? []).map((item) => ({
+    value: item.name,
+    label: item.name,
+    countLabel: formatNumber(item.count),
+  })),
+])
+
+const numberModeOptions = [
+  { value: 'all', label: 'Tất cả số' },
+  { value: 'range', label: 'Từ số – đến số' },
+  { value: 'single', label: 'Số chỉ định' },
+]
+
+const pageSizeOptions = PAGE_SIZES.map((size) => ({
+  value: String(size),
+  label: `${size} dòng`,
+}))
 
 const hasAliasParenthesis = (row: SummaryRowResponse): boolean =>
   !row.hasDocumentList && row.summary.trimEnd().endsWith(')')
@@ -1223,22 +1253,21 @@ onBeforeUnmount(() => {
           <div class="summary-filters">
             <label class="field">
               <span class="label">Năm</span>
-              <select v-model="year" class="select">
-                <option value="">Tất cả các năm</option>
-                <option v-for="item in session.years" :key="item.year" :value="item.year">
-                  {{ item.year }} ({{ formatNumber(item.count) }})
-                </option>
-              </select>
+              <AppSelect
+                :model-value="year === '' ? '' : String(year)"
+                :options="yearOptions"
+                placeholder="Tất cả các năm"
+                @update:model-value="(value) => { year = value === '' ? '' : Number(value) }"
+              />
             </label>
 
             <label class="field">
               <span class="label">Loại hồ sơ</span>
-              <select v-model="type" class="select">
-                <option value="">Tất cả loại</option>
-                <option v-for="item in session.types" :key="item.name" :value="item.name">
-                  {{ item.name }} ({{ formatNumber(item.count) }})
-                </option>
-              </select>
+              <AppSelect
+                v-model="type"
+                :options="typeOptions"
+                placeholder="Tất cả loại"
+              />
             </label>
 
             <label class="field summary-search">
@@ -1268,11 +1297,11 @@ onBeforeUnmount(() => {
             <div class="summary-number-filters">
             <label class="field">
               <span class="label">Lọc theo số hồ sơ</span>
-              <select v-model="numberMode" class="select">
-                <option value="all">Tất cả số</option>
-                <option value="range">Từ số – đến số</option>
-                <option value="single">Số chỉ định</option>
-              </select>
+              <AppSelect
+                v-model="numberMode"
+                :options="numberModeOptions"
+                :searchable="false"
+              />
             </label>
 
             <template v-if="numberMode === 'range'">
@@ -1601,9 +1630,13 @@ onBeforeUnmount(() => {
             <div class="row wrap" style="gap: 8px; align-items: center">
               <label class="summary-page-size">
                 <span class="hint">Mỗi trang</span>
-                <select v-model.number="pageSize" class="select select-sm">
-                  <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }}</option>
-                </select>
+                <AppSelect
+                  :model-value="String(pageSize)"
+                  :options="pageSizeOptions"
+                  :searchable="false"
+                  aria-label="Số dòng mỗi trang"
+                  @update:model-value="(value) => { pageSize = Number(value) }"
+                />
               </label>
               <button
                 class="btn btn-secondary btn-sm"
