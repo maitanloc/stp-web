@@ -98,6 +98,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Bản in hồ sơ' },
   },
   {
+    path: '/in-hang-loat',
+    name: 'print-batch',
+    component: () => import('./views/PrintBatchView.vue'),
+    meta: { title: 'In hàng loạt / Xuất PDF' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('./views/NotFoundView.vue'),

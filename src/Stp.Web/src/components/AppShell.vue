@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
+  CaseUpper,
   Combine,
   FileSpreadsheet,
   FolderOpen,
@@ -35,7 +36,18 @@ const { theme, toggleTheme } = useTheme()
 
 const sidebarOpen = ref(false)
 const healthy = ref<boolean | null>(null)
+const largeText = ref(false)
 let healthTimer: number | undefined
+
+function toggleLargeText(): void {
+  largeText.value = !largeText.value
+  document.documentElement.classList.toggle('large-text', largeText.value)
+  try {
+    localStorage.setItem('stp.largeText', largeText.value ? '1' : '0')
+  } catch {
+    // Bỏ qua.
+  }
+}
 
 const sections: NavSection[] = [
   {
@@ -78,6 +90,12 @@ async function checkHealth(): Promise<void> {
 onMounted(() => {
   void checkHealth()
   healthTimer = window.setInterval(() => void checkHealth(), 60_000)
+  try {
+    largeText.value = localStorage.getItem('stp.largeText') === '1'
+  } catch {
+    largeText.value = false
+  }
+  document.documentElement.classList.toggle('large-text', largeText.value)
 })
 
 onUnmounted(() => {
@@ -154,6 +172,16 @@ onUnmounted(() => {
             <RefreshCw :size="14" />
             Đồng bộ
           </RouterLink>
+          <button
+            class="btn btn-secondary btn-icon"
+            :class="{ 'is-active': largeText }"
+            type="button"
+            aria-label="Bật/tắt chữ lớn"
+            :title="largeText ? 'Tắt chữ lớn' : 'Bật chữ lớn cho dễ đọc'"
+            @click="toggleLargeText"
+          >
+            <CaseUpper :size="18" />
+          </button>
           <button
             class="btn btn-secondary btn-icon"
             type="button"

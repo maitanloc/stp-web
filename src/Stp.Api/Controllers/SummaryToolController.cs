@@ -176,7 +176,11 @@ public sealed class SummaryToolController : ControllerBase
                 .Select(ToChange)
                 .ToList();
 
-            var result = await _summary.ExportAsync(sessionId, changes, cancellationToken);
+            var result = await _summary.ExportAsync(
+                sessionId,
+                changes,
+                cancellationToken,
+                request.OutputFileName);
             return File(result.Content, result.ContentType, result.FileName);
         }
         catch (KeyNotFoundException ex)
@@ -260,7 +264,8 @@ public sealed class SummaryToolController : ControllerBase
                 sessionId,
                 changes.Select(ToChange).ToList(),
                 scope,
-                cancellationToken);
+                cancellationToken,
+                request.OutputFileName);
 
             Response.Headers["X-Summary-Total-Rows"] =
                 result.TotalRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -282,6 +287,30 @@ public sealed class SummaryToolController : ControllerBase
                                        or InvalidDataException)
         {
             return InvalidProblem(ex.Message);
+        }
+    }
+
+    /// <summary>Báo cáo dữ liệu thiếu theo năm cho phiên hiện tại.</summary>
+    [HttpGet("{sessionId:guid}/report")]
+    public ActionResult<IReadOnlyList<SummaryYearReportResponse>> GetReport(Guid sessionId)
+    {
+        try
+        {
+            var report = _summary.GetReport(sessionId)
+                .Select(item => new SummaryYearReportResponse(
+                    item.Year,
+                    item.Total,
+                    item.MissingSheetNumber,
+                    item.MissingDocumentNumber,
+                    item.MissingNumber,
+                    item.NeedsNormalization))
+                .ToList();
+
+            return Ok(report);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFoundProblem(ex.Message);
         }
     }
 
@@ -344,7 +373,13 @@ public sealed class SummaryToolController : ControllerBase
     }
 
     private static SummaryChange ToChange(SummaryChangeRequest change) =>
-        new(change.RowNumber, change.Items, change.SummaryText, change.SheetNumber);
+        new(
+            change.RowNumber,
+            change.Items,
+            change.SummaryText,
+            change.SheetNumber,
+            change.DocumentNumber,
+            change.NumberLabel);
 
     private static bool TryCreateScope(
         SummaryScopeRequest? request,
@@ -481,7 +516,8 @@ public sealed class SummaryToolController : ControllerBase
                 .ToList(),
             workbook.Types
                 .Select(item => new SummaryTypeResponse(item.Name, item.Count))
-                .ToList());
+                .ToList(),
+            workbook.NumberColumn);
 
     private static SummaryPreviewRowResponse ToResponse(SummaryPreviewRow row) =>
         new(
@@ -492,7 +528,13 @@ public sealed class SummaryToolController : ControllerBase
             row.SheetNumber,
             row.OriginalSheetNumber,
             row.SummaryChanged,
-            row.SheetNumberChanged);
+            row.SheetNumberChanged,
+            row.DocumentNumber,
+            row.OriginalDocumentNumber,
+            row.DocumentNumberChanged,
+            row.NumberLabel,
+            row.OriginalNumberLabel,
+            row.NumberLabelChanged);
 
     private static SummaryRowResponse ToResponse(SummaryRow row) =>
         new(

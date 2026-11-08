@@ -21,7 +21,8 @@ public sealed record SummaryInspectResponse(
     int NormalizableCount,
     IReadOnlyList<string> Catalog,
     IReadOnlyList<SummaryYearResponse> Years,
-    IReadOnlyList<SummaryTypeResponse> Types);
+    IReadOnlyList<SummaryTypeResponse> Types,
+    string NumberColumn = "B");
 
 public sealed record SummaryYearResponse(int Year, int Count);
 
@@ -55,13 +56,16 @@ public sealed record SummaryRowsResponse(
 /// <summary>
 /// Thay đổi mong muốn của một dòng. <see cref="Items"/> ghép lại danh mục giấy tờ;
 /// <see cref="SummaryText"/> sửa toàn bộ câu trích yếu (ưu tiên hơn Items);
-/// <see cref="SheetNumber"/> cập nhật cột số tờ (null = giữ nguyên, rỗng = xoá).
+/// <see cref="SheetNumber"/> cập nhật cột số tờ; <see cref="DocumentNumber"/> cập nhật
+/// hồ sơ số; <see cref="NumberLabel"/> cập nhật số hồ sơ (null = giữ nguyên, rỗng = xoá).
 /// </summary>
 public sealed record SummaryChangeRequest(
     int RowNumber,
     IReadOnlyList<string> Items,
     string? SummaryText = null,
-    string? SheetNumber = null);
+    string? SheetNumber = null,
+    string? DocumentNumber = null,
+    string? NumberLabel = null);
 
 public sealed record SummaryPreviewRequest(IReadOnlyList<SummaryChangeRequest> Changes);
 
@@ -73,9 +77,17 @@ public sealed record SummaryPreviewRowResponse(
     string? SheetNumber,
     string? OriginalSheetNumber,
     bool SummaryChanged,
-    bool SheetNumberChanged);
+    bool SheetNumberChanged,
+    string? DocumentNumber = null,
+    string? OriginalDocumentNumber = null,
+    bool DocumentNumberChanged = false,
+    string? NumberLabel = null,
+    string? OriginalNumberLabel = null,
+    bool NumberLabelChanged = false);
 
-public sealed record SummaryExportRequest(IReadOnlyList<SummaryChangeRequest> Changes);
+public sealed record SummaryExportRequest(
+    IReadOnlyList<SummaryChangeRequest> Changes,
+    string? OutputFileName = null);
 
 /// <summary>Phạm vi lọc dùng cho danh sách và bản xuất lọc.</summary>
 public sealed record SummaryScopeRequest(
@@ -97,7 +109,16 @@ public sealed record SummaryScopeRequest(
 
 public sealed record SummaryFilteredExportRequest(
     IReadOnlyList<SummaryChangeRequest>? Changes,
-    SummaryScopeRequest? Scope);
+    SummaryScopeRequest? Scope,
+    string? OutputFileName = null);
+
+public sealed record SummaryYearReportResponse(
+    int Year,
+    int Total,
+    int MissingSheetNumber,
+    int MissingDocumentNumber,
+    int MissingNumber,
+    int NeedsNormalization);
 
 public sealed record SummaryFilteredPreviewResponse(
     int TotalRows,

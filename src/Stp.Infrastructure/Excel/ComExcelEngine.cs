@@ -86,6 +86,11 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
 
     private static (string? Path, ExcelHostKind Kind) ResolveHost(ExcelComOptions options)
     {
+        if (string.Equals(options.ExcelPath?.Trim(), "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, ExcelHostKind.Microsoft);
+        }
+
         if (options.ExcelPath is { Length: > 0 } configured && File.Exists(configured))
         {
             var kind = IsWpsPath(configured) ? ExcelHostKind.Wps : ExcelHostKind.Microsoft;
@@ -183,9 +188,16 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
 
         if (!IsAvailable)
         {
-            throw new InvalidOperationException(
-                "Không tìm thấy WPS Spreadsheets hoặc Microsoft Excel trên máy. " +
-                "Hãy cài một ứng dụng bảng tính hoặc dùng chế độ template.");
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await ConvertWithoutExcelAsync(request, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -309,6 +321,111 @@ public sealed class ComExcelEngine : IExcelConversionService, IAsyncDisposable
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Chế độ template: chuyển .xlsx thành .xlsm mà không cần WPS/Microsoft Excel.
+    /// Cách làm: sinh sheet in bằng ClosedXML (nếu cần), chép nguyên byte sang .xlsm
+    /// rồi chèn VBA donor bằng OpenXML (đã đổi content type workbook sang macroEnabled).
+    /// </summary>
+    private async Task<ConversionOutcome> ConvertWithoutExcelAsync(
+        ConversionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        string? stagedInput = null;
+        PrintGenerationOutcome? printOutcome = null;
+
+        try
+        {
+            var effectiveRequest = request;
+
+            if (request.GeneratePrintSheets && _printSheetGenerator is not null)
+            {
+                printOutcome = await PreparePrintSheetsAsync(request, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (printOutcome.Generated
+                    && !string.Equals(printOutcome.OutputPath, request.InputPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    stagedInput = printOutcome.OutputPath;
+                    effectiveRequest = request.WithInputPath(stagedInput);
+                    _logger.LogInformation(
+                        "Template: đã sinh {Count} sheet in cho {Input}",
+                        printOutcome.GeneratedSheetCount,
+                        request.InputPath);
+                }
+            }
+
+            if (!File.Exists(effectiveRequest.InputPath))
+            {
+                return new ConversionOutcome
+                {
+                    Success = false,
+                    InputPath = request.InputPath,
+                    Duration = stopwatch.Elapsed,
+                    ErrorMessage = "Không tìm thấy file đầu vào để chuyển bằng template."
+                };
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(effectiveRequest.OutputPath)) ?? Path.GetTempPath());
+
+            var tempXlsm = effectiveRequest.OutputPath + ".tmpl-" + Guid.NewGuid().ToString("N") + ".tmp";
+            File.Copy(effectiveRequest.InputPath, tempXlsm, overwrite: true);
+
+            try
+            {
+                var injection = await Task.Run(
+                    () => _vbaProjectInjector.Inject(tempXlsm, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+
+                File.Move(tempXlsm, effectiveRequest.OutputPath, overwrite: true);
+
+                _logger.LogInformation(
+                    "Template: đã tạo .xlsm không cần Excel {Output}: donor {Donor} module, gắn {Mapped}",
+                    effectiveRequest.OutputPath,
+                    injection.DonorSheetModules,
+                    injection.MappedSheetModules);
+
+                stopwatch.Stop();
+                var warning = CombineWarnings(
+                    "Chạy không cần Excel (template OpenXML + VBA donor). " +
+                    "Mở file trên máy có Microsoft Excel và bấm 'Enable Content' để dùng macro.",
+                    BuildPrintGenerationWarning(printOutcome));
+
+                return new ConversionOutcome
+                {
+                    Success = true,
+                    InputPath = request.InputPath,
+                    OutputPath = effectiveRequest.OutputPath,
+                    MacroLines = injection.MacroLines,
+                    MacroVerified = false,
+                    Duration = stopwatch.Elapsed,
+                    Warning = warning,
+                    GeneratedPrintYears = printOutcome?.GeneratedYears ?? Array.Empty<int>()
+                };
+            }
+            catch (Exception ex)
+            {
+                TryDelete(tempXlsm);
+                _logger.LogError(ex, "Template: không chèn được VBA donor {Output}", effectiveRequest.OutputPath);
+                stopwatch.Stop();
+                return new ConversionOutcome
+                {
+                    Success = false,
+                    InputPath = request.InputPath,
+                    OutputPath = effectiveRequest.OutputPath,
+                    Duration = stopwatch.Elapsed,
+                    ErrorMessage = "Không chèn được macro VBA bằng template: " + ex.Message,
+                    Warning = "Không tạo được file .xlsm; hãy cài Microsoft Excel hoặc WPS.",
+                    GeneratedPrintYears = printOutcome?.GeneratedYears ?? Array.Empty<int>()
+                };
+            }
+        }
+        finally
+        {
+            TryDelete(stagedInput);
         }
     }
 

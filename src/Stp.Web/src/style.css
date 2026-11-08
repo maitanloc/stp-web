@@ -3,6 +3,40 @@
    Teal + indigo identity, light and dark themes.
    ============================================================ */
 
+/* Chế độ chữ lớn cho người lớn tuổi (A2) */
+html.large-text {
+  font-size: 17px;
+}
+
+html.large-text body,
+html.large-text .summary-base,
+html.large-text .summary-preview-text {
+  font-size: 1.05rem;
+}
+
+html.large-text .summary-sheet-input,
+html.large-text .input,
+html.large-text .select,
+html.large-text .cs-trigger,
+html.large-text .ms-trigger,
+html.large-text .topbar-title,
+html.large-text .card-title,
+html.large-text .table {
+  font-size: 1rem;
+}
+
+html.large-text .checkbox-title,
+html.large-text .checkbox-desc,
+html.large-text .summary-editor-head,
+html.large-text .summary-page-size .hint {
+  font-size: 0.95rem;
+}
+
+html.large-text .btn,
+html.large-text .btn-sm {
+  min-height: 2.4rem;
+}
+
 :root {
   color-scheme: light;
   --bg: #f3f6f7;

@@ -361,6 +361,7 @@ export interface SummaryInspectResponse {
   catalog: string[]
   years: SummaryYearResponse[]
   types: SummaryTypeResponse[]
+  numberColumn?: string | null
 }
 
 export interface SummaryRowResponse {
@@ -394,6 +395,17 @@ export interface SummaryChangeRequest {
   items: string[]
   summaryText?: string | null
   sheetNumber?: string | null
+  documentNumber?: string | null
+  numberLabel?: string | null
+}
+
+export interface SummaryYearReportResponse {
+  year: number
+  total: number
+  missingSheetNumber: number
+  missingDocumentNumber: number
+  missingNumber: number
+  needsNormalization: number
 }
 
 export interface SummaryPreviewRowResponse {
@@ -405,6 +417,17 @@ export interface SummaryPreviewRowResponse {
   originalSheetNumber: string | null
   summaryChanged: boolean
   sheetNumberChanged: boolean
+  documentNumber?: string | null
+  originalDocumentNumber?: string | null
+  documentNumberChanged?: boolean
+  numberLabel?: string | null
+  originalNumberLabel?: string | null
+  numberLabelChanged?: boolean
+}
+
+export interface SummaryExportRequest {
+  changes: SummaryChangeRequest[]
+  outputFileName?: string | null
 }
 
 export type SummaryNumberMode = 'all' | 'range' | 'single'
@@ -430,6 +453,7 @@ export interface SummaryScopeRequest {
 export interface SummaryFilteredExportRequest {
   changes: SummaryChangeRequest[]
   scope: SummaryScopeRequest
+  outputFileName?: string | null
 }
 
 export interface SummaryFilteredPreviewResponse {

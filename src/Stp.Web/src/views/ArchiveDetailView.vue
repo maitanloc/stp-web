@@ -257,6 +257,22 @@ onMounted(reload)
               Tìm
             </button>
             <button class="btn btn-ghost" type="button" @click="resetFilters">Xoá lọc</button>
+            <RouterLink
+              class="btn btn-secondary"
+              :to="{
+                name: 'print-batch',
+                query: {
+                  workbook: bookId,
+                  ...(yearFilter ? { year: yearFilter } : {}),
+                  ...(typeFilter ? { type: typeFilter } : {}),
+                },
+              }"
+              target="_blank"
+              rel="noopener"
+            >
+              <Printer :size="15" />
+              In / Xuất PDF hàng loạt
+            </RouterLink>
           </form>
 
           <div v-if="listError" class="alert alert-danger" style="margin-top: 12px">

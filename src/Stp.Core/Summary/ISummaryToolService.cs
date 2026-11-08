@@ -32,6 +32,9 @@ public sealed class SummaryWorkbook
     /// <summary>Cột "hồ sơ số" dùng để hiển thị; mặc định C.</summary>
     public string DocumentNumberColumn { get; init; } = "C";
 
+    /// <summary>Cột số hồ sơ dùng để lọc/sắp xếp; mặc định B.</summary>
+    public string NumberColumn { get; init; } = "B";
+
     public IReadOnlyList<string> Catalog { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<SummaryRow> Rows { get; init; } = Array.Empty<SummaryRow>();
@@ -154,13 +157,16 @@ public sealed record SummaryPage(
 /// <summary>
 /// Yêu cầu thay đổi một dòng. <see cref="Items"/> dùng để ghép danh mục giấy tờ;
 /// <see cref="SummaryText"/> cho phép sửa toàn bộ câu trích yếu; <see cref="SheetNumber"/>
-/// dùng để cập nhật cột số tờ (null = không đổi, chuỗi rỗng = xoá).
+/// dùng để cập nhật cột số tờ; <see cref="DocumentNumber"/> dùng để cập nhật cột hồ sơ số;
+/// <see cref="NumberLabel"/> dùng để cập nhật cột số hồ sơ (null = không đổi, chuỗi rỗng = xoá).
 /// </summary>
 public sealed record SummaryChange(
     int RowNumber,
     IReadOnlyList<string> Items,
     string? SummaryText = null,
-    string? SheetNumber = null);
+    string? SheetNumber = null,
+    string? DocumentNumber = null,
+    string? NumberLabel = null);
 
 public sealed record SummaryPreviewRow(
     int RowNumber,
@@ -170,7 +176,13 @@ public sealed record SummaryPreviewRow(
     string? SheetNumber = null,
     string? OriginalSheetNumber = null,
     bool SummaryChanged = false,
-    bool SheetNumberChanged = false);
+    bool SheetNumberChanged = false,
+    string? DocumentNumber = null,
+    string? OriginalDocumentNumber = null,
+    bool DocumentNumberChanged = false,
+    string? NumberLabel = null,
+    string? OriginalNumberLabel = null,
+    bool NumberLabelChanged = false);
 
 public sealed record SummaryExportResult(
     byte[] Content,
@@ -227,7 +239,8 @@ public interface ISummaryToolService
     Task<SummaryExportResult> ExportAsync(
         Guid sessionId,
         IReadOnlyList<SummaryChange> changes,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? outputFileName = null);
 
     /// <summary>
     /// Xuất một workbook nhẹ: chỉ giữ sheet trích yếu và các hồ sơ trong phạm vi,
@@ -237,7 +250,20 @@ public interface ISummaryToolService
         Guid sessionId,
         IReadOnlyList<SummaryChange> changes,
         SummaryScope scope,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? outputFileName = null);
 
     bool DeleteSession(Guid sessionId);
+
+    /// <summary>Báo cáo dữ liệu thiếu theo từng năm trong phiên hiện tại.</summary>
+    IReadOnlyList<SummaryYearReport> GetReport(Guid sessionId);
 }
+
+/// <summary>Thống kê dữ liệu thiếu của một năm.</summary>
+public sealed record SummaryYearReport(
+    int Year,
+    int Total,
+    int MissingSheetNumber,
+    int MissingDocumentNumber,
+    int MissingNumber,
+    int NeedsNormalization);

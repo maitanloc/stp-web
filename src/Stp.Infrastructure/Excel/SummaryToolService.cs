@@ -156,7 +156,7 @@ public sealed class SummaryToolService : ISummaryToolService
         {
             changeMap.TryGetValue(row.RowNumber, out var change);
             var plan = CreatePlan(row, change, session.Catalog);
-            if (plan.SummaryChanged || plan.SheetNumberChanged)
+            if (plan.SummaryChanged || plan.SheetNumberChanged || plan.DocumentNumberChanged || plan.NumberLabelChanged)
             {
                 result.Add(ToPreview(plan));
                 if (result.Count >= MaxPreviewRows)
@@ -201,7 +201,7 @@ public sealed class SummaryToolService : ISummaryToolService
             changeMap.TryGetValue(row.RowNumber, out var change);
             var plan = CreatePlan(row, change, session.Catalog);
 
-            if (plan.SummaryChanged || plan.SheetNumberChanged)
+            if (plan.SummaryChanged || plan.SheetNumberChanged || plan.DocumentNumberChanged || plan.NumberLabelChanged)
             {
                 changedRows++;
                 if (plan.Normalized)
@@ -228,7 +228,8 @@ public sealed class SummaryToolService : ISummaryToolService
     public async Task<SummaryExportResult> ExportAsync(
         Guid sessionId,
         IReadOnlyList<SummaryChange> changes,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? outputFileName = null)
     {
         var session = RequireSession(sessionId);
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
@@ -274,6 +275,24 @@ public sealed class SummaryToolService : ISummaryToolService
                 changedRows.Add(row.RowNumber);
             }
 
+            if (plan.DocumentNumberChanged)
+            {
+                patches.Add(new SummaryCellPatch(
+                    row.RowNumber,
+                    session.DocumentNumberColumn,
+                    plan.DocumentNumber ?? string.Empty));
+                changedRows.Add(row.RowNumber);
+            }
+
+            if (plan.NumberLabelChanged)
+            {
+                patches.Add(new SummaryCellPatch(
+                    row.RowNumber,
+                    session.NumberColumn,
+                    plan.NumberLabel ?? string.Empty));
+                changedRows.Add(row.RowNumber);
+            }
+
             if (plan.Normalized)
             {
                 normalizedRows++;
@@ -290,7 +309,8 @@ public sealed class SummaryToolService : ISummaryToolService
         Directory.CreateDirectory(outputDirectory);
 
         var extension = Path.GetExtension(session.FileName);
-        var outputName = Path.GetFileNameWithoutExtension(session.FileName) + "_trichyeu" + extension;
+        var defaultName = Path.GetFileNameWithoutExtension(session.FileName) + "_trichyeu" + extension;
+        var outputName = SanitizeOutputFileName(outputFileName, defaultName, extension);
         var outputPath = _storage.GetUniquePath(outputDirectory, outputName);
 
         try
@@ -329,7 +349,8 @@ public sealed class SummaryToolService : ISummaryToolService
         Guid sessionId,
         IReadOnlyList<SummaryChange> changes,
         SummaryScope scope,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? outputFileName = null)
     {
         var session = RequireSession(sessionId);
         var scopedRows = FilterRows(session.Rows, scope);
@@ -382,6 +403,24 @@ public sealed class SummaryToolService : ISummaryToolService
                 changedRows.Add(row.RowNumber);
             }
 
+            if (plan.DocumentNumberChanged)
+            {
+                patches.Add(new SummaryCellPatch(
+                    row.RowNumber,
+                    session.DocumentNumberColumn,
+                    plan.DocumentNumber ?? string.Empty));
+                changedRows.Add(row.RowNumber);
+            }
+
+            if (plan.NumberLabelChanged)
+            {
+                patches.Add(new SummaryCellPatch(
+                    row.RowNumber,
+                    session.NumberColumn,
+                    plan.NumberLabel ?? string.Empty));
+                changedRows.Add(row.RowNumber);
+            }
+
             if (plan.Normalized)
             {
                 normalizedRows++;
@@ -392,10 +431,11 @@ public sealed class SummaryToolService : ISummaryToolService
         Directory.CreateDirectory(outputDirectory);
 
         var extension = Path.GetExtension(session.FileName);
-        var outputName = Path.GetFileNameWithoutExtension(session.FileName)
+        var defaultFilteredName = Path.GetFileNameWithoutExtension(session.FileName)
             + "_loc"
             + ScopeSuffix(scope)
             + extension;
+        var outputName = SanitizeOutputFileName(outputFileName, defaultFilteredName, extension);
         var outputPath = _storage.GetUniquePath(outputDirectory, outputName);
 
         try
@@ -550,6 +590,7 @@ public sealed class SummaryToolService : ISummaryToolService
             SheetNumberColumn = sheet.Column(sheetNumberColumn).ColumnLetter(),
             SheetNumberHeader = sheetNumberHeader,
             DocumentNumberColumn = sheet.Column(documentNumberColumn).ColumnLetter(),
+            NumberColumn = sheet.Column(numberColumn).ColumnLetter(),
             Catalog = catalog,
             Rows = rows,
             Years = rows
@@ -1156,7 +1197,9 @@ public sealed class SummaryToolService : ISummaryToolService
         {
             summary = change.SummaryText.Trim();
         }
-        else if (change is not null && change.Items.Count == 0 && change.SheetNumber is not null)
+        else if (change is not null
+                 && change.Items.Count == 0
+                 && (change.SheetNumber is not null || change.DocumentNumber is not null || change.NumberLabel is not null))
         {
             // Chỉ cập nhật số tờ: giữ nguyên trích yếu, tránh vô tình xoá danh mục giấy tờ.
             summary = row.OriginalSummary;
@@ -1188,25 +1231,57 @@ public sealed class SummaryToolService : ISummaryToolService
                 StringComparison.Ordinal);
         }
 
+        var documentNumber = row.DocumentNumber;
+        var documentNumberChanged = false;
+        if (change?.DocumentNumber is not null)
+        {
+            documentNumber = change.DocumentNumber.Trim();
+            documentNumberChanged = !string.Equals(
+                documentNumber,
+                row.DocumentNumber,
+                StringComparison.Ordinal);
+        }
+
+        var numberLabel = row.NumberLabel;
+        var numberLabelChanged = false;
+        if (change?.NumberLabel is not null)
+        {
+            numberLabel = change.NumberLabel.Trim();
+            numberLabelChanged = !string.Equals(
+                numberLabel,
+                row.NumberLabel,
+                StringComparison.Ordinal);
+        }
+
         return new SummaryPlan(
             row,
             summary,
             sheetNumber,
             summaryChanged,
             sheetNumberChanged,
-            normalized && summaryChanged);
+            normalized && summaryChanged,
+            documentNumber,
+            documentNumberChanged,
+            numberLabel,
+            numberLabelChanged);
     }
 
     private static SummaryPreviewRow ToPreview(SummaryPlan plan) =>
         new(
             plan.Row.RowNumber,
             plan.Summary,
-            plan.SummaryChanged || plan.SheetNumberChanged,
+            plan.SummaryChanged || plan.SheetNumberChanged || plan.DocumentNumberChanged || plan.NumberLabelChanged,
             plan.Row.OriginalSummary,
             plan.SheetNumber,
             plan.Row.SheetNumber,
             plan.SummaryChanged,
-            plan.SheetNumberChanged);
+            plan.SheetNumberChanged,
+            plan.DocumentNumber,
+            plan.Row.DocumentNumber,
+            plan.DocumentNumberChanged,
+            plan.NumberLabel,
+            plan.Row.NumberLabel,
+            plan.NumberLabelChanged);
 
     private static List<string> NormalizeItems(
         IReadOnlyList<string> requestedItems,
@@ -1487,11 +1562,62 @@ public sealed class SummaryToolService : ISummaryToolService
         string? Group,
         string? Type);
 
+    public IReadOnlyList<SummaryYearReport> GetReport(Guid sessionId)
+    {
+        var session = RequireSession(sessionId);
+        return session.Rows
+            .Where(row => row.Year.HasValue)
+            .GroupBy(row => row.Year!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group => new SummaryYearReport(
+                group.Key,
+                group.Count(),
+                group.Count(row => string.IsNullOrWhiteSpace(row.SheetNumber)),
+                group.Count(row => string.IsNullOrWhiteSpace(row.DocumentNumber)),
+                group.Count(row => string.IsNullOrWhiteSpace(row.NumberLabel)),
+                group.Count(row => row.NeedsNormalization)))
+            .ToList();
+    }
+
+    /// <summary>Chuẩn hoá tên file xuất do người dùng đặt: bỏ đường dẫn, giữ đuôi gốc, bỏ ký tự nguy hiểm.</summary>
+    private static string SanitizeOutputFileName(string? requested, string fallback, string extension)
+    {
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return fallback;
+        }
+
+        var name = Path.GetFileName(requested.Trim());
+        name = Regex.Replace(name, @"[\\/:*?""<>|]", "_").Trim();
+        if (name.Length == 0)
+        {
+            return fallback;
+        }
+
+        // Giữ đuôi gốc nếu người dùng quên nhập hoặc nhập đuôi khác.
+        var ext = Path.GetExtension(name);
+        if (string.IsNullOrWhiteSpace(ext) || !ext.Equals(extension, StringComparison.OrdinalIgnoreCase))
+        {
+            name = Path.GetFileNameWithoutExtension(name) + extension;
+        }
+
+        if (name.Length > 120)
+        {
+            name = name[..(120 - extension.Length)] + extension;
+        }
+
+        return name.Length == 0 ? fallback : name;
+    }
+
     private sealed record SummaryPlan(
         SummaryRow Row,
         string Summary,
         string? SheetNumber,
         bool SummaryChanged,
         bool SheetNumberChanged,
-        bool Normalized);
+        bool Normalized,
+        string? DocumentNumber = null,
+        bool DocumentNumberChanged = false,
+        string? NumberLabel = null,
+        bool NumberLabelChanged = false);
 }
