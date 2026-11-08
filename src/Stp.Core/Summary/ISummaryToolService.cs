@@ -24,6 +24,14 @@ public sealed class SummaryWorkbook
 
     public string? SummaryHeader { get; init; }
 
+    /// <summary>Cột "số tờ" (khoảng trang) được nhận diện trong sheet; mặc định G.</summary>
+    public string SheetNumberColumn { get; init; } = "G";
+
+    public string? SheetNumberHeader { get; init; }
+
+    /// <summary>Cột "hồ sơ số" dùng để hiển thị; mặc định C.</summary>
+    public string DocumentNumberColumn { get; init; } = "C";
+
     public IReadOnlyList<string> Catalog { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<SummaryRow> Rows { get; init; } = Array.Empty<SummaryRow>();
@@ -37,6 +45,18 @@ public sealed class SummaryWorkbook
     public int BrokenSummaryCount { get; init; }
 
     public int FormulaSummaryCount { get; init; }
+
+    /// <summary>Số dòng dữ liệu chưa có số tờ (cột G).</summary>
+    public int MissingSheetNumberCount { get; init; }
+
+    /// <summary>Số dòng dữ liệu chưa có hồ sơ số (cột C).</summary>
+    public int MissingDocumentNumberCount { get; init; }
+
+    /// <summary>Số dòng dữ liệu chưa có số hồ sơ ở cột dùng để lọc.</summary>
+    public int MissingNumberCount { get; init; }
+
+    /// <summary>Số dòng đăng ký kết hôn cần chuẩn hoá tiền tố.</summary>
+    public int NormalizableCount { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
@@ -52,6 +72,12 @@ public sealed class SummaryRow
     public int? Number { get; init; }
 
     public string NumberLabel { get; init; } = string.Empty;
+
+    /// <summary>Giá trị cột "hồ sơ số" (C) để hiển thị và đối chiếu.</summary>
+    public string DocumentNumber { get; init; } = string.Empty;
+
+    /// <summary>Giá trị cột "số tờ" (G), thường là khoảng trang như "01-20".</summary>
+    public string SheetNumber { get; init; } = string.Empty;
 
     /// <summary>Toàn bộ nội dung ô trích yếu ban đầu.</summary>
     public string OriginalSummary { get; init; } = string.Empty;
@@ -98,7 +124,13 @@ public sealed record SummaryScope(
     SummaryNumberMode NumberMode = SummaryNumberMode.All,
     int? NumberFrom = null,
     int? NumberTo = null,
-    int? Number = null)
+    int? Number = null,
+    int? YearFrom = null,
+    int? YearTo = null,
+    bool OnlyMissingSheetNumber = false,
+    bool OnlyMissingDocumentNumber = false,
+    bool OnlyMissingNumber = false,
+    bool MissingSheetNumberFirst = false)
 {
     public static SummaryScope All { get; } = new();
 }
@@ -109,23 +141,42 @@ public sealed record SummaryPage(
     int Page,
     int PageSize);
 
-/// <summary>Yêu cầu thay đổi danh mục giấy tờ của một dòng.</summary>
-public sealed record SummaryChange(int RowNumber, IReadOnlyList<string> Items);
+/// <summary>
+/// Yêu cầu thay đổi một dòng. <see cref="Items"/> dùng để ghép danh mục giấy tờ;
+/// <see cref="SummaryText"/> cho phép sửa toàn bộ câu trích yếu; <see cref="SheetNumber"/>
+/// dùng để cập nhật cột số tờ (null = không đổi, chuỗi rỗng = xoá).
+/// </summary>
+public sealed record SummaryChange(
+    int RowNumber,
+    IReadOnlyList<string> Items,
+    string? SummaryText = null,
+    string? SheetNumber = null);
 
-public sealed record SummaryPreviewRow(int RowNumber, string Summary, bool Changed);
+public sealed record SummaryPreviewRow(
+    int RowNumber,
+    string Summary,
+    bool Changed,
+    string OriginalSummary = "",
+    string? SheetNumber = null,
+    string? OriginalSheetNumber = null,
+    bool SummaryChanged = false,
+    bool SheetNumberChanged = false);
 
 public sealed record SummaryExportResult(
     byte[] Content,
     string FileName,
     string ContentType,
-    int ChangedRows);
+    int ChangedRows,
+    int NormalizedRows = 0);
 
 /// <summary>Kết quả xem trước bản xuất lọc: số hồ sơ trong phạm vi và các thay đổi được áp dụng.</summary>
 public sealed record SummaryFilteredPreview(
     int TotalRows,
     int ChangedRows,
     int IgnoredChanges,
-    IReadOnlyList<SummaryPreviewRow> Items);
+    IReadOnlyList<SummaryPreviewRow> Items,
+    int NormalizedRows = 0,
+    bool Truncated = false);
 
 public sealed record SummaryFilteredExportResult(
     byte[] Content,
@@ -133,7 +184,8 @@ public sealed record SummaryFilteredExportResult(
     string ContentType,
     int ChangedRows,
     int TotalRows,
-    int IgnoredChanges);
+    int IgnoredChanges,
+    int NormalizedRows = 0);
 
 public interface ISummaryToolService
 {

@@ -12,6 +12,8 @@ public sealed class SummaryToolController : ControllerBase
     private const int MaxChanges = 5000;
     private const int MaxItemsPerRow = 80;
     private const int MaxItemLength = 200;
+    private const int MaxSummaryLength = 4000;
+    private const int MaxSheetNumberLength = 40;
 
     private readonly ISummaryToolService _summary;
 
@@ -72,18 +74,31 @@ public sealed class SummaryToolController : ControllerBase
         [FromQuery] int? numberFrom = null,
         [FromQuery] int? numberTo = null,
         [FromQuery] int? number = null,
+        [FromQuery] int? yearFrom = null,
+        [FromQuery] int? yearTo = null,
+        [FromQuery] bool onlyMissingSheetNumber = false,
+        [FromQuery] bool onlyMissingDocumentNumber = false,
+        [FromQuery] bool onlyMissingNumber = false,
+        [FromQuery] bool missingSheetNumberFirst = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
         if (!TryCreateScope(
-                year,
-                type,
-                search,
-                onlyExisting,
-                numberMode,
-                numberFrom,
-                numberTo,
-                number,
+                new SummaryScopeRequest(
+                    year,
+                    type,
+                    search,
+                    onlyExisting,
+                    numberMode,
+                    numberFrom,
+                    numberTo,
+                    number,
+                    yearFrom,
+                    yearTo,
+                    onlyMissingSheetNumber,
+                    onlyMissingDocumentNumber,
+                    onlyMissingNumber,
+                    missingSheetNumberFirst),
                 out var scope,
                 out var scopeError))
         {
@@ -120,7 +135,7 @@ public sealed class SummaryToolController : ControllerBase
         try
         {
             var changes = request.Changes
-                .Select(change => new SummaryChange(change.RowNumber, change.Items))
+                .Select(ToChange)
                 .ToList();
 
             var preview = _summary
@@ -147,20 +162,16 @@ public sealed class SummaryToolController : ControllerBase
         [FromBody] SummaryExportRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.Changes.Count == 0)
-        {
-            return InvalidProblem("Chưa chọn dòng nào để xuất.");
-        }
-
-        if (ValidateChanges(request.Changes) is { } validationError)
+        var requestedChanges = request.Changes ?? Array.Empty<SummaryChangeRequest>();
+        if (ValidateChanges(requestedChanges, allowEmpty: true) is { } validationError)
         {
             return validationError;
         }
 
         try
         {
-            var changes = request.Changes
-                .Select(change => new SummaryChange(change.RowNumber, change.Items))
+            var changes = requestedChanges
+                .Select(ToChange)
                 .ToList();
 
             var result = await _summary.ExportAsync(sessionId, changes, cancellationToken);
@@ -199,13 +210,15 @@ public sealed class SummaryToolController : ControllerBase
         {
             var preview = _summary.PreviewFiltered(
                 sessionId,
-                changes.Select(change => new SummaryChange(change.RowNumber, change.Items)).ToList(),
+                changes.Select(ToChange).ToList(),
                 scope);
 
             return Ok(new SummaryFilteredPreviewResponse(
                 preview.TotalRows,
                 preview.ChangedRows,
                 preview.IgnoredChanges,
+                preview.NormalizedRows,
+                preview.Truncated,
                 preview.Items.Select(ToResponse).ToList()));
         }
         catch (KeyNotFoundException ex)
@@ -243,7 +256,7 @@ public sealed class SummaryToolController : ControllerBase
         {
             var result = await _summary.ExportFilteredAsync(
                 sessionId,
-                changes.Select(change => new SummaryChange(change.RowNumber, change.Items)).ToList(),
+                changes.Select(ToChange).ToList(),
                 scope,
                 cancellationToken);
 
@@ -253,6 +266,8 @@ public sealed class SummaryToolController : ControllerBase
                 result.ChangedRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
             Response.Headers["X-Summary-Ignored-Changes"] =
                 result.IgnoredChanges.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Response.Headers["X-Summary-Normalized-Rows"] =
+                result.NormalizedRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
             return File(result.Content, result.ContentType, result.FileName);
         }
@@ -309,34 +324,25 @@ public sealed class SummaryToolController : ControllerBase
                 return InvalidProblem(
                     $"Tên giấy tờ không được dài quá {MaxItemLength} ký tự.");
             }
+
+            if (change.SummaryText is { Length: > MaxSummaryLength })
+            {
+                return InvalidProblem(
+                    $"Trích yếu không được dài quá {MaxSummaryLength} ký tự.");
+            }
+
+            if (change.SheetNumber is { Length: > MaxSheetNumberLength })
+            {
+                return InvalidProblem(
+                    $"Số tờ không được dài quá {MaxSheetNumberLength} ký tự.");
+            }
         }
 
         return null;
     }
 
-    private static bool TryCreateScope(
-        int? year,
-        string? type,
-        string? search,
-        bool onlyExisting,
-        string? numberMode,
-        int? numberFrom,
-        int? numberTo,
-        int? number,
-        out SummaryScope scope,
-        out string? error) =>
-        TryCreateScope(
-            new SummaryScopeRequest(
-                year,
-                type,
-                search,
-                onlyExisting,
-                numberMode,
-                numberFrom,
-                numberTo,
-                number),
-            out scope,
-            out error);
+    private static SummaryChange ToChange(SummaryChangeRequest change) =>
+        new(change.RowNumber, change.Items, change.SummaryText, change.SheetNumber);
 
     private static bool TryCreateScope(
         SummaryScopeRequest? request,
@@ -354,6 +360,21 @@ public sealed class SummaryToolController : ControllerBase
         if (request.Year.HasValue && request.Year.Value is < 1900 or > 2200)
         {
             error = "Năm lọc không hợp lệ.";
+            return false;
+        }
+
+        if ((request.YearFrom.HasValue && request.YearFrom.Value is < 1900 or > 2200)
+            || (request.YearTo.HasValue && request.YearTo.Value is < 1900 or > 2200))
+        {
+            error = "Khoảng năm không hợp lệ.";
+            return false;
+        }
+
+        if (request.YearFrom.HasValue
+            && request.YearTo.HasValue
+            && request.YearFrom.Value > request.YearTo.Value)
+        {
+            error = "Năm bắt đầu không được lớn hơn năm kết thúc.";
             return false;
         }
 
@@ -405,7 +426,13 @@ public sealed class SummaryToolController : ControllerBase
             mode,
             mode == SummaryNumberMode.Range ? request.NumberFrom : null,
             mode == SummaryNumberMode.Range ? request.NumberTo : null,
-            mode == SummaryNumberMode.Single ? request.Number : null);
+            mode == SummaryNumberMode.Single ? request.Number : null,
+            request.YearFrom,
+            request.YearTo,
+            request.OnlyMissingSheetNumber,
+            request.OnlyMissingDocumentNumber,
+            request.OnlyMissingNumber,
+            request.MissingSheetNumberFirst);
 
         return true;
     }
@@ -434,10 +461,17 @@ public sealed class SummaryToolController : ControllerBase
             workbook.SheetName,
             workbook.SummaryColumn,
             workbook.SummaryHeader,
+            workbook.SheetNumberColumn,
+            workbook.SheetNumberHeader,
+            workbook.DocumentNumberColumn,
             workbook.Rows.Count,
             workbook.ExistingListCount,
             workbook.BrokenSummaryCount,
             workbook.FormulaSummaryCount,
+            workbook.MissingSheetNumberCount,
+            workbook.MissingDocumentNumberCount,
+            workbook.MissingNumberCount,
+            workbook.NormalizableCount,
             workbook.Catalog,
             workbook.Years
                 .Select(item => new SummaryYearResponse(item.Year, item.Count))
@@ -447,13 +481,23 @@ public sealed class SummaryToolController : ControllerBase
                 .ToList());
 
     private static SummaryPreviewRowResponse ToResponse(SummaryPreviewRow row) =>
-        new(row.RowNumber, row.Summary, row.Changed);
+        new(
+            row.RowNumber,
+            row.Summary,
+            row.Changed,
+            row.OriginalSummary,
+            row.SheetNumber,
+            row.OriginalSheetNumber,
+            row.SummaryChanged,
+            row.SheetNumberChanged);
 
     private static SummaryRowResponse ToResponse(SummaryRow row) =>
         new(
             row.RowNumber,
             row.Year,
             row.NumberLabel,
+            row.DocumentNumber,
+            row.SheetNumber,
             row.OriginalSummary,
             row.BaseSummary,
             row.Items,

@@ -347,10 +347,17 @@ export interface SummaryInspectResponse {
   sheetName: string
   summaryColumn: string
   summaryHeader: string | null
+  sheetNumberColumn: string
+  sheetNumberHeader: string | null
+  documentNumberColumn: string
   rowCount: number
   existingListCount: number
   brokenSummaryCount: number
   formulaSummaryCount: number
+  missingSheetNumberCount: number
+  missingDocumentNumberCount: number
+  missingNumberCount: number
+  normalizableCount: number
   catalog: string[]
   years: SummaryYearResponse[]
   types: SummaryTypeResponse[]
@@ -360,6 +367,8 @@ export interface SummaryRowResponse {
   rowNumber: number
   year: number | null
   numberLabel: string
+  documentNumber: string
+  sheetNumber: string
   summary: string
   baseSummary: string
   items: string[]
@@ -380,12 +389,19 @@ export interface SummaryRowsResponse {
 export interface SummaryChangeRequest {
   rowNumber: number
   items: string[]
+  summaryText?: string | null
+  sheetNumber?: string | null
 }
 
 export interface SummaryPreviewRowResponse {
   rowNumber: number
   summary: string
   changed: boolean
+  originalSummary: string
+  sheetNumber: string | null
+  originalSheetNumber: string | null
+  summaryChanged: boolean
+  sheetNumberChanged: boolean
 }
 
 export type SummaryNumberMode = 'all' | 'range' | 'single'
@@ -399,6 +415,12 @@ export interface SummaryScopeRequest {
   numberFrom: number | null
   numberTo: number | null
   number: number | null
+  yearFrom: number | null
+  yearTo: number | null
+  onlyMissingSheetNumber: boolean
+  onlyMissingDocumentNumber: boolean
+  onlyMissingNumber: boolean
+  missingSheetNumberFirst: boolean
 }
 
 export interface SummaryFilteredExportRequest {
@@ -410,6 +432,8 @@ export interface SummaryFilteredPreviewResponse {
   totalRows: number
   changedRows: number
   ignoredChanges: number
+  normalizedRows: number
+  truncated: boolean
   items: SummaryPreviewRowResponse[]
 }
 

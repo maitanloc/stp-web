@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
+  CircleCheck,
+  Clock,
   Download,
   Eraser,
   FilePenLine,
@@ -15,6 +18,7 @@ import {
 } from '@lucide/vue'
 import { download, queryString, request, saveBlob } from '../api/client'
 import type {
+  SummaryChangeRequest,
   SummaryFilteredPreviewResponse,
   SummaryInspectResponse,
   SummaryNumberMode,
@@ -33,7 +37,27 @@ import { useToast } from '../composables/useToast'
 interface RowEdit {
   row: SummaryRowResponse
   items: string[]
+  /** null = ghép từ items; chuỗi = người dùng sửa toàn bộ câu. */
+  summaryText: string | null
+  /** null = giữ nguyên; chuỗi rỗng = xoá số tờ. */
+  sheetNumber: string | null
 }
+
+interface DraftEntry {
+  row: SummaryRowResponse
+  items: string[]
+  summaryText: string | null
+  sheetNumber: string | null
+}
+
+interface DraftPayload {
+  fileName: string
+  savedAt: string
+  edits: DraftEntry[]
+}
+
+const DRAFT_PREFIX = 'stp.summary.draft.'
+const PAGE_SIZES = [20, 50, 100, 200]
 
 const toast = useToast()
 
@@ -50,6 +74,8 @@ const loadingRows = ref(false)
 const rowsError = ref<string | null>(null)
 
 const year = ref<number | ''>('')
+const yearFrom = ref<number | ''>('')
+const yearTo = ref<number | ''>('')
 const type = ref('')
 const search = ref('')
 const onlyExisting = ref(false)
@@ -57,9 +83,19 @@ const numberMode = ref<SummaryNumberMode>('all')
 const numberFrom = ref<number | ''>('')
 const numberTo = ref<number | ''>('')
 const singleNumber = ref<number | ''>('')
+const onlyMissingSheetNumber = ref(false)
+const onlyMissingDocumentNumber = ref(false)
+const onlyMissingNumber = ref(false)
+const missingSheetNumberFirst = ref(false)
 
 const edits = ref(new Map<number, RowEdit>())
 const changedCount = computed(() => edits.value.size)
+const selected = ref(new Set<number>())
+const bulkItems = ref<string[]>([])
+const bulkApplying = ref(false)
+
+const editingSummaryRow = ref<number | null>(null)
+const summaryDraft = ref('')
 
 const previewOpen = ref(false)
 const previewMode = ref<'full' | 'filtered'>('full')
@@ -69,6 +105,12 @@ const previewError = ref<string | null>(null)
 const filteredPreview = ref<SummaryFilteredPreviewResponse | null>(null)
 const exporting = ref(false)
 const filteredExporting = ref(false)
+const exportingIssues = ref(false)
+
+const draftSavedAt = ref<Date | null>(null)
+const draftStatus = ref<'idle' | 'saved'>('idle')
+
+const searchInput = ref<HTMLInputElement | null>(null)
 
 const scopeReady = computed(() => {
   if (numberMode.value === 'range') {
@@ -95,6 +137,12 @@ const scopeRequest = computed<SummaryScopeRequest>(() => ({
     numberMode.value === 'single' && singleNumber.value !== ''
       ? Number(singleNumber.value)
       : null,
+  yearFrom: yearFrom.value === '' ? null : Number(yearFrom.value),
+  yearTo: yearTo.value === '' ? null : Number(yearTo.value),
+  onlyMissingSheetNumber: onlyMissingSheetNumber.value,
+  onlyMissingDocumentNumber: onlyMissingDocumentNumber.value,
+  onlyMissingNumber: onlyMissingNumber.value,
+  missingSheetNumberFirst: missingSheetNumberFirst.value,
 }))
 
 const scopeLabel = computed(() => {
@@ -102,6 +150,12 @@ const scopeLabel = computed(() => {
 
   if (year.value !== '') {
     parts.push(`năm ${year.value}`)
+  }
+
+  if (yearFrom.value !== '' || yearTo.value !== '') {
+    parts.push(
+      `năm ${yearFrom.value === '' ? '…' : yearFrom.value}–${yearTo.value === '' ? '…' : yearTo.value}`,
+    )
   }
 
   if (numberMode.value === 'range') {
@@ -128,43 +182,49 @@ const scopeLabel = computed(() => {
     parts.push('chỉ dòng đã có danh mục')
   }
 
+  if (onlyMissingSheetNumber.value) {
+    parts.push('thiếu số tờ')
+  }
+
+  if (onlyMissingDocumentNumber.value) {
+    parts.push('thiếu hồ sơ số')
+  }
+
+  if (onlyMissingNumber.value) {
+    parts.push('thiếu số hồ sơ')
+  }
+
   return parts.length > 0 ? parts.join(' · ') : 'toàn bộ workbook'
 })
 
-const allChanges = computed(() =>
+const allChanges = computed<SummaryChangeRequest[]>(() =>
   [...edits.value.values()]
     .sort((left, right) => left.row.rowNumber - right.row.rowNumber)
-    .map((edit) => ({ rowNumber: edit.row.rowNumber, items: edit.items })),
+    .map((edit) => {
+      const summary = edit.summaryText ?? composeSummary(edit.row, edit.items)
+      return {
+        rowNumber: edit.row.rowNumber,
+        items: edit.items,
+        summaryText: summary,
+        sheetNumber: edit.sheetNumber ?? edit.row.sheetNumber,
+      }
+    }),
 )
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const rangeStart = computed(() => (total.value === 0 ? 0 : (page.value - 1) * pageSize.value + 1))
 const rangeEnd = computed(() => Math.min(total.value, page.value * pageSize.value))
+
+const allPageSelected = computed(
+  () => rows.value.length > 0 && rows.value.every((row) => selected.value.has(row.rowNumber)),
+)
+
 const hasAliasParenthesis = (row: SummaryRowResponse): boolean =>
   !row.hasDocumentList && row.summary.trimEnd().endsWith(')')
 
-const previewItems = computed(() =>
-  previewRows.value
-    .filter((row) => row.changed)
-    .map((row) => ({
-      ...row,
-      edit: edits.value.get(row.rowNumber) ?? null,
-    })),
-)
-
-const exportChanges = computed(() =>
-  previewItems.value.map((row) => ({
-    rowNumber: row.rowNumber,
-    items: row.edit?.items ?? [],
-  })),
-)
-
 let searchTimer: number | undefined
-let numberTimer: number | undefined
-
-function itemsFor(row: SummaryRowResponse): string[] {
-  return edits.value.get(row.rowNumber)?.items ?? row.items
-}
+let filterTimer: number | undefined
+let autosaveTimer: number | undefined
 
 function normalizeText(value: string): string {
   return value
@@ -175,25 +235,195 @@ function normalizeText(value: string): string {
     .toLowerCase()
 }
 
-function sameItems(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false
-  const keys = new Set(left.map(normalizeText))
-  return right.every((item) => keys.has(normalizeText(item)))
+/** Sắp xếp mục theo đúng thứ tự danh mục như backend để bản xem trước khớp bản xuất. */
+function orderItems(items: string[]): string[] {
+  const order = new Map<string, number>()
+  session.value?.catalog.forEach((item, index) => {
+    const key = normalizeText(item)
+    if (!order.has(key)) order.set(key, index)
+  })
+
+  const seen = new Set<string>()
+  return items
+    .map((value, index) => ({ value: value.trim().replace(/\s+/g, ' '), index }))
+    .filter((item) => item.value.length > 0)
+    .filter((item) => {
+      const key = normalizeText(item.value)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((left, right) => {
+      const leftOrder = order.get(normalizeText(left.value)) ?? Number.MAX_SAFE_INTEGER
+      const rightOrder = order.get(normalizeText(right.value)) ?? Number.MAX_SAFE_INTEGER
+      return leftOrder - rightOrder || left.index - right.index
+    })
+    .map((item) => item.value)
 }
 
-function setRowItems(row: SummaryRowResponse, items: string[]): void {
+/** Ghép câu trích yếu giống hệt SummaryToolService.BuildSummary. */
+function composeSummary(row: SummaryRowResponse, items: string[]): string {
+  const ordered = orderItems(items)
+  if (ordered.length === 0) {
+    return row.hasDocumentList ? row.baseSummary : row.summary
+  }
+
+  const baseText = row.baseSummary.trimEnd()
+  const list = ordered.join(', ')
+
+  if (baseText.length === 0) {
+    return `(${list})`
+  }
+
+  let separator = ' '
+  if (row.hasDocumentList) {
+    const original = row.summary.trimEnd()
+    const openIndex = original.lastIndexOf('(')
+    if (openIndex > 0 && !/\s/.test(original[openIndex - 1] ?? '')) {
+      separator = ''
+    }
+  }
+
+  return `${baseText}${separator}(${list})`
+}
+
+function editFor(row: SummaryRowResponse): RowEdit {
+  return (
+    edits.value.get(row.rowNumber) ?? {
+      row,
+      items: row.items,
+      summaryText: null,
+      sheetNumber: null,
+    }
+  )
+}
+
+function itemsFor(row: SummaryRowResponse): string[] {
+  return editFor(row).items
+}
+
+function summaryFor(row: SummaryRowResponse): string {
+  const edit = editFor(row)
+  return edit.summaryText ?? composeSummary(row, edit.items)
+}
+
+function sheetFor(row: SummaryRowResponse): string {
+  return editFor(row).sheetNumber ?? row.sheetNumber
+}
+
+function commit(row: SummaryRowResponse, patch: Partial<Omit<RowEdit, 'row'>>): void {
+  const current = editFor(row)
+  const nextEdit: RowEdit = { ...current, ...patch }
+  const summary = nextEdit.summaryText ?? composeSummary(row, nextEdit.items)
+  const sheet = nextEdit.sheetNumber ?? row.sheetNumber
+  const changed = summary !== row.summary || sheet !== row.sheetNumber
+
   const next = new Map(edits.value)
-  if (sameItems(items, row.items)) {
-    next.delete(row.rowNumber)
+  if (changed) {
+    next.set(row.rowNumber, nextEdit)
   } else {
-    next.set(row.rowNumber, { row, items })
+    next.delete(row.rowNumber)
   }
 
   edits.value = next
 }
 
+function setRowItems(row: SummaryRowResponse, items: string[]): void {
+  commit(row, { items, summaryText: null })
+}
+
+function onSheetChange(row: SummaryRowResponse, event: Event): void {
+  const value = (event.target as HTMLInputElement).value.trim()
+  commit(row, { sheetNumber: value === row.sheetNumber ? null : value })
+}
+
+function openSummaryEditor(row: SummaryRowResponse): void {
+  editingSummaryRow.value = row.rowNumber
+  summaryDraft.value = summaryFor(row)
+}
+
+function closeSummaryEditor(): void {
+  editingSummaryRow.value = null
+  summaryDraft.value = ''
+}
+
+function saveSummaryEditor(row: SummaryRowResponse): void {
+  const text = summaryDraft.value.trim()
+  commit(row, { summaryText: text })
+  closeSummaryEditor()
+  toast.success('Đã cập nhật trích yếu', `Dòng ${row.rowNumber} sẽ được ghi khi xuất.`)
+}
+
 function resetEdits(): void {
+  if (edits.value.size === 0) return
+  if (!window.confirm('Hoàn tác toàn bộ thay đổi chưa xuất?')) return
   edits.value = new Map()
+  closeSummaryEditor()
+  selected.value = new Set()
+  clearDraft()
+}
+
+function toggleSelect(rowNumber: number): void {
+  const next = new Set(selected.value)
+  if (next.has(rowNumber)) next.delete(rowNumber)
+  else next.add(rowNumber)
+  selected.value = next
+}
+
+function toggleSelectPage(): void {
+  const next = new Set(selected.value)
+  if (allPageSelected.value) {
+    rows.value.forEach((row) => next.delete(row.rowNumber))
+  } else {
+    rows.value.forEach((row) => next.add(row.rowNumber))
+  }
+  selected.value = next
+}
+
+function clearSelection(): void {
+  selected.value = new Set()
+}
+
+function applyBulk(): void {
+  if (selected.value.size === 0) {
+    toast.warning('Chưa chọn dòng', 'Tích chọn ít nhất một dòng trong trang hiện tại.')
+    return
+  }
+
+  if (bulkItems.value.length === 0) {
+    toast.warning('Chưa chọn giấy tờ', 'Chọn danh mục giấy tờ cần áp dụng cho các dòng đã tích.')
+    return
+  }
+
+  bulkApplying.value = true
+  let applied = 0
+  const next = new Map(edits.value)
+
+  for (const row of rows.value) {
+    if (!selected.value.has(row.rowNumber)) continue
+    const current = next.get(row.rowNumber) ?? {
+      row,
+      items: row.items,
+      summaryText: null,
+      sheetNumber: null,
+    }
+    const nextEdit: RowEdit = { ...current, items: bulkItems.value, summaryText: null }
+    const summary = composeSummary(row, nextEdit.items)
+    const sheet = nextEdit.sheetNumber ?? row.sheetNumber
+    if (summary !== row.summary || sheet !== row.sheetNumber) {
+      next.set(row.rowNumber, nextEdit)
+    } else {
+      next.delete(row.rowNumber)
+    }
+    applied++
+  }
+
+  edits.value = next
+  bulkApplying.value = false
+  toast.success(
+    'Đã áp dụng danh mục',
+    `${formatNumber(applied)} dòng trong trang hiện tại đã nhận ${bulkItems.value.length} loại giấy tờ.`,
+  )
 }
 
 async function inspect(): Promise<void> {
@@ -221,11 +451,15 @@ async function inspect(): Promise<void> {
 
     session.value = data
     edits.value = new Map()
+    selected.value = new Set()
+    bulkItems.value = []
     previewRows.value = []
     previewOpen.value = false
     previewMode.value = 'full'
     filteredPreview.value = null
     year.value = ''
+    yearFrom.value = ''
+    yearTo.value = ''
     type.value = ''
     search.value = ''
     onlyExisting.value = false
@@ -233,19 +467,52 @@ async function inspect(): Promise<void> {
     numberFrom.value = ''
     numberTo.value = ''
     singleNumber.value = ''
+    onlyMissingSheetNumber.value = false
+    onlyMissingDocumentNumber.value = false
+    onlyMissingNumber.value = false
+    missingSheetNumberFirst.value = false
     page.value = 1
+    pageSize.value = 20
     files.value = []
+    closeSummaryEditor()
+    draftSavedAt.value = null
+    draftStatus.value = 'idle'
 
     toast.success(
       'Đã đọc workbook',
-      `${formatNumber(data.rowCount)} hồ sơ · ${formatNumber(data.catalog.length)} loại giấy tờ · ${formatNumber(data.existingListCount)} dòng đã có danh mục.`,
+      `${formatNumber(data.rowCount)} hồ sơ · ${formatNumber(data.missingSheetNumberCount)} dòng thiếu số tờ · ${formatNumber(data.normalizableCount)} dòng cần chuẩn hoá tiền tố.`,
     )
 
+    restoreDraft(data.fileName)
     await fetchRows()
   } catch (caught) {
     inspectError.value = errorMessage(caught)
   } finally {
     inspecting.value = false
+  }
+}
+
+function queryParams(): Record<string, string | number | boolean | null | undefined> {
+  return {
+    year: year.value === '' ? undefined : year.value,
+    yearFrom: yearFrom.value === '' ? undefined : yearFrom.value,
+    yearTo: yearTo.value === '' ? undefined : yearTo.value,
+    type: type.value || undefined,
+    search: search.value.trim() || undefined,
+    onlyExisting: onlyExisting.value || undefined,
+    numberMode: numberMode.value === 'all' ? undefined : numberMode.value,
+    numberFrom:
+      numberMode.value === 'range' && numberFrom.value !== '' ? numberFrom.value : undefined,
+    numberTo:
+      numberMode.value === 'range' && numberTo.value !== '' ? numberTo.value : undefined,
+    number:
+      numberMode.value === 'single' && singleNumber.value !== ''
+        ? singleNumber.value
+        : undefined,
+    onlyMissingSheetNumber: onlyMissingSheetNumber.value || undefined,
+    onlyMissingDocumentNumber: onlyMissingDocumentNumber.value || undefined,
+    onlyMissingNumber: onlyMissingNumber.value || undefined,
+    missingSheetNumberFirst: missingSheetNumberFirst.value || undefined,
   }
 }
 
@@ -259,19 +526,7 @@ async function fetchRows(): Promise<void> {
   try {
     const response = await request<SummaryRowsResponse>(
       `/api/summary/${active.sessionId}/rows${queryString({
-        year: year.value === '' ? undefined : year.value,
-        type: type.value || undefined,
-        search: search.value.trim() || undefined,
-        onlyExisting: onlyExisting.value || undefined,
-        numberMode: numberMode.value === 'all' ? undefined : numberMode.value,
-        numberFrom:
-          numberMode.value === 'range' && numberFrom.value !== '' ? numberFrom.value : undefined,
-        numberTo:
-          numberMode.value === 'range' && numberTo.value !== '' ? numberTo.value : undefined,
-        number:
-          numberMode.value === 'single' && singleNumber.value !== ''
-            ? singleNumber.value
-            : undefined,
+        ...queryParams(),
         page: page.value,
         pageSize: pageSize.value,
       })}`,
@@ -287,6 +542,7 @@ async function fetchRows(): Promise<void> {
     total.value = response.total
     pageSize.value = response.pageSize
     page.value = response.page
+    selected.value = new Set()
   } catch (caught) {
     rowsError.value = errorMessage(caught)
   } finally {
@@ -311,15 +567,20 @@ function closeSession(): void {
   }
 
   void deleteSessionSilent(active.sessionId)
+  clearDraft()
   session.value = null
   rows.value = []
   total.value = 0
   edits.value = new Map()
+  selected.value = new Set()
   previewRows.value = []
   previewOpen.value = false
   previewMode.value = 'full'
   filteredPreview.value = null
   inspectError.value = null
+  closeSummaryEditor()
+  draftSavedAt.value = null
+  draftStatus.value = 'idle'
 }
 
 function goToPage(next: number): void {
@@ -333,13 +594,6 @@ async function openPreview(): Promise<void> {
   const active = session.value
   if (!active) return
 
-  const changes = allChanges.value
-
-  if (changes.length === 0) {
-    toast.info('Chưa có thay đổi', 'Chọn giấy tờ cho ít nhất một hồ sơ trước khi xem trước.')
-    return
-  }
-
   previewMode.value = 'full'
   previewOpen.value = true
   previewLoading.value = true
@@ -350,12 +604,13 @@ async function openPreview(): Promise<void> {
   try {
     const result = await request<SummaryPreviewRowResponse[]>(
       `/api/summary/${active.sessionId}/preview`,
-      { method: 'POST', body: { changes } },
+      { method: 'POST', body: { changes: allChanges.value } },
     )
 
     previewRows.value = result
-    if (result.every((row) => !row.changed)) {
-      previewError.value = 'Các lựa chọn trùng với nội dung hiện có, không có gì để xuất.'
+    if (result.length === 0) {
+      previewError.value =
+        'Không có dòng nào cần ghi: trích yếu và số tờ đều đã đúng chuẩn. Hãy sửa ít nhất một dòng.'
     }
   } catch (caught) {
     previewError.value = errorMessage(caught)
@@ -395,6 +650,8 @@ async function openFilteredPreview(): Promise<void> {
     if (result.totalRows === 0) {
       previewError.value =
         'Phạm vi hiện tại không có hồ sơ nào. Hãy nới điều kiện lọc trước khi xuất.'
+    } else if (result.items.length === 0) {
+      previewError.value = null
     }
   } catch (caught) {
     previewError.value = errorMessage(caught)
@@ -405,21 +662,25 @@ async function openFilteredPreview(): Promise<void> {
 
 async function exportFile(): Promise<void> {
   const active = session.value
-  if (!active || exportChanges.value.length === 0) return
+  if (!active) return
 
   exporting.value = true
   try {
     const result = await download(`/api/summary/${active.sessionId}/export`, {
       method: 'POST',
-      body: { changes: exportChanges.value },
+      body: { changes: allChanges.value },
     })
 
     saveBlob(result.blob, result.fileName)
+    const normalized = previewRows.value.filter((row) => row.summaryChanged).length
     toast.success(
       'Đã xuất file Excel',
-      `${result.fileName} · ${formatNumber(exportChanges.value.length)} dòng được cập nhật.`,
+      `${result.fileName} · ${formatNumber(previewRows.value.length)} dòng được cập nhật${normalized > 0 ? ` · ${formatNumber(normalized)} dòng chuẩn hoá` : ''}.`,
     )
     previewOpen.value = false
+    clearDraft()
+    draftSavedAt.value = null
+    draftStatus.value = 'idle'
   } catch (caught) {
     toast.error('Không xuất được file', errorMessage(caught))
   } finally {
@@ -441,11 +702,15 @@ async function exportFilteredFile(): Promise<void> {
     saveBlob(result.blob, result.fileName)
     const keptRows = filteredPreview.value?.totalRows ?? total.value
     const changedRows = filteredPreview.value?.changedRows ?? 0
+    const normalizedRows = filteredPreview.value?.normalizedRows ?? 0
     toast.success(
       'Đã xuất bản lọc',
-      `${result.fileName} · ${formatNumber(keptRows)} hồ sơ được giữ · ${formatNumber(changedRows)} dòng được cập nhật.`,
+      `${result.fileName} · ${formatNumber(keptRows)} hồ sơ được giữ · ${formatNumber(changedRows)} dòng cập nhật${normalizedRows > 0 ? ` · ${formatNumber(normalizedRows)} dòng chuẩn hoá` : ''}.`,
     )
     previewOpen.value = false
+    clearDraft()
+    draftSavedAt.value = null
+    draftStatus.value = 'idle'
   } catch (caught) {
     toast.error('Không xuất được bản lọc', errorMessage(caught))
   } finally {
@@ -453,10 +718,240 @@ async function exportFilteredFile(): Promise<void> {
   }
 }
 
-watch([year, type, onlyExisting], () => {
+function csvCell(value: string | number | null): string {
+  const text = value === null || value === undefined ? '' : String(value)
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+/** Xuất danh sách các dòng còn thiếu số tờ / hồ sơ số / số hồ sơ trong phạm vi hiện tại. */
+async function exportIssues(): Promise<void> {
+  const active = session.value
+  if (!active) return
+
+  exportingIssues.value = true
+  try {
+    const all: SummaryRowResponse[] = []
+    let currentPage = 1
+    let pageCount = 1
+
+    do {
+      const response = await request<SummaryRowsResponse>(
+        `/api/summary/${active.sessionId}/rows${queryString({
+          ...queryParams(),
+          page: currentPage,
+          pageSize: 200,
+        })}`,
+      )
+      all.push(...response.items)
+      pageCount = Math.max(1, Math.ceil(response.total / response.pageSize))
+      currentPage++
+    } while (currentPage <= pageCount && currentPage <= 500)
+
+    const issues = all.filter(
+      (row) =>
+        !row.sheetNumber.trim() || !row.documentNumber.trim() || !row.numberLabel.trim(),
+    )
+
+    if (issues.length === 0) {
+      toast.info('Không có dòng thiếu dữ liệu', 'Mọi hồ sơ trong phạm vi đều đã đủ thông tin.')
+      return
+    }
+
+    const header = [
+      'Dòng',
+      'Số hồ sơ',
+      'Hồ sơ số',
+      'Số tờ',
+      'Năm',
+      'Loại',
+      'Trích yếu',
+      'Thiếu',
+    ]
+    const lines = [
+      header.map(csvCell).join(','),
+      ...issues.map((row) => {
+        const missing: string[] = []
+        if (!row.numberLabel.trim()) missing.push('số hồ sơ')
+        if (!row.documentNumber.trim()) missing.push('hồ sơ số')
+        if (!row.sheetNumber.trim()) missing.push('số tờ')
+        return [
+          row.rowNumber,
+          row.numberLabel,
+          row.documentNumber,
+          row.sheetNumber,
+          row.year ?? '',
+          row.type ?? '',
+          row.summary,
+          missing.join('; '),
+        ]
+          .map(csvCell)
+          .join(',')
+      }),
+    ]
+
+    const csv = `\uFEFF${lines.join('\r\n')}`
+    const baseName = active.fileName.replace(/\.[^.]+$/, '')
+    saveBlob(
+      new Blob([csv], { type: 'text/csv;charset=utf-8' }),
+      `${baseName}_thieu-du-lieu.csv`,
+    )
+    toast.success(
+      'Đã xuất danh sách thiếu dữ liệu',
+      `${formatNumber(issues.length)} dòng trong phạm vi · mở bằng Excel để bổ sung.`,
+    )
+  } catch (caught) {
+    toast.error('Không xuất được danh sách', errorMessage(caught))
+  } finally {
+    exportingIssues.value = false
+  }
+}
+
+function draftKey(fileName: string): string {
+  return `${DRAFT_PREFIX}${fileName}`
+}
+
+function saveDraft(): void {
+  const active = session.value
+  if (!active) return
+
+  try {
+    if (edits.value.size === 0) {
+      localStorage.removeItem(draftKey(active.fileName))
+      draftSavedAt.value = null
+      draftStatus.value = 'idle'
+      return
+    }
+
+    const payload: DraftPayload = {
+      fileName: active.fileName,
+      savedAt: new Date().toISOString(),
+      edits: [...edits.value.values()].map((edit) => ({
+        row: edit.row,
+        items: edit.items,
+        summaryText: edit.summaryText,
+        sheetNumber: edit.sheetNumber,
+      })),
+    }
+    localStorage.setItem(draftKey(active.fileName), JSON.stringify(payload))
+    draftSavedAt.value = new Date(payload.savedAt)
+    draftStatus.value = 'saved'
+  } catch {
+    // localStorage có thể bị chặn hoặc đầy; bỏ qua và vẫn làm việc trong bộ nhớ.
+  }
+}
+
+function restoreDraft(fileName: string): void {
+  try {
+    const raw = localStorage.getItem(draftKey(fileName))
+    if (!raw) return
+
+    const payload = JSON.parse(raw) as DraftPayload
+    if (!payload.edits || payload.edits.length === 0) {
+      localStorage.removeItem(draftKey(fileName))
+      return
+    }
+
+    const savedAt = new Date(payload.savedAt)
+    const label = savedAt.toLocaleString('vi-VN')
+    if (!window.confirm(`Tìm thấy bản nháp ${payload.edits.length} dòng cho file này (${label}). Khôi phục?`)) {
+      localStorage.removeItem(draftKey(fileName))
+      return
+    }
+
+    const next = new Map<number, RowEdit>()
+    for (const entry of payload.edits) {
+      if (!entry?.row) continue
+      next.set(entry.row.rowNumber, {
+        row: entry.row,
+        items: entry.items ?? entry.row.items,
+        summaryText: entry.summaryText ?? null,
+        sheetNumber: entry.sheetNumber ?? null,
+      })
+    }
+
+    edits.value = next
+    draftSavedAt.value = savedAt
+    draftStatus.value = 'saved'
+    toast.success('Đã khôi phục bản nháp', `${formatNumber(next.size)} dòng thay đổi đã được nạp.`)
+  } catch {
+    // Bản nháp hỏng: bỏ qua để không chặn mở file.
+  }
+}
+
+function clearDraft(): void {
+  const active = session.value
+  if (!active) return
+  try {
+    localStorage.removeItem(draftKey(active.fileName))
+  } catch {
+    // Bỏ qua.
+  }
+}
+
+function onGlobalKeydown(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null
+  const typing =
+    !!target &&
+    (target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable)
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    if (session.value) void openPreview()
+    return
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    event.preventDefault()
+    if (session.value && scopeReady.value) void openFilteredPreview()
+    return
+  }
+
+  if (event.key === 'Escape') {
+    if (editingSummaryRow.value !== null) {
+      closeSummaryEditor()
+      return
+    }
+    if (previewOpen.value) {
+      previewOpen.value = false
+      return
+    }
+  }
+
+  if (typing) return
+
+  if (event.key === '/') {
+    event.preventDefault()
+    searchInput.value?.focus()
+    return
+  }
+
+  if (event.key === 'ArrowLeft' && session.value && page.value > 1) {
+    event.preventDefault()
+    goToPage(page.value - 1)
+  }
+
+  if (event.key === 'ArrowRight' && session.value && page.value < totalPages.value) {
+    event.preventDefault()
+    goToPage(page.value + 1)
+  }
+}
+
+watch(edits, () => {
   if (!session.value) return
-  page.value = 1
-  void fetchRows()
+  if (autosaveTimer) window.clearTimeout(autosaveTimer)
+  autosaveTimer = window.setTimeout(saveDraft, 700)
+})
+
+watch([year, yearFrom, yearTo, type, onlyExisting, onlyMissingSheetNumber, onlyMissingDocumentNumber, onlyMissingNumber, missingSheetNumberFirst], () => {
+  if (!session.value) return
+  if (filterTimer) window.clearTimeout(filterTimer)
+  filterTimer = window.setTimeout(() => {
+    page.value = 1
+    void fetchRows()
+  }, 300)
 })
 
 watch(search, () => {
@@ -470,17 +965,30 @@ watch(search, () => {
 
 watch([numberMode, numberFrom, numberTo, singleNumber], () => {
   if (!session.value) return
-  if (numberTimer) window.clearTimeout(numberTimer)
-  numberTimer = window.setTimeout(() => {
+  if (filterTimer) window.clearTimeout(filterTimer)
+  filterTimer = window.setTimeout(() => {
     page.value = 1
     void fetchRows()
   }, 350)
 })
 
+watch(pageSize, () => {
+  if (!session.value) return
+  page.value = 1
+  void fetchRows()
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown)
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
   if (searchTimer) window.clearTimeout(searchTimer)
-  if (numberTimer) window.clearTimeout(numberTimer)
+  if (filterTimer) window.clearTimeout(filterTimer)
+  if (autosaveTimer) window.clearTimeout(autosaveTimer)
   if (session.value) {
+    saveDraft()
     void deleteSessionSilent(session.value.sessionId)
   }
 })
@@ -493,10 +1001,10 @@ onBeforeUnmount(() => {
         <div class="row" style="gap: 12px; align-items: flex-start">
           <span class="summary-step"><FilePenLine :size="20" /></span>
           <div>
-            <h1 class="page-title" style="font-size: 20px">Bổ sung danh mục giấy tờ vào trích yếu</h1>
+            <h1 class="page-title" style="font-size: 20px">Bổ sung trích yếu và số tờ</h1>
             <p class="page-subtitle" style="margin-top: 4px">
-              Chọn workbook, tích các loại giấy tờ cần thêm, rồi xuất lại đúng file gốc.
-              Công cụ chỉ thay phần trong ngoặc cuối cột trích yếu.
+              Chọn workbook, sửa trích yếu hoặc bổ sung số tờ còn thiếu, rồi xuất lại đúng file
+              gốc. Hồ sơ đăng ký kết hôn được chuẩn hoá tiền tố tự động khi xuất.
             </p>
           </div>
         </div>
@@ -513,7 +1021,7 @@ onBeforeUnmount(() => {
             <strong>Không đụng chạm phần còn lại</strong>
             <div>
               Toàn bộ sheet, công thức, định dạng, hình ảnh, ghi chú và macro được giữ nguyên.
-              Chỉ các ô trích yếu được chọn mới được ghi lại.
+              Chỉ các ô trích yếu và ô số tờ cần sửa mới được ghi lại.
             </div>
           </div>
         </div>
@@ -549,16 +1057,21 @@ onBeforeUnmount(() => {
               <div class="row wrap" style="gap: 8px">
                 <strong class="truncate" style="max-width: 420px">{{ session.fileName }}</strong>
                 <span class="badge badge-brand">{{ session.sheetName }}!{{ session.summaryColumn }}</span>
+                <span class="badge badge-neutral">Số tờ: cột {{ session.sheetNumberColumn }}</span>
                 <span class="badge badge-neutral">{{ formatBytes(session.fileSizeBytes) }}</span>
               </div>
               <div class="hint" style="margin-top: 4px">
                 {{ formatNumber(session.rowCount) }} hồ sơ · {{ formatNumber(session.catalog.length) }} loại giấy tờ ·
-                {{ formatNumber(session.existingListCount) }} dòng đã có danh mục
+                {{ formatNumber(session.missingSheetNumberCount) }} dòng thiếu số tờ
               </div>
             </div>
           </div>
 
           <div class="row wrap">
+            <span v-if="draftStatus === 'saved' && draftSavedAt" class="badge badge-info" title="Bản nháp tự lưu trên máy này">
+              <Clock :size="13" />
+              Nháp {{ draftSavedAt.toLocaleTimeString('vi-VN') }}
+            </span>
             <button class="btn btn-secondary btn-sm" type="button" @click="closeSession">
               <X :size="14" />
               Đóng workbook
@@ -567,33 +1080,64 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <div class="summary-guide">
+        <div class="summary-guide-step">
+          <span class="summary-guide-index">1</span>
+          <div>
+            <strong>Chọn phạm vi</strong>
+            <span>Lọc năm, loại, số hồ sơ hoặc dòng còn thiếu.</span>
+          </div>
+        </div>
+        <div class="summary-guide-step">
+          <span class="summary-guide-index">2</span>
+          <div>
+            <strong>Sửa dữ liệu</strong>
+            <span>Sửa trích yếu, bổ sung số tờ, gán giấy tờ hàng loạt.</span>
+          </div>
+        </div>
+        <div class="summary-guide-step">
+          <span class="summary-guide-index">3</span>
+          <div>
+            <strong>Xem trước</strong>
+            <span>Đối chiếu trước/sau và số dòng chuẩn hoá.</span>
+          </div>
+        </div>
+        <div class="summary-guide-step">
+          <span class="summary-guide-index">4</span>
+          <div>
+            <strong>Xuất file</strong>
+            <span>Giữ nguyên định dạng gốc, chỉ ghi ô đã sửa.</span>
+          </div>
+        </div>
+      </div>
+
       <div class="grid grid-4 summary-stats">
         <div class="card summary-stat">
           <div class="card-body">
             <span class="summary-stat-label">Hồ sơ</span>
             <strong class="summary-stat-value">{{ formatNumber(session.rowCount) }}</strong>
-            <span class="hint">Dòng có số hồ sơ</span>
+            <span class="hint">Dòng dữ liệu đọc được</span>
           </div>
         </div>
         <div class="card summary-stat">
           <div class="card-body">
-            <span class="summary-stat-label">Đã có danh mục</span>
-            <strong class="summary-stat-value">{{ formatNumber(session.existingListCount) }}</strong>
-            <span class="hint">Ngoặc cuối là danh mục giấy tờ</span>
+            <span class="summary-stat-label">Thiếu số tờ</span>
+            <strong class="summary-stat-value">{{ formatNumber(session.missingSheetNumberCount) }}</strong>
+            <span class="hint">Cột {{ session.sheetNumberColumn }} đang trống</span>
           </div>
         </div>
         <div class="card summary-stat">
           <div class="card-body">
-            <span class="summary-stat-label">Năm hồ sơ</span>
-            <strong class="summary-stat-value">{{ formatNumber(session.years.length) }}</strong>
-            <span class="hint">Từ {{ session.years[0]?.year ?? '—' }} đến {{ session.years.at(-1)?.year ?? '—' }}</span>
+            <span class="summary-stat-label">Cần chuẩn hoá</span>
+            <strong class="summary-stat-value">{{ formatNumber(session.normalizableCount) }}</strong>
+            <span class="hint">Tiền tố đăng ký kết hôn</span>
           </div>
         </div>
         <div class="card summary-stat">
           <div class="card-body">
             <span class="summary-stat-label">Đang chờ xuất</span>
             <strong class="summary-stat-value">{{ formatNumber(changedCount) }}</strong>
-            <span class="hint">Hồ sơ đã đổi danh mục</span>
+            <span class="hint">Dòng đã sửa trên máy này</span>
           </div>
         </div>
       </div>
@@ -601,9 +1145,10 @@ onBeforeUnmount(() => {
       <section class="card">
         <div class="card-header summary-filter-header">
           <div>
-            <div class="card-title">Chọn giấy tờ cho từng hồ sơ</div>
+            <div class="card-title">Sửa trích yếu và số tờ</div>
             <div class="card-subtitle">
-              Bấm vào ô giấy tờ để mở danh mục, tích một hoặc nhiều mục. Danh sách chỉ được ghép vào ngoặc cuối.
+              Bấm vào ô giấy tờ để chọn danh mục, sửa trực tiếp ô số tờ, hoặc mở “Sửa toàn bộ” để
+              chỉnh cả câu trích yếu.
             </div>
           </div>
           <button class="btn btn-ghost btn-sm" type="button" :disabled="loadingRows" @click="fetchRows">
@@ -635,13 +1180,14 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="field summary-search">
-              <span class="label">Tìm kiếm</span>
+              <span class="label">Tìm kiếm nâng cao</span>
               <span class="search-box">
                 <Search :size="15" />
                 <input
+                  ref="searchInput"
                   v-model="search"
                   class="input"
-                  placeholder="Số hồ sơ, tên người, nội dung trích yếu..."
+                  placeholder="Số hồ sơ, hồ sơ số, số tờ, tên người, trích yếu... (phím /)"
                 />
               </span>
             </label>
@@ -668,41 +1214,67 @@ onBeforeUnmount(() => {
             <template v-if="numberMode === 'range'">
               <label class="field">
                 <span class="label">Từ số</span>
-                <input
-                  v-model.number="numberFrom"
-                  class="input"
-                  type="number"
-                  min="1"
-                  placeholder="VD: 36"
-                />
+                <input v-model.number="numberFrom" class="input" type="number" min="1" placeholder="VD: 36" />
               </label>
               <label class="field">
                 <span class="label">Đến số</span>
-                <input
-                  v-model.number="numberTo"
-                  class="input"
-                  type="number"
-                  min="1"
-                  placeholder="VD: 40"
-                />
+                <input v-model.number="numberTo" class="input" type="number" min="1" placeholder="VD: 40" />
               </label>
             </template>
 
             <label v-else-if="numberMode === 'single'" class="field">
               <span class="label">Số hồ sơ</span>
-              <input
-                v-model.number="singleNumber"
-                class="input"
-                type="number"
-                min="1"
-                placeholder="VD: 38"
-              />
+              <input v-model.number="singleNumber" class="input" type="number" min="1" placeholder="VD: 38" />
+            </label>
+
+            <label class="field">
+              <span class="label">Năm từ</span>
+              <input v-model.number="yearFrom" class="input" type="number" min="1900" max="2200" placeholder="VD: 2015" />
+            </label>
+
+            <label class="field">
+              <span class="label">Năm đến</span>
+              <input v-model.number="yearTo" class="input" type="number" min="1900" max="2200" placeholder="VD: 2024" />
             </label>
 
             <div class="summary-number-hint hint">
               Số hồ sơ lấy từ phần đầu cột B (ví dụ “36A” tính là 36). Bản lọc chỉ giữ sheet ML và
               các hồ sơ trong phạm vi.
             </div>
+          </div>
+
+          <div class="summary-missing-filters">
+            <label class="checkbox">
+              <input v-model="onlyMissingSheetNumber" type="checkbox" />
+              <span class="checkbox-text">
+                <span class="checkbox-title">Chỉ dòng thiếu số tờ</span>
+                <span class="checkbox-desc">{{ formatNumber(session.missingSheetNumberCount) }} dòng cột {{ session.sheetNumberColumn }}</span>
+              </span>
+            </label>
+
+            <label class="checkbox">
+              <input v-model="onlyMissingDocumentNumber" type="checkbox" />
+              <span class="checkbox-text">
+                <span class="checkbox-title">Chỉ dòng thiếu hồ sơ số</span>
+                <span class="checkbox-desc">{{ formatNumber(session.missingDocumentNumberCount) }} dòng cột {{ session.documentNumberColumn }}</span>
+              </span>
+            </label>
+
+            <label class="checkbox">
+              <input v-model="onlyMissingNumber" type="checkbox" />
+              <span class="checkbox-text">
+                <span class="checkbox-title">Chỉ dòng thiếu số hồ sơ</span>
+                <span class="checkbox-desc">{{ formatNumber(session.missingNumberCount) }} dòng</span>
+              </span>
+            </label>
+
+            <label class="checkbox">
+              <input v-model="missingSheetNumberFirst" type="checkbox" />
+              <span class="checkbox-text">
+                <span class="checkbox-title">Ưu tiên dòng thiếu số tờ</span>
+                <span class="checkbox-desc">Đưa lên đầu danh sách</span>
+              </span>
+            </label>
           </div>
 
           <div class="summary-scope">
@@ -716,15 +1288,30 @@ onBeforeUnmount(() => {
                 <template v-else> · nhập số hồ sơ để tiếp tục</template>
               </span>
             </div>
-            <button
-              class="btn btn-secondary btn-sm"
-              type="button"
-              :disabled="!scopeReady || total === 0 || loadingRows"
-              @click="openFilteredPreview"
-            >
-              <Download :size="14" />
-              Xuất bản lọc
-            </button>
+            <div class="row wrap" style="gap: 8px">
+              <button
+                class="btn btn-secondary btn-sm"
+                type="button"
+                :disabled="exportingIssues"
+                @click="exportIssues"
+              >
+                <Download :size="14" />
+                {{ exportingIssues ? 'Đang lập danh sách...' : 'Xuất danh sách thiếu' }}
+              </button>
+              <button
+                class="btn btn-secondary btn-sm"
+                type="button"
+                :disabled="!scopeReady || total === 0 || loadingRows"
+                @click="openFilteredPreview"
+              >
+                <Download :size="14" />
+                Xuất bản lọc
+              </button>
+              <button class="btn btn-accent btn-sm" type="button" @click="openPreview">
+                <FilePenLine :size="14" />
+                Xem trước &amp; xuất toàn bộ
+              </button>
+            </div>
           </div>
 
           <div v-if="rowsError" class="alert alert-danger">
@@ -745,79 +1332,173 @@ onBeforeUnmount(() => {
             />
           </div>
 
-          <div v-else class="table-wrap">
-            <table class="table table-hover summary-table">
-              <thead>
-                <tr>
-                  <th style="width: 96px">Hồ sơ</th>
-                  <th style="width: 74px">Năm</th>
-                  <th>Trích yếu gốc (không thay đổi)</th>
-                  <th style="width: 330px">Giấy tờ trong ngoặc</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="row in rows"
-                  :key="row.rowNumber"
-                  :class="{ 'is-edited': edits.has(row.rowNumber) }"
-                >
-                  <td>
-                    <div class="summary-number">{{ row.numberLabel }}</div>
-                    <div class="hint">Dòng {{ row.rowNumber }}</div>
-                  </td>
-                  <td>
-                    <span class="badge badge-neutral">{{ row.year ?? '—' }}</span>
-                  </td>
-                  <td>
-                    <div class="summary-base" :title="row.summary">{{ row.baseSummary }}</div>
-                    <div class="summary-meta">
-                      <span v-if="row.hasDocumentList" class="badge badge-info">
-                        Đã có {{ row.items.length }} mục
-                      </span>
-                      <span
-                        v-if="hasAliasParenthesis(row)"
-                        class="badge badge-warning"
-                        title="Ngoặc cuối không được nhận diện là danh mục giấy tờ. Nếu bổ sung, một ngoặc mới sẽ được thêm sau ngoặc này."
-                      >
-                        Ngoặc không phải danh mục
-                      </span>
-                      <span
-                        v-if="row.isBrokenSummary"
-                        class="badge badge-danger"
-                        title="Ô trích yếu đang chứa chuỗi công thức lỗi #REF!. Phần này được giữ nguyên."
-                      >
-                        Ô lỗi #REF!
-                      </span>
-                      <span v-if="row.type" class="hint truncate" style="max-width: 240px">{{ row.type }}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <SummaryItemPicker
-                      :model-value="itemsFor(row)"
-                      :catalog="session.catalog"
-                      :placeholder="row.hasDocumentList ? 'Sửa danh mục...' : 'Chọn giấy tờ...'"
-                      @update:model-value="(items) => setRowItems(row, items)"
-                    />
+          <template v-else>
+            <div v-if="selected.size > 0" class="summary-bulkbar">
+              <div class="row wrap" style="gap: 8px; align-items: center">
+                <span class="badge badge-brand">{{ formatNumber(selected.size) }} dòng đã chọn</span>
+                <SummaryItemPicker
+                  v-model="bulkItems"
+                  :catalog="session.catalog"
+                  placeholder="Giấy tờ áp dụng hàng loạt..."
+                />
+                <button class="btn btn-primary btn-sm" type="button" :disabled="bulkApplying" @click="applyBulk">
+                  <Check :size="14" />
+                  Áp dụng cho dòng đã chọn
+                </button>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button" @click="clearSelection">
+                <X :size="14" />
+                Bỏ chọn
+              </button>
+            </div>
 
-                    <div v-if="itemsFor(row).length > 0" class="summary-chips" :title="itemsFor(row).join(', ')">
-                      <span v-for="item in itemsFor(row).slice(0, 3)" :key="item" class="chip">
-                        {{ item }}
-                      </span>
-                      <span v-if="itemsFor(row).length > 3" class="chip chip-more">
-                        +{{ itemsFor(row).length - 3 }}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+            <div class="table-wrap">
+              <table class="table table-hover summary-table">
+                <thead>
+                  <tr>
+                    <th style="width: 42px">
+                      <input
+                        type="checkbox"
+                        :checked="allPageSelected"
+                        aria-label="Chọn tất cả dòng trong trang"
+                        @change="toggleSelectPage"
+                      />
+                    </th>
+                    <th style="width: 116px">Hồ sơ</th>
+                    <th style="width: 74px">Năm</th>
+                    <th style="width: 108px">Số tờ ({{ session.sheetNumberColumn }})</th>
+                    <th>Trích yếu</th>
+                    <th style="width: 320px">Giấy tờ trong ngoặc</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="row in rows" :key="row.rowNumber">
+                    <tr :class="{ 'is-edited': edits.has(row.rowNumber) }">
+                      <td>
+                        <input
+                          type="checkbox"
+                          :checked="selected.has(row.rowNumber)"
+                          :aria-label="`Chọn dòng ${row.rowNumber}`"
+                          @change="toggleSelect(row.rowNumber)"
+                        />
+                      </td>
+                      <td>
+                        <div class="summary-number">{{ row.numberLabel || '—' }}</div>
+                        <div v-if="row.documentNumber" class="hint truncate" :title="row.documentNumber">
+                          HS {{ row.documentNumber }}
+                        </div>
+                        <div class="hint">Dòng {{ row.rowNumber }}</div>
+                      </td>
+                      <td>
+                        <span class="badge badge-neutral">{{ row.year ?? '—' }}</span>
+                      </td>
+                      <td>
+                        <input
+                          class="input summary-sheet-input"
+                          :class="{ 'is-missing': !sheetFor(row).trim() }"
+                          :value="sheetFor(row)"
+                          placeholder="VD: 01-20"
+                          :aria-label="`Số tờ dòng ${row.rowNumber}`"
+                          @change="onSheetChange(row, $event)"
+                        />
+                        <span v-if="!sheetFor(row).trim()" class="summary-missing-tag">Thiếu</span>
+                      </td>
+                      <td>
+                        <div class="summary-base" :title="summaryFor(row)">{{ summaryFor(row) }}</div>
+                        <div class="summary-meta">
+                          <span v-if="row.hasDocumentList" class="badge badge-info">
+                            Đã có {{ itemsFor(row).length }} mục
+                          </span>
+                          <span
+                            v-if="hasAliasParenthesis(row)"
+                            class="badge badge-warning"
+                            title="Ngoặc cuối không được nhận diện là danh mục giấy tờ. Nếu bổ sung, một ngoặc mới sẽ được thêm sau ngoặc này."
+                          >
+                            Ngoặc không phải danh mục
+                          </span>
+                          <span
+                            v-if="row.isBrokenSummary"
+                            class="badge badge-danger"
+                            title="Ô trích yếu đang chứa chuỗi công thức lỗi #REF!. Phần này được giữ nguyên."
+                          >
+                            Ô lỗi #REF!
+                          </span>
+                          <span v-if="row.type" class="hint truncate" style="max-width: 240px">{{ row.type }}</span>
+                          <button
+                            class="btn btn-ghost btn-sm summary-edit-summary"
+                            type="button"
+                            @click="openSummaryEditor(row)"
+                          >
+                            <FilePenLine :size="13" />
+                            Sửa toàn bộ
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <SummaryItemPicker
+                          :model-value="itemsFor(row)"
+                          :catalog="session.catalog"
+                          :placeholder="row.hasDocumentList ? 'Sửa danh mục...' : 'Chọn giấy tờ...'"
+                          @update:model-value="(items) => setRowItems(row, items)"
+                        />
+
+                        <div v-if="itemsFor(row).length > 0" class="summary-chips" :title="itemsFor(row).join(', ')">
+                          <span v-for="item in itemsFor(row).slice(0, 3)" :key="item" class="chip">
+                            {{ item }}
+                          </span>
+                          <span v-if="itemsFor(row).length > 3" class="chip chip-more">
+                            +{{ itemsFor(row).length - 3 }}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr v-if="editingSummaryRow === row.rowNumber" class="summary-editor-row">
+                      <td colspan="6">
+                        <div class="summary-editor">
+                          <div class="summary-editor-head">
+                            <strong>Sửa toàn bộ trích yếu · dòng {{ row.rowNumber }}</strong>
+                            <span class="hint">Hồ sơ {{ row.numberLabel || '—' }}</span>
+                          </div>
+                          <textarea
+                            v-model="summaryDraft"
+                            class="input summary-editor-text"
+                            rows="4"
+                            placeholder="Nhập toàn bộ câu trích yếu..."
+                          />
+                          <div class="row wrap" style="gap: 8px; justify-content: flex-end">
+                            <button class="btn btn-secondary btn-sm" type="button" @click="closeSummaryEditor">
+                              Huỷ
+                            </button>
+                            <button
+                              class="btn btn-primary btn-sm"
+                              type="button"
+                              :disabled="!summaryDraft.trim()"
+                              @click="saveSummaryEditor(row)"
+                            >
+                              <CircleCheck :size="14" />
+                              Lưu trích yếu
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
 
           <div class="summary-pager">
             <span class="hint">
               {{ formatNumber(rangeStart) }}–{{ formatNumber(rangeEnd) }} / {{ formatNumber(total) }} hồ sơ
             </span>
-            <div class="row" style="gap: 8px">
+            <div class="row wrap" style="gap: 8px; align-items: center">
+              <label class="summary-page-size">
+                <span class="hint">Mỗi trang</span>
+                <select v-model.number="pageSize" class="select select-sm">
+                  <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }}</option>
+                </select>
+              </label>
               <button
                 class="btn btn-secondary btn-sm"
                 type="button"
@@ -839,15 +1520,21 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+
+          <div class="summary-shortcuts hint">
+            Phím tắt: <kbd>Ctrl</kbd> + <kbd>S</kbd> xem trước · <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+            xuất bản lọc · <kbd>/</kbd> tìm kiếm · <kbd>←</kbd> <kbd>→</kbd> chuyển trang ·
+            <kbd>Esc</kbd> đóng.
+          </div>
         </div>
       </section>
 
       <div v-if="changedCount > 0" class="summary-actionbar">
         <div>
           <strong>{{ formatNumber(changedCount) }}</strong>
-          <span> hồ sơ đã thay đổi danh mục giấy tờ</span>
+          <span> dòng đã sửa, chưa xuất</span>
         </div>
-        <div class="row" style="gap: 8px">
+        <div class="row wrap" style="gap: 8px">
           <button class="btn btn-ghost btn-sm" type="button" @click="resetEdits">
             <Eraser :size="14" />
             Hoàn tác tất cả
@@ -875,14 +1562,14 @@ onBeforeUnmount(() => {
           <div class="modal-header">
             <div>
               <div class="card-title">
-                {{ previewMode === 'filtered' ? 'Xem trước bản xuất lọc' : 'Xem trước thay đổi trích yếu' }}
+                {{ previewMode === 'filtered' ? 'Xem trước bản xuất lọc' : 'Xem trước thay đổi trích yếu và số tờ' }}
               </div>
               <div class="card-subtitle">
                 <template v-if="previewMode === 'filtered'">
                   Chỉ giữ sheet ML và các hồ sơ trong phạm vi hiện tại; xoá mọi sheet và hồ sơ còn lại.
                 </template>
                 <template v-else>
-                  Chỉ phần trong ngoặc cuối thay đổi. Phần trích yếu phía trước giữ nguyên từng ký tự.
+                  Hiển thị trước/sau từng dòng. Hồ sơ đăng ký kết hôn được chuẩn hoá tiền tố tự động.
                 </template>
               </div>
             </div>
@@ -910,44 +1597,69 @@ onBeforeUnmount(() => {
                 <span class="badge badge-success">
                   {{ formatNumber(filteredPreview.changedRows) }} dòng cập nhật
                 </span>
+                <span v-if="filteredPreview.normalizedRows > 0" class="badge badge-info">
+                  {{ formatNumber(filteredPreview.normalizedRows) }} dòng chuẩn hoá
+                </span>
                 <span v-if="filteredPreview.ignoredChanges > 0" class="badge badge-warning">
                   {{ formatNumber(filteredPreview.ignoredChanges) }} thay đổi ngoài phạm vi bị bỏ qua
                 </span>
                 <span class="badge badge-neutral">Chỉ còn sheet ML</span>
               </div>
 
-              <div
-                v-if="previewMode === 'filtered' && previewItems.length === 0"
-                class="alert alert-info"
-              >
+              <div v-if="previewRows.length === 0" class="alert alert-info">
                 <Info :size="17" />
                 <div class="grow">
-                  Không có thay đổi nội dung trong phạm vi. Bản lọc chỉ giữ
-                  {{ formatNumber(filteredPreview?.totalRows ?? total) }} hồ sơ.
+                  Không có dòng nào cần ghi trong phạm vi hiện tại.
+                  <template v-if="previewMode === 'filtered' && filteredPreview">
+                    Bản lọc vẫn giữ {{ formatNumber(filteredPreview.totalRows) }} hồ sơ.
+                  </template>
                 </div>
               </div>
 
               <div v-else class="summary-preview-list">
-                <article v-for="row in previewItems" :key="row.rowNumber" class="summary-preview-item">
+                <article v-for="row in previewRows" :key="row.rowNumber" class="summary-preview-item">
                   <header class="row-between wrap">
-                    <div class="row" style="gap: 8px">
+                    <div class="row wrap" style="gap: 8px">
                       <span class="badge badge-brand">Dòng {{ row.rowNumber }}</span>
-                      <span class="hint">Hồ sơ {{ row.edit?.row.numberLabel }}</span>
-                      <span v-if="row.edit?.row.year" class="hint">Năm {{ row.edit.row.year }}</span>
+                      <span v-if="row.summaryChanged" class="badge badge-info">Trích yếu</span>
+                      <span v-if="row.sheetNumberChanged" class="badge badge-warning">Số tờ</span>
                     </div>
                     <span class="badge badge-success">Sẽ cập nhật</span>
                   </header>
 
-                  <div class="summary-preview-label">Trích yếu gốc</div>
-                  <p class="summary-preview-text muted">{{ row.edit?.row.summary }}</p>
-
-                  <div class="summary-preview-label">Sau khi bổ sung</div>
-                  <p class="summary-preview-text">{{ row.summary }}</p>
-
-                  <div v-if="row.edit" class="summary-chips">
-                    <span v-for="item in row.edit.items" :key="item" class="chip">{{ item }}</span>
+                  <div class="summary-diff">
+                    <div class="summary-diff-col">
+                      <div class="summary-preview-label">Trước</div>
+                      <p class="summary-preview-text muted">{{ row.originalSummary }}</p>
+                      <p v-if="row.sheetNumberChanged" class="summary-preview-text muted">
+                        Số tờ: {{ row.originalSheetNumber || '(trống)' }}
+                      </p>
+                    </div>
+                    <div class="summary-diff-col">
+                      <div class="summary-preview-label">Sau</div>
+                      <p class="summary-preview-text">{{ row.summary }}</p>
+                      <p v-if="row.sheetNumberChanged" class="summary-preview-text">
+                        Số tờ: {{ row.sheetNumber || '(xoá)' }}
+                      </p>
+                    </div>
                   </div>
                 </article>
+              </div>
+
+              <div v-if="previewMode === 'filtered' && filteredPreview?.truncated" class="alert alert-info" style="margin-top: 12px">
+                <Info :size="17" />
+                <div class="grow">
+                  Danh sách xem trước được rút gọn còn 500 dòng đầu. Tất cả
+                  {{ formatNumber(filteredPreview.changedRows) }} dòng vẫn được ghi khi xuất.
+                </div>
+              </div>
+
+              <div v-else-if="previewMode === 'full' && previewRows.length >= 500" class="alert alert-info" style="margin-top: 12px">
+                <Info :size="17" />
+                <div class="grow">
+                  Đang hiển thị 500 dòng đầu. Tất cả các dòng cần chuẩn hoá hoặc đã sửa vẫn
+                  được ghi đầy đủ khi xuất file.
+                </div>
               </div>
             </template>
           </div>
@@ -959,7 +1671,7 @@ onBeforeUnmount(() => {
                 {{ formatNumber(filteredPreview?.changedRows ?? 0) }} dòng · chỉ còn sheet ML.
               </template>
               <template v-else>
-                {{ formatNumber(exportChanges.length) }} dòng sẽ được ghi. Các phần khác của workbook giữ nguyên.
+                {{ formatNumber(previewRows.length) }} dòng sẽ được ghi. Các phần khác của workbook giữ nguyên.
               </template>
             </span>
             <button class="btn btn-secondary" type="button" @click="previewOpen = false">Quay lại</button>
@@ -977,7 +1689,7 @@ onBeforeUnmount(() => {
               v-else
               class="btn btn-accent"
               type="button"
-              :disabled="exporting || exportChanges.length === 0"
+              :disabled="exporting || previewRows.length === 0"
               @click="exportFile"
             >
               <Download :size="16" />

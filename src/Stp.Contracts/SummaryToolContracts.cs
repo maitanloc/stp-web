@@ -8,10 +8,17 @@ public sealed record SummaryInspectResponse(
     string SheetName,
     string SummaryColumn,
     string? SummaryHeader,
+    string SheetNumberColumn,
+    string? SheetNumberHeader,
+    string DocumentNumberColumn,
     int RowCount,
     int ExistingListCount,
     int BrokenSummaryCount,
     int FormulaSummaryCount,
+    int MissingSheetNumberCount,
+    int MissingDocumentNumberCount,
+    int MissingNumberCount,
+    int NormalizableCount,
     IReadOnlyList<string> Catalog,
     IReadOnlyList<SummaryYearResponse> Years,
     IReadOnlyList<SummaryTypeResponse> Types);
@@ -25,6 +32,8 @@ public sealed record SummaryRowResponse(
     int RowNumber,
     int? Year,
     string NumberLabel,
+    string DocumentNumber,
+    string SheetNumber,
     string Summary,
     string BaseSummary,
     IReadOnlyList<string> Items,
@@ -40,12 +49,28 @@ public sealed record SummaryRowsResponse(
     int Page,
     int PageSize);
 
-/// <summary>Danh mục giấy tờ mong muốn của một dòng.</summary>
-public sealed record SummaryChangeRequest(int RowNumber, IReadOnlyList<string> Items);
+/// <summary>
+/// Thay đổi mong muốn của một dòng. <see cref="Items"/> ghép lại danh mục giấy tờ;
+/// <see cref="SummaryText"/> sửa toàn bộ câu trích yếu (ưu tiên hơn Items);
+/// <see cref="SheetNumber"/> cập nhật cột số tờ (null = giữ nguyên, rỗng = xoá).
+/// </summary>
+public sealed record SummaryChangeRequest(
+    int RowNumber,
+    IReadOnlyList<string> Items,
+    string? SummaryText = null,
+    string? SheetNumber = null);
 
 public sealed record SummaryPreviewRequest(IReadOnlyList<SummaryChangeRequest> Changes);
 
-public sealed record SummaryPreviewRowResponse(int RowNumber, string Summary, bool Changed);
+public sealed record SummaryPreviewRowResponse(
+    int RowNumber,
+    string Summary,
+    bool Changed,
+    string OriginalSummary,
+    string? SheetNumber,
+    string? OriginalSheetNumber,
+    bool SummaryChanged,
+    bool SheetNumberChanged);
 
 public sealed record SummaryExportRequest(IReadOnlyList<SummaryChangeRequest> Changes);
 
@@ -58,7 +83,13 @@ public sealed record SummaryScopeRequest(
     string? NumberMode,
     int? NumberFrom,
     int? NumberTo,
-    int? Number);
+    int? Number,
+    int? YearFrom = null,
+    int? YearTo = null,
+    bool OnlyMissingSheetNumber = false,
+    bool OnlyMissingDocumentNumber = false,
+    bool OnlyMissingNumber = false,
+    bool MissingSheetNumberFirst = false);
 
 public sealed record SummaryFilteredExportRequest(
     IReadOnlyList<SummaryChangeRequest>? Changes,
@@ -68,4 +99,6 @@ public sealed record SummaryFilteredPreviewResponse(
     int TotalRows,
     int ChangedRows,
     int IgnoredChanges,
+    int NormalizedRows,
+    bool Truncated,
     IReadOnlyList<SummaryPreviewRowResponse> Items);

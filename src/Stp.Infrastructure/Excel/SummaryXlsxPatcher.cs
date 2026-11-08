@@ -6,8 +6,8 @@ using System.Xml.Linq;
 
 namespace Stp.Infrastructure.Excel;
 
-/// <summary>Một ô trích yếu cần thay bằng chuỗi mới.</summary>
-internal sealed record SummaryCellPatch(int RowNumber, string Text);
+/// <summary>Một ô cần thay bằng chuỗi mới (cột trích yếu hoặc cột số tờ).</summary>
+internal sealed record SummaryCellPatch(int RowNumber, string Column, string Text);
 
 /// <summary>
 /// Ghi lại workbook gốc bằng cách chỉ thay XML của đúng worksheet chứa trích yếu.
@@ -58,7 +58,6 @@ internal static class SummaryXlsxPatcher
         string sourcePath,
         string outputPath,
         string sheetName,
-        string columnLetter,
         IReadOnlyList<SummaryCellPatch> patches)
     {
         if (patches.Count == 0)
@@ -78,7 +77,7 @@ internal static class SummaryXlsxPatcher
         var worksheetXml = ReadEntryText(worksheetEntry);
 
         var updatedWorkbook = EnableFullCalculation(workbookXml);
-        var updatedWorksheet = PatchWorksheet(worksheetXml, columnLetter, patches);
+        var updatedWorksheet = PatchWorksheet(worksheetXml, patches);
 
         var workbookBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
             .GetBytes(updatedWorkbook);
@@ -133,7 +132,6 @@ internal static class SummaryXlsxPatcher
         string sourcePath,
         string outputPath,
         string sheetName,
-        string columnLetter,
         int headerRow,
         IReadOnlySet<int> allowedRows,
         IReadOnlyList<SummaryCellPatch> patches)
@@ -176,7 +174,6 @@ internal static class SummaryXlsxPatcher
             worksheetXml,
             headerRow,
             allowedRows,
-            columnLetter,
             patches);
 
         var removedRelationshipIds = new HashSet<string>(StringComparer.Ordinal);
@@ -370,20 +367,16 @@ internal static class SummaryXlsxPatcher
         string worksheetXml,
         int headerRow,
         IReadOnlySet<int> allowedRows,
-        string columnLetter,
         IReadOnlyList<SummaryCellPatch> patches)
     {
-        var column = columnLetter.Trim().ToUpperInvariant();
-        if (column.Length == 0 || column.Any(character => character is < 'A' or > 'Z'))
+        foreach (var patch in patches)
         {
-            throw new ArgumentException(
-                $"Cột trích yếu '{columnLetter}' không hợp lệ.",
-                nameof(columnLetter));
+            NormalizeColumn(patch.Column);
         }
 
         var updates = patches
             .GroupBy(patch => patch.RowNumber)
-            .ToDictionary(group => group.Key, group => group.Last().Text);
+            .ToDictionary(group => group.Key, group => group.ToList());
 
         var rowTags = FindRows(worksheetXml);
         if (rowTags.Count == 0)
@@ -405,9 +398,18 @@ internal static class SummaryXlsxPatcher
             if (row.RowNumber <= headerRow || allowedRows.Contains(row.RowNumber))
             {
                 var segment = worksheetXml[row.Start..rowEnd];
-                if (updates.TryGetValue(row.RowNumber, out var text))
+                if (updates.TryGetValue(row.RowNumber, out var rowPatches))
                 {
-                    segment = PatchRowSegment(segment, row.RowNumber, column, row.Prefix, text);
+                    foreach (var patch in rowPatches.OrderByDescending(
+                                 patch => ColumnIndex(patch.Column)))
+                    {
+                        segment = PatchRowSegment(
+                            segment,
+                            row.RowNumber,
+                            NormalizeColumn(patch.Column),
+                            row.Prefix,
+                            patch.Text);
+                    }
                 }
 
                 builder.Append(segment);
@@ -423,6 +425,19 @@ internal static class SummaryXlsxPatcher
 
         var filtered = UpdateDimension(builder.ToString(), headerRow, allowedRows);
         return (filtered, CollectSharedStringReferences(filtered));
+    }
+
+    private static string NormalizeColumn(string columnLetter)
+    {
+        var column = columnLetter.Trim().ToUpperInvariant();
+        if (column.Length == 0 || column.Any(character => character is < 'A' or > 'Z'))
+        {
+            throw new ArgumentException(
+                $"Cột '{columnLetter}' không hợp lệ.",
+                nameof(columnLetter));
+        }
+
+        return column;
     }
 
     private static int FindRowEnd(string worksheetXml, RowTag row)
@@ -1338,130 +1353,76 @@ internal static class SummaryXlsxPatcher
 
     private static string PatchWorksheet(
         string worksheetXml,
-        string columnLetter,
         IReadOnlyList<SummaryCellPatch> patches)
     {
-        var column = columnLetter.Trim().ToUpperInvariant();
-        if (column.Length == 0 || column.Any(character => character is < 'A' or > 'Z'))
+        if (patches.Count == 0)
         {
-            throw new ArgumentException($"Cột trích yếu '{columnLetter}' không hợp lệ.", nameof(columnLetter));
+            return worksheetXml;
         }
 
-        var updates = patches
+        foreach (var patch in patches)
+        {
+            NormalizeColumn(patch.Column);
+        }
+
+        var byRow = patches
             .GroupBy(patch => patch.RowNumber)
-            .ToDictionary(group => group.Key, group => group.Last().Text);
+            .OrderByDescending(group => group.Key)
+            .ToList();
 
         var rowTags = FindRows(worksheetXml);
         var prefix = rowTags.Count > 0
             ? rowTags[0].Prefix
             : DetectElementPrefix(worksheetXml);
+        var rowMap = rowTags.ToDictionary(tag => tag.RowNumber);
 
-        // Sửa từ dòng cuối lên để các vị trí phía trước không bị lệch.
-        foreach (var rowNumber in updates.Keys.OrderByDescending(value => value))
+        // Sửa từ dòng cuối lên để vị trí các dòng phía trước không bị lệch.
+        foreach (var group in byRow)
         {
-            var text = updates[rowNumber];
-            var row = rowTags.FirstOrDefault(tag => tag.RowNumber == rowNumber);
+            var rowNumber = group.Key;
 
-            if (row is not null)
+            if (rowMap.TryGetValue(rowNumber, out var row))
             {
-                worksheetXml = PatchCellInRow(worksheetXml, rowTags, row, column, prefix, text);
+                var rowEnd = FindRowEnd(worksheetXml, row);
+                var segment = worksheetXml[row.Start..rowEnd];
+
+                foreach (var patch in group.OrderByDescending(
+                             patch => ColumnIndex(patch.Column)))
+                {
+                    segment = PatchRowSegment(
+                        segment,
+                        rowNumber,
+                        NormalizeColumn(patch.Column),
+                        row.Prefix,
+                        patch.Text);
+                }
+
+                worksheetXml = string.Concat(
+                    worksheetXml[..row.Start],
+                    segment,
+                    worksheetXml[rowEnd..]);
                 continue;
             }
 
+            var cells = string.Concat(group
+                .OrderBy(patch => ColumnIndex(patch.Column))
+                .Select(patch => BuildCell(
+                    rowNumber,
+                    NormalizeColumn(patch.Column),
+                    null,
+                    prefix,
+                    patch.Text)));
             worksheetXml = InsertRow(
                 worksheetXml,
-                rowTags,
+                FindRows(worksheetXml),
                 rowNumber,
-                BuildCell(rowNumber, column, null, prefix, text),
+                cells,
                 prefix);
             rowTags = FindRows(worksheetXml);
+            rowMap = rowTags.ToDictionary(tag => tag.RowNumber);
         }
 
         return worksheetXml;
-    }
-
-    private static string PatchCellInRow(
-        string worksheetXml,
-        IReadOnlyList<RowTag> rowTags,
-        RowTag row,
-        string column,
-        string prefix,
-        string text)
-    {
-        if (row.SelfClosing)
-        {
-            var openTag = row.Tag[..^2] + ">";
-            var cell = BuildCell(row.RowNumber, column, null, prefix, text);
-            return string.Concat(
-                worksheetXml[..row.Start],
-                openTag,
-                cell,
-                $"</{prefix}row>",
-                worksheetXml[row.ContentStart..]);
-        }
-
-        var rowEnd = rowTags
-            .Where(tag => tag.Start > row.Start)
-            .Select(tag => tag.Start)
-            .DefaultIfEmpty(worksheetXml.Length)
-            .First();
-        rowEnd = Math.Min(rowEnd, worksheetXml.Length);
-
-        var segment = worksheetXml[row.ContentStart..rowEnd];
-        var cellPattern =
-            $@"<{Regex.Escape(prefix)}c\b[^>]*?\br=""{Regex.Escape(column)}{row.RowNumber}""(?=[\s/>])[^>]*?(?:/>|>.*?</{Regex.Escape(prefix)}c>)";
-        var cellMatch = Regex.Match(segment, cellPattern, RegexOptions.Singleline);
-
-        if (cellMatch.Success)
-        {
-            var openingTagEnd = cellMatch.Value.IndexOf('>');
-            var openingTag = openingTagEnd >= 0
-                ? cellMatch.Value[..(openingTagEnd + 1)]
-                : cellMatch.Value;
-            var style = Regex.Match(openingTag, @"\bs=""([^""]*)""");
-            var styleAttribute = style.Success ? $" s=\"{style.Groups[1].Value}\"" : string.Empty;
-            var newCell = BuildCell(row.RowNumber, column, styleAttribute, prefix, text);
-
-            var absoluteStart = row.ContentStart + cellMatch.Index;
-            return string.Concat(
-                worksheetXml[..absoluteStart],
-                newCell,
-                worksheetXml[(absoluteStart + cellMatch.Length)..]);
-        }
-
-        // Ô chưa tồn tại: chèn đúng thứ tự cột trong dòng.
-        var rowClose = segment.LastIndexOf($"</{prefix}row>", StringComparison.Ordinal);
-        if (rowClose < 0)
-        {
-            throw new InvalidDataException(
-                $"Không đọc được dòng {row.RowNumber} trong worksheet.");
-        }
-
-        var insertAt = rowClose;
-        var targetIndex = ColumnIndex(column);
-        foreach (Match candidate in Regex.Matches(
-                     segment,
-                     $@"<{Regex.Escape(prefix)}c\b[^>]*?\br=""(?<col>[A-Z]+)(?<row>\d+)""",
-                     RegexOptions.Singleline))
-        {
-            if (!int.TryParse(candidate.Groups["row"].Value, out var candidateRow)
-                || candidateRow != row.RowNumber)
-            {
-                continue;
-            }
-
-            if (ColumnIndex(candidate.Groups["col"].Value) > targetIndex)
-            {
-                insertAt = candidate.Index;
-                break;
-            }
-        }
-
-        var insertedCell = BuildCell(row.RowNumber, column, null, prefix, text);
-        return string.Concat(
-            worksheetXml[..(row.ContentStart + insertAt)],
-            insertedCell,
-            worksheetXml[(row.ContentStart + insertAt)..]);
     }
 
     private static string InsertRow(
