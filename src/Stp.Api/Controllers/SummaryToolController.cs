@@ -80,6 +80,7 @@ public sealed class SummaryToolController : ControllerBase
         [FromQuery] bool onlyMissingDocumentNumber = false,
         [FromQuery] bool onlyMissingNumber = false,
         [FromQuery] bool missingSheetNumberFirst = false,
+        [FromQuery] bool onlyNeedsNormalization = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
@@ -98,7 +99,8 @@ public sealed class SummaryToolController : ControllerBase
                     onlyMissingSheetNumber,
                     onlyMissingDocumentNumber,
                     onlyMissingNumber,
-                    missingSheetNumberFirst),
+                    missingSheetNumberFirst,
+                    onlyNeedsNormalization),
                 out var scope,
                 out var scopeError))
         {
@@ -432,7 +434,8 @@ public sealed class SummaryToolController : ControllerBase
             request.OnlyMissingSheetNumber,
             request.OnlyMissingDocumentNumber,
             request.OnlyMissingNumber,
-            request.MissingSheetNumberFirst);
+            request.MissingSheetNumberFirst,
+            request.OnlyNeedsNormalization);
 
         return true;
     }
@@ -505,5 +508,8 @@ public sealed class SummaryToolController : ControllerBase
             row.HasFormula,
             row.IsBrokenSummary,
             row.Group,
-            row.Type);
+            row.Type,
+            row.NeedsNormalization,
+            row.NormalizedSummary,
+            row.NormalizedBaseSummary);
 }

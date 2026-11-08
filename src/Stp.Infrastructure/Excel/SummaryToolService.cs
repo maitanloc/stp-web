@@ -500,6 +500,13 @@ public sealed class SummaryToolService : ISummaryToolService
         {
             var (baseSummary, items, hasDocumentList) = ParseSummary(raw.Text, catalog);
             var isBroken = LooksLikeBrokenSummary(raw.Text);
+            var needsNormalization = MarriageSummaryNormalizer.NeedsNormalization(raw.Text);
+            var normalizedSummary = needsNormalization
+                ? MarriageSummaryNormalizer.NormalizeIfNeeded(raw.Text)
+                : raw.Text;
+            var normalizedBaseSummary = needsNormalization
+                ? NormalizeBaseSummary(normalizedSummary, hasDocumentList)
+                : baseSummary;
 
             return new SummaryRow
             {
@@ -515,6 +522,9 @@ public sealed class SummaryToolService : ISummaryToolService
                 HasDocumentList = hasDocumentList,
                 HasFormula = raw.HasFormula,
                 IsBrokenSummary = isBroken,
+                NeedsNormalization = needsNormalization,
+                NormalizedSummary = normalizedSummary,
+                NormalizedBaseSummary = normalizedBaseSummary,
                 Group = raw.Group,
                 Type = raw.Type
             };
@@ -561,8 +571,7 @@ public sealed class SummaryToolService : ISummaryToolService
             MissingSheetNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.SheetNumber)),
             MissingDocumentNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.DocumentNumber)),
             MissingNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.NumberLabel)),
-            NormalizableCount = rows.Count(row =>
-                MarriageSummaryNormalizer.NeedsNormalization(row.OriginalSummary))
+            NormalizableCount = rows.Count(row => row.NeedsNormalization)
         };
     }
 
@@ -973,6 +982,24 @@ public sealed class SummaryToolService : ISummaryToolService
         return (trimmed[..group.Value.OpenIndex].TrimEnd(), items, true);
     }
 
+    /// <summary>
+    /// Bỏ danh mục giấy tờ ở cuối câu đã chuẩn hoá để lấy phần tiền tố. Cách này
+    /// giữ đúng các trường hợp câu gốc kết thúc bằng "của" ngay trước danh mục.
+    /// </summary>
+    private static string NormalizeBaseSummary(string normalizedSummary, bool hasDocumentList)
+    {
+        if (!hasDocumentList)
+        {
+            return normalizedSummary;
+        }
+
+        var trimmed = normalizedSummary.TrimEnd();
+        var group = SplitTrailingGroup(trimmed);
+        return group is null
+            ? normalizedSummary
+            : trimmed[..group.Value.OpenIndex].TrimEnd();
+    }
+
     private static (int OpenIndex, string Inside)? SplitTrailingGroup(string text)
     {
         if (!text.EndsWith(')'))
@@ -1255,6 +1282,11 @@ public sealed class SummaryToolService : ISummaryToolService
             query = query.Where(row => string.IsNullOrWhiteSpace(row.NumberLabel));
         }
 
+        if (scope.OnlyNeedsNormalization)
+        {
+            query = query.Where(row => row.NeedsNormalization);
+        }
+
         if (!string.IsNullOrWhiteSpace(scope.Type))
         {
             query = query.Where(row =>
@@ -1274,6 +1306,7 @@ public sealed class SummaryToolService : ISummaryToolService
                 || row.DocumentNumber.Contains(term, StringComparison.CurrentCultureIgnoreCase)
                 || row.SheetNumber.Contains(term, StringComparison.CurrentCultureIgnoreCase)
                 || row.OriginalSummary.Contains(term, StringComparison.CurrentCultureIgnoreCase)
+                || row.NormalizedSummary.Contains(term, StringComparison.CurrentCultureIgnoreCase)
                 || row.Items.Any(item =>
                     item.Contains(term, StringComparison.CurrentCultureIgnoreCase))
                 || (row.Type?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)

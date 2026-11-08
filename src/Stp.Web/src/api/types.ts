@@ -377,6 +377,9 @@ export interface SummaryRowResponse {
   isBrokenSummary: boolean
   group: string | null
   type: string | null
+  needsNormalization: boolean
+  normalizedSummary: string
+  normalizedBaseSummary: string
 }
 
 export interface SummaryRowsResponse {
@@ -421,6 +424,7 @@ export interface SummaryScopeRequest {
   onlyMissingDocumentNumber: boolean
   onlyMissingNumber: boolean
   missingSheetNumberFirst: boolean
+  onlyNeedsNormalization: boolean
 }
 
 export interface SummaryFilteredExportRequest {

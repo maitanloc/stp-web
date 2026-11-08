@@ -86,6 +86,7 @@ const singleNumber = ref<number | ''>('')
 const onlyMissingSheetNumber = ref(false)
 const onlyMissingDocumentNumber = ref(false)
 const onlyMissingNumber = ref(false)
+const onlyNeedsNormalization = ref(false)
 const missingSheetNumberFirst = ref(false)
 
 const edits = ref(new Map<number, RowEdit>())
@@ -142,6 +143,7 @@ const scopeRequest = computed<SummaryScopeRequest>(() => ({
   onlyMissingSheetNumber: onlyMissingSheetNumber.value,
   onlyMissingDocumentNumber: onlyMissingDocumentNumber.value,
   onlyMissingNumber: onlyMissingNumber.value,
+  onlyNeedsNormalization: onlyNeedsNormalization.value,
   missingSheetNumberFirst: missingSheetNumberFirst.value,
 }))
 
@@ -194,6 +196,10 @@ const scopeLabel = computed(() => {
     parts.push('thiếu số hồ sơ')
   }
 
+  if (onlyNeedsNormalization.value) {
+    parts.push('cần chuẩn hoá tiền tố')
+  }
+
   return parts.length > 0 ? parts.join(' · ') : 'toàn bộ workbook'
 })
 
@@ -217,6 +223,11 @@ const rangeEnd = computed(() => Math.min(total.value, page.value * pageSize.valu
 
 const allPageSelected = computed(
   () => rows.value.length > 0 && rows.value.every((row) => selected.value.has(row.rowNumber)),
+)
+
+const selectedNormalizableCount = computed(
+  () =>
+    rows.value.filter((row) => selected.value.has(row.rowNumber) && row.needsNormalization).length,
 )
 
 const hasAliasParenthesis = (row: SummaryRowResponse): boolean =>
@@ -261,14 +272,20 @@ function orderItems(items: string[]): string[] {
     .map((item) => item.value)
 }
 
+/** Phần tiền tố hiển thị: dùng bản đã chuẩn hoá nếu backend phát hiện cần sửa. */
+function baseSummaryFor(row: SummaryRowResponse): string {
+  return row.needsNormalization ? row.normalizedBaseSummary : row.baseSummary
+}
+
 /** Ghép câu trích yếu giống hệt SummaryToolService.BuildSummary. */
 function composeSummary(row: SummaryRowResponse, items: string[]): string {
   const ordered = orderItems(items)
   if (ordered.length === 0) {
-    return row.hasDocumentList ? row.baseSummary : row.summary
+    if (row.hasDocumentList) return baseSummaryFor(row)
+    return row.needsNormalization ? row.normalizedSummary : row.summary
   }
 
-  const baseText = row.baseSummary.trimEnd()
+  const baseText = baseSummaryFor(row).trimEnd()
   const list = ordered.join(', ')
 
   if (baseText.length === 0) {
@@ -316,7 +333,10 @@ function commit(row: SummaryRowResponse, patch: Partial<Omit<RowEdit, 'row'>>): 
   const nextEdit: RowEdit = { ...current, ...patch }
   const summary = nextEdit.summaryText ?? composeSummary(row, nextEdit.items)
   const sheet = nextEdit.sheetNumber ?? row.sheetNumber
-  const changed = summary !== row.summary || sheet !== row.sheetNumber
+  // Dòng đăng ký kết hôn được backend chuẩn hoá tự động khi xuất, nên so sánh
+  // với bản đã chuẩn hoá để không tạo thay đổi thừa.
+  const baseline = row.needsNormalization ? row.normalizedSummary : row.summary
+  const changed = summary !== baseline || sheet !== row.sheetNumber
 
   const next = new Map(edits.value)
   if (changed) {
@@ -426,6 +446,43 @@ function applyBulk(): void {
   )
 }
 
+/** Đưa các dòng đang chọn về đúng tiền tố chuẩn, giữ nguyên danh mục giấy tờ. */
+function normalizeSelected(): void {
+  if (selectedNormalizableCount.value === 0) {
+    toast.info('Không có dòng cần chuẩn hoá', 'Các dòng đang chọn đã dùng đúng tiền tố.')
+    return
+  }
+
+  const next = new Map(edits.value)
+  let applied = 0
+
+  for (const row of rows.value) {
+    if (!selected.value.has(row.rowNumber) || !row.needsNormalization) continue
+
+    const current = next.get(row.rowNumber) ?? {
+      row,
+      items: row.items,
+      summaryText: null,
+      sheetNumber: null,
+    }
+
+    // Không ghi đè câu người dùng đã sửa tay; bản xuất vẫn tự chuẩn hoá tiền tố.
+    if (current.summaryText !== null) continue
+
+    next.set(row.rowNumber, {
+      ...current,
+      summaryText: composeSummary(row, current.items),
+    })
+    applied++
+  }
+
+  edits.value = next
+  toast.success(
+    'Đã chuẩn hoá tiền tố',
+    `${formatNumber(applied)} dòng đang chọn đã được đưa về câu chuẩn.`,
+  )
+}
+
 async function inspect(): Promise<void> {
   const file = files.value[0]
   if (!file) {
@@ -470,6 +527,7 @@ async function inspect(): Promise<void> {
     onlyMissingSheetNumber.value = false
     onlyMissingDocumentNumber.value = false
     onlyMissingNumber.value = false
+    onlyNeedsNormalization.value = false
     missingSheetNumberFirst.value = false
     page.value = 1
     pageSize.value = 20
@@ -512,6 +570,7 @@ function queryParams(): Record<string, string | number | boolean | null | undefi
     onlyMissingSheetNumber: onlyMissingSheetNumber.value || undefined,
     onlyMissingDocumentNumber: onlyMissingDocumentNumber.value || undefined,
     onlyMissingNumber: onlyMissingNumber.value || undefined,
+    onlyNeedsNormalization: onlyNeedsNormalization.value || undefined,
     missingSheetNumberFirst: missingSheetNumberFirst.value || undefined,
   }
 }
@@ -945,7 +1004,7 @@ watch(edits, () => {
   autosaveTimer = window.setTimeout(saveDraft, 700)
 })
 
-watch([year, yearFrom, yearTo, type, onlyExisting, onlyMissingSheetNumber, onlyMissingDocumentNumber, onlyMissingNumber, missingSheetNumberFirst], () => {
+watch([year, yearFrom, yearTo, type, onlyExisting, onlyMissingSheetNumber, onlyMissingDocumentNumber, onlyMissingNumber, onlyNeedsNormalization, missingSheetNumberFirst], () => {
   if (!session.value) return
   if (filterTimer) window.clearTimeout(filterTimer)
   filterTimer = window.setTimeout(() => {
@@ -1130,7 +1189,7 @@ onBeforeUnmount(() => {
           <div class="card-body">
             <span class="summary-stat-label">Cần chuẩn hoá</span>
             <strong class="summary-stat-value">{{ formatNumber(session.normalizableCount) }}</strong>
-            <span class="hint">Tiền tố đăng ký kết hôn</span>
+            <span class="hint">Tự động sửa tiền tố khi xuất</span>
           </div>
         </div>
         <div class="card summary-stat">
@@ -1269,6 +1328,14 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="checkbox">
+              <input v-model="onlyNeedsNormalization" type="checkbox" />
+              <span class="checkbox-text">
+                <span class="checkbox-title">Chỉ dòng cần chuẩn hoá</span>
+                <span class="checkbox-desc">{{ formatNumber(session.normalizableCount) }} dòng tiền tố cũ</span>
+              </span>
+            </label>
+
+            <label class="checkbox">
               <input v-model="missingSheetNumberFirst" type="checkbox" />
               <span class="checkbox-text">
                 <span class="checkbox-title">Ưu tiên dòng thiếu số tờ</span>
@@ -1344,6 +1411,15 @@ onBeforeUnmount(() => {
                 <button class="btn btn-primary btn-sm" type="button" :disabled="bulkApplying" @click="applyBulk">
                   <Check :size="14" />
                   Áp dụng cho dòng đã chọn
+                </button>
+                <button
+                  v-if="selectedNormalizableCount > 0"
+                  class="btn btn-secondary btn-sm"
+                  type="button"
+                  @click="normalizeSelected"
+                >
+                  <CircleCheck :size="14" />
+                  Chuẩn hoá tiền tố ({{ formatNumber(selectedNormalizableCount) }})
                 </button>
               </div>
               <button class="btn btn-ghost btn-sm" type="button" @click="clearSelection">
@@ -1424,6 +1500,14 @@ onBeforeUnmount(() => {
                             Ô lỗi #REF!
                           </span>
                           <span v-if="row.type" class="hint truncate" style="max-width: 240px">{{ row.type }}</span>
+                          <span
+                            v-if="row.needsNormalization"
+                            class="badge badge-success"
+                            :title="`Tự động đổi tiền tố khi xuất. Trước: ${row.summary}`"
+                          >
+                            <CircleCheck :size="12" />
+                            Tự chuẩn hoá
+                          </span>
                           <button
                             class="btn btn-ghost btn-sm summary-edit-summary"
                             type="button"
@@ -1458,6 +1542,14 @@ onBeforeUnmount(() => {
                           <div class="summary-editor-head">
                             <strong>Sửa toàn bộ trích yếu · dòng {{ row.rowNumber }}</strong>
                             <span class="hint">Hồ sơ {{ row.numberLabel || '—' }}</span>
+                          </div>
+                          <div v-if="row.needsNormalization" class="alert alert-info" style="margin: 0">
+                            <Info :size="15" />
+                            <div class="grow">
+                              Dòng này sẽ tự động đổi sang tiền tố
+                              “Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với
+                              người nước ngoài của…” khi xuất file.
+                            </div>
                           </div>
                           <textarea
                             v-model="summaryDraft"

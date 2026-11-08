@@ -32,6 +32,17 @@ public sealed class SummaryNormalizationTests
             Assert.Equal(1, session.MissingDocumentNumberCount);
             Assert.Equal(1, session.MissingNumberCount);
             Assert.Equal(4, session.NormalizableCount);
+
+            var row2 = session.Rows.Single(row => row.RowNumber == 2);
+            Assert.True(row2.NeedsNormalization);
+            Assert.Equal(
+                StandardPrefix + " của Bà NGUYỄN THỊ A và Ông JOHN SMITH",
+                row2.NormalizedSummary);
+            Assert.Equal(row2.NormalizedSummary, row2.NormalizedBaseSummary);
+
+            var row9 = session.Rows.Single(row => row.RowNumber == 9);
+            Assert.False(row9.NeedsNormalization);
+            Assert.Equal(row9.OriginalSummary, row9.NormalizedSummary);
         }
         finally
         {
@@ -230,6 +241,41 @@ public sealed class SummaryNormalizationTests
                 20);
             Assert.Equal(1, search.Total);
             Assert.Equal(2, search.Items[0].RowNumber);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetRows_FiltersRowsNeedingNormalizationAndSearchesNormalizedText()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var source = CreateWorkbook(directory);
+            var service = CreateService(directory);
+            var session = await OpenSessionAsync(service, source);
+
+            var normalizable = service.GetRows(
+                session.SessionId,
+                new SummaryScope(OnlyNeedsNormalization: true),
+                1,
+                20);
+            Assert.Equal(4, normalizable.Total);
+            Assert.All(normalizable.Items, row => Assert.True(row.NeedsNormalization));
+            Assert.Equal(new[] { 2, 3, 4, 5 }, normalizable.Items.Select(row => row.RowNumber));
+
+            // Tìm bằng tiền tố chuẩn phải thấy cả các dòng còn dùng tiền tố cũ.
+            var search = service.GetRows(
+                session.SessionId,
+                new SummaryScope(Search: "Quyết định về việc cho phép"),
+                1,
+                20);
+            Assert.Equal(5, search.Total);
+            Assert.Contains(search.Items, row => row.RowNumber == 2);
+            Assert.Contains(search.Items, row => row.RowNumber == 9);
         }
         finally
         {

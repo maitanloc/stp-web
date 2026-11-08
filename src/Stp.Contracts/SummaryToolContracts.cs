@@ -41,7 +41,10 @@ public sealed record SummaryRowResponse(
     bool HasFormula,
     bool IsBrokenSummary,
     string? Group,
-    string? Type);
+    string? Type,
+    bool NeedsNormalization = false,
+    string NormalizedSummary = "",
+    string NormalizedBaseSummary = "");
 
 public sealed record SummaryRowsResponse(
     IReadOnlyList<SummaryRowResponse> Items,
@@ -89,7 +92,8 @@ public sealed record SummaryScopeRequest(
     bool OnlyMissingSheetNumber = false,
     bool OnlyMissingDocumentNumber = false,
     bool OnlyMissingNumber = false,
-    bool MissingSheetNumberFirst = false);
+    bool MissingSheetNumberFirst = false,
+    bool OnlyNeedsNormalization = false);
 
 public sealed record SummaryFilteredExportRequest(
     IReadOnlyList<SummaryChangeRequest>? Changes,

@@ -96,6 +96,15 @@ public sealed class SummaryRow
     /// <summary>True khi ô chứa công thức lỗi hoặc chuỗi bắt đầu bằng ="..." và #REF!.</summary>
     public bool IsBrokenSummary { get; init; }
 
+    /// <summary>True khi tiền tố đăng ký kết hôn chưa đúng chuẩn và sẽ được sửa khi xuất.</summary>
+    public bool NeedsNormalization { get; init; }
+
+    /// <summary>Câu trích yếu sau khi chuẩn hoá tiền tố, dùng để hiển thị trước khi xuất.</summary>
+    public string NormalizedSummary { get; init; } = string.Empty;
+
+    /// <summary>Phần trước danh mục giấy tờ sau khi chuẩn hoá tiền tố.</summary>
+    public string NormalizedBaseSummary { get; init; } = string.Empty;
+
     public string? Group { get; init; }
 
     public string? Type { get; init; }
@@ -130,7 +139,8 @@ public sealed record SummaryScope(
     bool OnlyMissingSheetNumber = false,
     bool OnlyMissingDocumentNumber = false,
     bool OnlyMissingNumber = false,
-    bool MissingSheetNumberFirst = false)
+    bool MissingSheetNumberFirst = false,
+    bool OnlyNeedsNormalization = false)
 {
     public static SummaryScope All { get; } = new();
 }
