@@ -408,6 +408,25 @@ export interface SummaryYearReportResponse {
   needsNormalization: number
 }
 
+export interface SummarySessionInfoResponse {
+  sessionId: string
+  fileName: string
+  fileSizeBytes: number
+  createdAt: string
+  rowCount: number
+}
+
+export interface SyncResponse {
+  success: boolean
+  syncSessionId: string
+  workbookId: string | null
+  addedCount: number
+  updatedCount: number
+  deletedCount: number
+  conflictCount: number
+  errorMessage: string | null
+}
+
 export interface SummaryPreviewRowResponse {
   rowNumber: number
   summary: string

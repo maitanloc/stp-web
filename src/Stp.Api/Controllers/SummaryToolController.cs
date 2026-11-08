@@ -62,6 +62,32 @@ public sealed class SummaryToolController : ControllerBase
         }
     }
 
+    /// <summary>Thông tin phiên để khôi phục sau F5 / mất kết nối.</summary>
+    [HttpGet("{sessionId:guid}")]
+    public ActionResult<SummaryInspectResponse> GetSession(Guid sessionId)
+    {
+        var session = _summary.GetSession(sessionId);
+        return session is null
+            ? NotFoundProblem("Phiên làm việc không tồn tại hoặc đã hết hạn.")
+            : Ok(ToResponse(session));
+    }
+
+    /// <summary>Danh sách phiên đang dở để mở lại không cần import.</summary>
+    [HttpGet("sessions")]
+    public ActionResult<IReadOnlyList<SummarySessionInfoResponse>> ListSessions()
+    {
+        var sessions = _summary.ListSessions()
+            .Select(item => new SummarySessionInfoResponse(
+                item.SessionId,
+                item.FileName,
+                item.FileSizeBytes,
+                item.CreatedAt,
+                item.RowCount))
+            .ToList();
+
+        return Ok(sessions);
+    }
+
     /// <summary>Danh sách dòng hồ sơ, lọc theo năm/loại/nội dung.</summary>
     [HttpGet("{sessionId:guid}/rows")]
     public ActionResult<SummaryRowsResponse> GetRows(

@@ -259,7 +259,18 @@ public interface ISummaryToolService
 
     /// <summary>Báo cáo dữ liệu thiếu theo từng năm trong phiên hiện tại.</summary>
     IReadOnlyList<SummaryYearReport> GetReport(Guid sessionId);
+
+    /// <summary>Danh sách phiên đang dở (kể cả sau restart server) để mở lại không cần import.</summary>
+    IReadOnlyList<SummarySessionInfo> ListSessions();
 }
+
+/// <summary>Thông tin phiên làm việc đã lưu để khôi phục.</summary>
+public sealed record SummarySessionInfo(
+    Guid SessionId,
+    string FileName,
+    long FileSizeBytes,
+    DateTimeOffset CreatedAt,
+    int RowCount);
 
 /// <summary>Thống kê dữ liệu thiếu của một năm.</summary>
 public sealed record SummaryYearReport(

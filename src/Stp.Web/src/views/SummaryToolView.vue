@@ -26,6 +26,8 @@ import type {
   SummaryRowResponse,
   SummaryRowsResponse,
   SummaryScopeRequest,
+  SummarySessionInfoResponse,
+  SyncResponse,
 } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { formatBytes, formatNumber } from '../lib/format'
@@ -148,6 +150,159 @@ const pendingExportMode = ref<'full' | 'filtered'>('full')
 // D3: báo cáo thiếu theo năm
 const yearReport = ref<Array<{ year: number; total: number; missingSheetNumber: number; missingDocumentNumber: number; missingNumber: number; needsNormalization: number }>>([])
 const reportLoading = ref(false)
+
+// Khôi phục phiên sau F5 / mất kết nối + lưu vào Kho + lịch sử quá trình
+const ACTIVE_SESSION_KEY = 'stp.summary.activeSession'
+const HISTORY_PREFIX = 'stp.summary.history.'
+const resumeCandidates = ref<SummarySessionInfoResponse[]>([])
+const resuming = ref(false)
+const archiving = ref(false)
+const saveToArchiveOpen = ref(false)
+const lastExportedBlob = ref<Blob | null>(null)
+const lastExportedName = ref('')
+
+interface HistoryEntry {
+  at: string
+  action: string
+  detail: string
+}
+
+const historyEntries = ref<HistoryEntry[]>([])
+
+function rememberSession(sessionId: string, fileName: string): void {
+  try {
+    localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify({ sessionId, fileName }))
+  } catch {
+    // Bỏ qua.
+  }
+}
+
+function forgetSession(): void {
+  try {
+    localStorage.removeItem(ACTIVE_SESSION_KEY)
+  } catch {
+    // Bỏ qua.
+  }
+}
+
+function historyKey(fileName: string): string {
+  return `${HISTORY_PREFIX}${fileName}`
+}
+
+function loadHistory(fileName: string): void {
+  try {
+    const raw = localStorage.getItem(historyKey(fileName))
+    historyEntries.value = raw ? (JSON.parse(raw) as HistoryEntry[]) : []
+  } catch {
+    historyEntries.value = []
+  }
+}
+
+function pushHistoryEntry(action: string, detail: string): void {
+  const active = session.value
+  if (!active) return
+
+  const entry: HistoryEntry = { at: new Date().toISOString(), action, detail }
+  historyEntries.value = [entry, ...historyEntries.value].slice(0, 50)
+  try {
+    localStorage.setItem(historyKey(active.fileName), JSON.stringify(historyEntries.value))
+  } catch {
+    // Bỏ qua.
+  }
+}
+
+function loadResumeCandidates(): void {
+  request<SummarySessionInfoResponse[]>('/api/summary/sessions')
+    .then((list) => {
+      resumeCandidates.value = list
+    })
+    .catch(() => {
+      resumeCandidates.value = []
+    })
+}
+
+async function restoreFromServer(sessionId: string): Promise<boolean> {
+  try {
+    const data = await request<SummaryInspectResponse>(`/api/summary/${sessionId}`)
+    session.value = data
+    rememberSession(data.sessionId, data.fileName)
+    resetHistory()
+    loadHistory(data.fileName)
+    page.value = 1
+    await fetchRows()
+    await fetchYearReport()
+    restoreDraft(data.fileName)
+    resetHistory()
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function resumeLastSession(): Promise<void> {
+  let saved: { sessionId: string; fileName: string } | null = null
+  try {
+    const raw = localStorage.getItem(ACTIVE_SESSION_KEY)
+    if (raw) saved = JSON.parse(raw) as { sessionId: string; fileName: string }
+  } catch {
+    saved = null
+  }
+
+  if (!saved) return
+
+  resuming.value = true
+  try {
+    const ok = await restoreFromServer(saved.sessionId)
+    if (ok) {
+      toast.success('Đã khôi phục phiên đang dở', `File ${saved.fileName} được mở lại — không cần import.`)
+    } else {
+      forgetSession()
+      loadResumeCandidates()
+    }
+  } finally {
+    resuming.value = false
+  }
+}
+
+async function openResumeCandidate(candidate: SummarySessionInfoResponse): Promise<void> {
+  resuming.value = true
+  try {
+    const ok = await restoreFromServer(candidate.sessionId)
+    if (ok) {
+      toast.success('Đã mở lại phiên', candidate.fileName)
+    } else {
+      toast.error('Không mở lại được phiên', 'Phiên đã hết hạn hoặc file đã bị xoá.')
+    }
+  } finally {
+    resuming.value = false
+  }
+}
+
+async function archiveLastExport(): Promise<void> {
+  if (!lastExportedBlob.value || !lastExportedName.value) return
+
+  archiving.value = true
+  try {
+    const form = new FormData()
+    form.append('file', new File([lastExportedBlob.value], lastExportedName.value))
+    const result = await request<SyncResponse>('/api/sync', { method: 'POST', form })
+
+    if (result.success) {
+      pushHistoryEntry('Lưu vào Kho', `${lastExportedName.value} · +${result.addedCount} / sửa ${result.updatedCount} / xoá ${result.deletedCount}`)
+      saveToArchiveOpen.value = false
+      toast.success(
+        'Đã lưu vào Kho hồ sơ',
+        `${lastExportedName.value} · thêm ${formatNumber(result.addedCount)} · sửa ${formatNumber(result.updatedCount)} · xoá ${formatNumber(result.deletedCount)}. Lần sau mở Kho là thấy, không cần import.`,
+      )
+    } else {
+      toast.error('Chưa lưu được vào Kho', result.errorMessage ?? 'Không rõ lỗi.')
+    }
+  } catch (caught) {
+    toast.error('Chưa lưu được vào Kho', errorMessage(caught))
+  } finally {
+    archiving.value = false
+  }
+}
 
 // A5: hoàn tác / làm lại
 const editHistory = ref<Map<number, RowEdit>[]>([])
@@ -661,6 +816,8 @@ async function inspect(): Promise<void> {
     }
 
     session.value = data
+    rememberSession(data.sessionId, data.fileName)
+    loadHistory(data.fileName)
     edits.value = new Map()
     resetHistory()
     selected.value = new Set()
@@ -818,6 +975,8 @@ function closeSession(): void {
 
   void deleteSessionSilent(active.sessionId)
   clearDraft()
+  forgetSession()
+  historyEntries.value = []
   session.value = null
   rows.value = []
   total.value = 0
@@ -954,12 +1113,19 @@ async function doExportFull(): Promise<void> {
     })
 
     saveBlob(result.blob, result.fileName)
+    lastExportedBlob.value = result.blob
+    lastExportedName.value = result.fileName
     const normalized = previewRows.value.filter((row) => row.summaryChanged).length
+    pushHistoryEntry(
+      'Xuất file',
+      `${result.fileName} · ${formatNumber(previewRows.value.length)} dòng${normalized > 0 ? ` · ${formatNumber(normalized)} sửa mở đầu` : ''}`,
+    )
     toast.success(
       'Đã xuất file Excel',
       `${result.fileName} · ${formatNumber(previewRows.value.length)} dòng được cập nhật${normalized > 0 ? ` · ${formatNumber(normalized)} dòng chuẩn hoá` : ''}.`,
     )
     previewOpen.value = false
+    saveToArchiveOpen.value = true
     clearDraft()
     draftSavedAt.value = null
     draftStatus.value = 'idle'
@@ -982,14 +1148,21 @@ async function doExportFiltered(): Promise<void> {
     })
 
     saveBlob(result.blob, result.fileName)
+    lastExportedBlob.value = result.blob
+    lastExportedName.value = result.fileName
     const keptRows = filteredPreview.value?.totalRows ?? total.value
     const changedRows = filteredPreview.value?.changedRows ?? 0
     const normalizedRows = filteredPreview.value?.normalizedRows ?? 0
+    pushHistoryEntry(
+      'Xuất bản lọc',
+      `${result.fileName} · giữ ${formatNumber(keptRows)} hồ sơ · ${formatNumber(changedRows)} dòng cập nhật`,
+    )
     toast.success(
       'Đã xuất bản lọc',
       `${result.fileName} · ${formatNumber(keptRows)} hồ sơ được giữ · ${formatNumber(changedRows)} dòng cập nhật${normalizedRows > 0 ? ` · ${formatNumber(normalizedRows)} dòng chuẩn hoá` : ''}.`,
     )
     previewOpen.value = false
+    saveToArchiveOpen.value = true
     clearDraft()
     draftSavedAt.value = null
     draftStatus.value = 'idle'
@@ -1284,6 +1457,9 @@ watch(pageSize, () => {
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
+  void resumeLastSession().then(() => {
+    if (!session.value) loadResumeCandidates()
+  })
 })
 
 onBeforeUnmount(() => {
@@ -1293,7 +1469,8 @@ onBeforeUnmount(() => {
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
   if (session.value) {
     saveDraft()
-    void deleteSessionSilent(session.value.sessionId)
+    // KHÔNG xoá phiên trên server khi rời trang: F5/mất kết nối vẫn khôi phục được.
+    // Phiên tự hết hạn sau 12 giờ (CleanupExpired ở backend).
   }
 })
 </script>
@@ -1318,6 +1495,40 @@ onBeforeUnmount(() => {
           :multiple="false"
           hint="Chọn workbook có sheet ML và cột Trích yếu nội dung"
         />
+
+        <div v-if="resumeCandidates.length > 0" class="summary-resume card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Phiên đang dở</div>
+              <div class="card-subtitle">
+                F5 hoặc mất kết nối cũng không mất — mở lại tại đây, không cần import.
+              </div>
+            </div>
+          </div>
+          <div class="card-body stack" style="gap: 8px">
+            <div
+              v-for="candidate in resumeCandidates"
+              :key="candidate.sessionId"
+              class="row-between"
+              style="padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px"
+            >
+              <div style="min-width: 0">
+                <div class="truncate"><strong>{{ candidate.fileName }}</strong></div>
+                <div class="hint">
+                  {{ formatNumber(candidate.rowCount) }} hồ sơ · {{ new Date(candidate.createdAt).toLocaleString('vi-VN') }}
+                </div>
+              </div>
+              <button
+                class="btn btn-secondary btn-sm"
+                type="button"
+                :disabled="resuming"
+                @click="openResumeCandidate(candidate)"
+              >
+                {{ resuming ? 'Đang mở...' : 'Mở lại' }}
+              </button>
+            </div>
+          </div>
+        </div>
 
         <div class="alert alert-info summary-note">
           <Info :size="17" />
@@ -1384,6 +1595,18 @@ onBeforeUnmount(() => {
               Đóng workbook
             </button>
           </div>
+        </div>
+
+        <div v-if="historyEntries.length > 0" class="summary-history">
+          <details>
+            <summary class="hint">Lưu lại quá trình ({{ historyEntries.length }} lượt)</summary>
+            <div class="stack" style="gap: 6px; margin-top: 8px">
+              <div v-for="(entry, index) in historyEntries" :key="`${entry.at}-${index}`" class="hint">
+                {{ new Date(entry.at).toLocaleString('vi-VN') }} · <strong>{{ entry.action }}</strong> ·
+                {{ entry.detail }}
+              </div>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -2254,6 +2477,43 @@ onBeforeUnmount(() => {
             >
               <Download :size="16" />
               Tải file xuống
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lưu file vừa xuất vào Kho hồ sơ để lần sau khỏi import lại -->
+      <div v-if="saveToArchiveOpen" class="modal-backdrop" @click.self="saveToArchiveOpen = false">
+        <div class="modal" style="width: min(520px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title">Lưu vào Kho hồ sơ?</div>
+              <div class="card-subtitle">
+                File {{ lastExportedName }} sẽ được đồng bộ vào SQL Server. Lần sau mở Kho là thấy,
+                không cần import lại. Tên file có hậu tố _trichyeu/_loc để nhận biết là file chỉnh trích yếu.
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="saveToArchiveOpen = false">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info">
+              <Info :size="15" />
+              <div class="grow">
+                Đồng bộ theo nguyên tắc “Excel thắng”: thêm/sửa/xoá hồ sơ trong Kho theo đúng file đã xuất.
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" @click="saveToArchiveOpen = false">Để sau</button>
+            <button
+              class="btn btn-accent"
+              type="button"
+              :disabled="archiving"
+              @click="archiveLastExport"
+            >
+              {{ archiving ? 'Đang lưu...' : 'Lưu vào Kho' }}
             </button>
           </div>
         </div>

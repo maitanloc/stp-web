@@ -123,6 +123,13 @@ public sealed record SummaryYearReportResponse(
     int MissingNumber,
     int NeedsNormalization);
 
+public sealed record SummarySessionInfoResponse(
+    Guid SessionId,
+    string FileName,
+    long FileSizeBytes,
+    DateTimeOffset CreatedAt,
+    int RowCount);
+
 public sealed record SummaryFilteredPreviewResponse(
     int TotalRows,
     int ChangedRows,

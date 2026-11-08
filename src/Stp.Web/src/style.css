@@ -3120,6 +3120,21 @@ pre,
   padding: 10px 12px;
 }
 
+.summary-history {
+  padding: 10px 14px 14px;
+  border-top: 1px dashed var(--border);
+}
+
+.summary-history summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.summary-resume {
+  border: 1px solid var(--brand);
+}
+
 .summary-missing-filters .checkbox {
   margin: 0;
 }

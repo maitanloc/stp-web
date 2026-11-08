@@ -106,8 +106,110 @@ public sealed class SummaryToolService : ISummaryToolService
         }
     }
 
-    public SummaryWorkbook? GetSession(Guid sessionId) =>
-        _sessions.TryGetValue(sessionId, out var session) ? session : null;
+    public SummaryWorkbook? GetSession(Guid sessionId)
+    {
+        if (_sessions.TryGetValue(sessionId, out var session))
+        {
+            return session;
+        }
+
+        return TryRestore(sessionId);
+    }
+
+    public IReadOnlyList<SummarySessionInfo> ListSessions()
+    {
+        _sessions.Values.ToList();
+
+        var uploadsRoot = Path.Combine(_storage.RootPath, "uploads");
+        if (!Directory.Exists(uploadsRoot))
+        {
+            return Array.Empty<SummarySessionInfo>();
+        }
+
+        var result = new List<SummarySessionInfo>();
+
+        foreach (var directory in Directory.EnumerateDirectories(uploadsRoot))
+        {
+            if (!Guid.TryParse(Path.GetFileName(directory), out var sessionId))
+            {
+                continue;
+            }
+
+            var session = GetSession(sessionId);
+            if (session is not null)
+            {
+                result.Add(new SummarySessionInfo(
+                    session.SessionId,
+                    session.FileName,
+                    session.FileSizeBytes,
+                    session.CreatedAt,
+                    session.Rows.Count));
+            }
+        }
+
+        return result
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(20)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Khôi phục phiên từ file upload đã lưu trên đĩa (sống sót F5/mất kết nối/restart API).
+    /// </summary>
+    private SummaryWorkbook? TryRestore(Guid sessionId)
+    {
+        try
+        {
+            var directory = _storage.GetJobUploadDirectory(sessionId);
+            var markerPath = Path.Combine(directory, MarkerFileName);
+            if (!File.Exists(markerPath))
+            {
+                return null;
+            }
+
+            // Chỉ dọn phiên quá hạn như cũ; phiên còn hạn thì đọc lại từ file.
+            var marker = File.ReadAllText(markerPath);
+            var createdAt = DateTimeOffset.UtcNow;
+            var match = Regex.Match(marker, "\"createdAt\"\\s*:\\s*\"([^\"]+)\"");
+            if (match.Success && DateTimeOffset.TryParse(
+                    match.Groups[1].Value,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out var parsed))
+            {
+                createdAt = parsed;
+            }
+
+            if (createdAt < DateTimeOffset.UtcNow - SessionLifetime)
+            {
+                // Quá hạn: xoá cả thư mục và bỏ qua.
+                _storage.DeleteDirectory(directory);
+                return null;
+            }
+
+            var filePath = Directory.EnumerateFiles(directory)
+                .FirstOrDefault(path =>
+                    path.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)
+                    || path.EndsWith(".xlsm", StringComparison.OrdinalIgnoreCase)
+                    || path.EndsWith(".xltx", StringComparison.OrdinalIgnoreCase)
+                    || path.EndsWith(".xltm", StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                return null;
+            }
+
+            var fileInfo = new FileInfo(filePath);
+            var session = Parse(sessionId, filePath, fileInfo.Name, fileInfo.Length);
+            _sessions[sessionId] = session;
+            return session;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Không khôi phục được phiên trích yếu {SessionId}", sessionId);
+            return null;
+        }
+    }
 
     public SummaryPage GetRows(
         Guid sessionId,
