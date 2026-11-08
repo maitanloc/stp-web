@@ -117,8 +117,28 @@ const exportingIssues = ref(false)
 
 // Chỉ xuất các dòng đã tích (tránh xuất thừa)
 const onlySelectedRows = ref(false)
+const exportScope = ref<'all' | 'edited' | 'selected' | 'filtered'>('all')
 
 const selectedRowNumbers = computed(() => [...selected.value].sort((a, b) => a - b))
+const editedRowNumbers = computed(() => [...edits.value.keys()].sort((a, b) => a - b))
+
+function effectiveOnlyRowNumbers(): number[] | undefined {
+  if (exportScope.value === 'selected' && selectedRowNumbers.value.length > 0) {
+    return selectedRowNumbers.value
+  }
+  if (exportScope.value === 'edited' && editedRowNumbers.value.length > 0) {
+    return editedRowNumbers.value
+  }
+  return undefined
+}
+
+function onExportScopeChange(): void {
+  if (previewMode.value === 'filtered') {
+    void openFilteredPreview()
+  } else {
+    void openPreview()
+  }
+}
 
 // A3: đổi tên file xuất
 const exportNameOpen = ref(false)
@@ -832,10 +852,7 @@ async function openPreview(): Promise<void> {
   filteredPreview.value = null
 
   try {
-    const only =
-      onlySelectedRows.value && selectedRowNumbers.value.length > 0
-        ? selectedRowNumbers.value
-        : undefined
+    const only = effectiveOnlyRowNumbers() ?? (onlySelectedRows.value ? selectedRowNumbers.value : undefined)
     const result = await request<SummaryPreviewRowResponse[]>(
       `/api/summary/${active.sessionId}/preview`,
       { method: 'POST', body: { changes: allChanges.value, onlyRowNumbers: only } },
@@ -926,10 +943,7 @@ async function doExportFull(): Promise<void> {
 
   exporting.value = true
   try {
-    const only =
-      onlySelectedRows.value && selectedRowNumbers.value.length > 0
-        ? selectedRowNumbers.value
-        : undefined
+    const only = effectiveOnlyRowNumbers() ?? (onlySelectedRows.value ? selectedRowNumbers.value : undefined)
     const result = await download(`/api/summary/${active.sessionId}/export`, {
       method: 'POST',
       body: {
@@ -2029,6 +2043,40 @@ onBeforeUnmount(() => {
             </div>
 
             <template v-else>
+              <div class="summary-scope-picker">
+                <div class="summary-preview-label">Phạm vi xuất</div>
+                <div class="row wrap" style="gap: 8px">
+                  <label class="radio-card" :class="{ selected: exportScope === 'all' }">
+                    <input v-model="exportScope" value="all" type="radio" @change="onExportScopeChange" />
+                    <span class="checkbox-text">
+                      <span class="checkbox-title">Toàn bộ workbook</span>
+                      <span class="checkbox-desc">Giữ mọi sheet; chuẩn hoá mọi dòng kết hôn.</span>
+                    </span>
+                  </label>
+                  <label class="radio-card" :class="{ selected: exportScope === 'edited' }">
+                    <input v-model="exportScope" value="edited" type="radio" :disabled="editedRowNumbers.length === 0" @change="onExportScopeChange" />
+                    <span class="checkbox-text">
+                      <span class="checkbox-title">Chỉ dòng đã sửa ({{ formatNumber(editedRowNumbers.length) }})</span>
+                      <span class="checkbox-desc">Không đụng dòng bạn không chạm tới.</span>
+                    </span>
+                  </label>
+                  <label class="radio-card" :class="{ selected: exportScope === 'selected' }">
+                    <input v-model="exportScope" value="selected" type="radio" :disabled="selectedRowNumbers.length === 0" @change="onExportScopeChange" />
+                    <span class="checkbox-text">
+                      <span class="checkbox-title">Chỉ dòng đã tích ({{ formatNumber(selectedRowNumbers.length) }})</span>
+                      <span class="checkbox-desc">Đúng danh sách bạn chọn tay.</span>
+                    </span>
+                  </label>
+                  <label class="radio-card" :class="{ selected: exportScope === 'filtered' }">
+                    <input v-model="exportScope" value="filtered" type="radio" @change="onExportScopeChange" />
+                    <span class="checkbox-text">
+                      <span class="checkbox-title">Theo bộ lọc hiện tại</span>
+                      <span class="checkbox-desc">Năm / từ số–đến số / loại… như thanh lọc ở trên; bản lọc bỏ sheet thừa.</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
               <div v-if="previewMode === 'full' && selectedRowNumbers.length > 0" class="alert alert-info" style="margin: 0 0 12px">
                 <Info :size="15" />
                 <div class="grow">

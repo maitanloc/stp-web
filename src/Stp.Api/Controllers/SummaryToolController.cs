@@ -129,14 +129,14 @@ public sealed class SummaryToolController : ControllerBase
         Guid sessionId,
         [FromBody] SummaryPreviewRequest request)
     {
-        if (ValidateChanges(request.Changes) is { } validationError)
+        if (ValidateChanges(request.Changes, allowEmpty: true) is { } validationError)
         {
             return validationError;
         }
 
         try
         {
-            var changes = request.Changes
+            var changes = (request.Changes ?? Array.Empty<SummaryChangeRequest>())
                 .Select(ToChange)
                 .ToList();
 

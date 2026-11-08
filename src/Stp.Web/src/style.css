@@ -3104,6 +3104,22 @@ pre,
   background: var(--surface-2);
 }
 
+.summary-scope-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.summary-scope-picker .radio-card {
+  flex: 1 1 160px;
+  padding: 10px 12px;
+}
+
 .summary-missing-filters .checkbox {
   margin: 0;
 }

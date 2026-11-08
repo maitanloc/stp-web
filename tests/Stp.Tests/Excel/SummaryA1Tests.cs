@@ -67,6 +67,26 @@ public sealed class SummaryA1Tests
                 Assert.Equal("5A", sheet.Cell("B2").GetString());
                 Assert.Equal("HS-99", sheet.Cell("C2").GetString());
                 Assert.Equal("21-40", sheet.Cell("G2").GetString());
+                Assert.StartsWith(
+                    "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài",
+                    sheet.Cell("D2").GetString());
+
+                // Bản lọc (chỉ giữ ML + dòng trong phạm vi) cũng phải vá đúng B/C/D/G.
+                var filtered = await service.ExportFilteredAsync(
+                    session.SessionId,
+                    changes,
+                    new SummaryScope(Year: 1990));
+                var filteredPath = Path.Combine(directory, "a1-filtered.xlsx");
+                await File.WriteAllBytesAsync(filteredPath, filtered.Content);
+                using var filteredWorkbook = new XLWorkbook(filteredPath);
+                Assert.Single(filteredWorkbook.Worksheets);
+                var filteredSheet = filteredWorkbook.Worksheet("ML");
+                Assert.Equal("5A", filteredSheet.Cell("B2").GetString());
+                Assert.Equal("HS-99", filteredSheet.Cell("C2").GetString());
+                Assert.Equal("21-40", filteredSheet.Cell("G2").GetString());
+                Assert.StartsWith(
+                    "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài",
+                    filteredSheet.Cell("D2").GetString());
             }
         }
         finally
