@@ -135,7 +135,7 @@ function effectiveOnlyRowNumbers(): number[] | undefined {
 }
 
 function onExportScopeChange(): void {
-  if (previewMode.value === 'filtered') {
+  if (exportScope.value === 'filtered') {
     void openFilteredPreview()
   } else {
     void openPreview()
@@ -1041,6 +1041,7 @@ async function openFilteredPreview(): Promise<void> {
     return
   }
 
+  exportScope.value = 'filtered'
   previewMode.value = 'filtered'
   previewOpen.value = true
   previewLoading.value = true
@@ -1428,6 +1429,9 @@ watch([year, yearFrom, yearTo, type, onlyExisting, onlyMissingSheetNumber, onlyM
   filterTimer = window.setTimeout(() => {
     page.value = 1
     void fetchRows()
+    if (previewOpen.value && exportScope.value === 'filtered') {
+      void openFilteredPreview()
+    }
   }, 300)
 })
 
@@ -1437,6 +1441,9 @@ watch(search, () => {
   searchTimer = window.setTimeout(() => {
     page.value = 1
     void fetchRows()
+    if (previewOpen.value && exportScope.value === 'filtered') {
+      void openFilteredPreview()
+    }
   }, 350)
 })
 
@@ -1446,6 +1453,9 @@ watch([numberMode, numberFrom, numberTo, singleNumber], () => {
   filterTimer = window.setTimeout(() => {
     page.value = 1
     void fetchRows()
+    if (previewOpen.value && exportScope.value === 'filtered') {
+      void openFilteredPreview()
+    }
   }, 350)
 })
 
