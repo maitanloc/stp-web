@@ -929,26 +929,24 @@ public sealed class SummaryToolService : ISummaryToolService
         };
     }
 
-    private sealed record SummarySheetMatch(
-        IXLWorksheet Sheet,
-        int HeaderRow,
-        int SummaryColumn,
-        string? Header,
-        int Score);
-
     /// <summary>
-    /// Chọn sheet dữ liệu để bổ sung trích yếu. Nhiều workbook có cả sheet nhập
-    /// còn công thức (ví dụ "file nhập") và sheet đã dán dữ liệu sạch (ví dụ
-    /// "file dán"). Ta chấm điểm để chọn sheet có khoảng trang thật, có ngày và
-    /// nhiều hồ sơ nhất, thay vì lấy sheet đầu tiên có tiêu đề.
+    /// Chọn sheet dữ liệu để bổ sung trích yếu. Ưu tiên sheet "ML"; nếu không có,
+    /// lấy sheet đầu tiên theo thứ tự trong workbook có tiêu đề
+    /// "Trích yếu nội dung" (bỏ qua sheet in theo năm). Cách này giữ đúng sheet
+    /// người dùng vẫn làm việc, ví dụ "file nhập" trong các workbook DK KET HON.
     /// </summary>
     private static (IXLWorksheet Sheet, int HeaderRow, int SummaryColumn, string? Header) FindSummarySheet(
         XLWorkbook workbook)
     {
         var sheets = workbook.Worksheets.ToList();
-        var matches = new List<SummarySheetMatch>();
+        var preferred = sheets.FirstOrDefault(sheet =>
+            string.Equals(sheet.Name, "ML", StringComparison.OrdinalIgnoreCase));
 
-        foreach (var sheet in sheets)
+        var candidates = preferred is null
+            ? sheets
+            : new[] { preferred }.Concat(sheets.Where(sheet => !ReferenceEquals(sheet, preferred)));
+
+        foreach (var sheet in candidates)
         {
             if (IsYearPrintSheet(sheet))
             {
@@ -956,30 +954,11 @@ public sealed class SummaryToolService : ISummaryToolService
             }
 
             var header = FindSummaryHeader(sheet);
-            if (header is null)
+            if (header is not null)
             {
-                continue;
+                return (sheet, header.Value.Row, header.Value.Column, header.Value.Header);
             }
-
-            matches.Add(new SummarySheetMatch(
-                sheet,
-                header.Value.Row,
-                header.Value.Column,
-                header.Value.Header,
-                ScoreSummarySheet(sheet, header.Value.Row, header.Value.Column)));
         }
-
-        if (matches.Count > 0)
-        {
-            var best = matches
-                .OrderByDescending(match => match.Score)
-                .First();
-
-            return (best.Sheet, best.HeaderRow, best.SummaryColumn, best.Header);
-        }
-
-        var preferred = sheets.FirstOrDefault(sheet =>
-            string.Equals(sheet.Name, "ML", StringComparison.OrdinalIgnoreCase));
 
         if (preferred is not null)
         {
@@ -1022,124 +1001,6 @@ public sealed class SummaryToolService : ISummaryToolService
             sheet.Cell("K1").GetString().Trim(),
             "BANG_IN_HANG_LOAT",
             StringComparison.Ordinal);
-    }
-
-    private static int ScoreSummarySheet(IXLWorksheet sheet, int headerRow, int summaryColumn)
-    {
-        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
-        var lastColumn = sheet.LastColumnUsed()?.ColumnNumber() ?? 0;
-        var name = NormalizeKey(sheet.Name);
-        var score = 0;
-
-        if (name == "ml")
-        {
-            score += 1_000_000;
-        }
-
-        if (name == "file dan")
-        {
-            score += 500_000;
-        }
-
-        if (name is "form" or "ds" or "gop" or "test")
-        {
-            score -= 500_000;
-        }
-
-        var sampleEnd = Math.Min(lastRow, headerRow + 600);
-        var (rangeColumn, rangeCount, _) =
-            FindPageRangeColumn(sheet, headerRow, sampleEnd, lastColumn);
-
-        if (rangeColumn > 0 && rangeCount > 0)
-        {
-            score += 200_000 + (Math.Min(rangeCount, 5_000) * 10);
-        }
-        else
-        {
-            score -= 50_000;
-        }
-
-        var dateColumn = DetectDateColumn(sheet, headerRow, lastColumn, summaryColumn);
-        var dateCount = CountDateLike(sheet, headerRow + 1, sampleEnd, dateColumn);
-        if (dateCount > 0)
-        {
-            score += 100_000 + (Math.Min(dateCount, 5_000) * 5);
-        }
-        else
-        {
-            score -= 20_000;
-        }
-
-        var dataRows = 0;
-        var dataEnd = Math.Min(lastRow, headerRow + 2_000);
-        for (var row = headerRow + 1; row <= dataEnd; row++)
-        {
-            if (!string.IsNullOrWhiteSpace(sheet.Cell(row, summaryColumn).GetString()))
-            {
-                dataRows++;
-            }
-        }
-
-        score += Math.Min(dataRows, 10_000);
-
-        if (headerRow == 1)
-        {
-            score += 5_000;
-        }
-
-        return score;
-    }
-
-    private static int CountDateLike(IXLWorksheet sheet, int firstRow, int lastRow, int column)
-    {
-        if (column <= 0)
-        {
-            return 0;
-        }
-
-        var count = 0;
-        for (var row = firstRow; row <= lastRow; row++)
-        {
-            var cell = sheet.Cell(row, column);
-            if (cell.IsEmpty())
-            {
-                continue;
-            }
-
-            if (cell.DataType == XLDataType.DateTime)
-            {
-                count++;
-                continue;
-            }
-
-            if (cell.DataType == XLDataType.Number)
-            {
-                var serial = cell.GetDouble();
-                if (serial is > 20_000 and < 80_000)
-                {
-                    count++;
-                }
-
-                continue;
-            }
-
-            var text = cell.GetString().Trim();
-            if (DateTime.TryParse(
-                    text,
-                    CultureInfo.GetCultureInfo("vi-VN"),
-                    DateTimeStyles.None,
-                    out _)
-                || DateTime.TryParse(
-                    text,
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.None,
-                    out _))
-            {
-                count++;
-            }
-        }
-
-        return count;
     }
 
     private static int DetectNumberColumn(IXLWorksheet sheet, int lastRow)
