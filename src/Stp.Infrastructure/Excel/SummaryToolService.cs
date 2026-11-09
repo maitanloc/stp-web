@@ -930,17 +930,19 @@ public sealed class SummaryToolService : ISummaryToolService
     }
 
     /// <summary>
-    /// Chọn sheet dữ liệu để bổ sung trích yếu. Ưu tiên sheet "ML"; nếu không có,
-    /// lấy sheet đầu tiên theo thứ tự trong workbook có tiêu đề
-    /// "Trích yếu nội dung" (bỏ qua sheet in theo năm). Cách này giữ đúng sheet
-    /// người dùng vẫn làm việc, ví dụ "file nhập" trong các workbook DK KET HON.
+    /// Chọn sheet dữ liệu để bổ sung trích yếu. Quy tắc của người dùng: chỉ lấy
+    /// sheet "file nhập" (không lấy "file dán" hay sheet in theo năm). Nếu file
+    /// không có sheet "file nhập" thì ưu tiên "ML", sau đó lấy sheet đầu tiên
+    /// theo thứ tự trong workbook có tiêu đề "Trích yếu nội dung".
     /// </summary>
     private static (IXLWorksheet Sheet, int HeaderRow, int SummaryColumn, string? Header) FindSummarySheet(
         XLWorkbook workbook)
     {
         var sheets = workbook.Worksheets.ToList();
         var preferred = sheets.FirstOrDefault(sheet =>
-            string.Equals(sheet.Name, "ML", StringComparison.OrdinalIgnoreCase));
+            NormalizeKey(sheet.Name) is "file nhap")
+            ?? sheets.FirstOrDefault(sheet =>
+                string.Equals(sheet.Name, "ML", StringComparison.OrdinalIgnoreCase));
 
         var candidates = preferred is null
             ? sheets
