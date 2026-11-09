@@ -886,11 +886,13 @@ public sealed class SummaryToolService : ISummaryToolService
         int lastColumn)
     {
         var best = new List<string>();
+        var bestScore = -1;
         var lastRow = Math.Min(sheet.LastRowUsed()?.RowNumber() ?? headerRow, headerRow + 6);
 
         for (var row = headerRow; row <= lastRow; row++)
         {
             var values = new List<string>();
+            var keywordHits = 0;
             for (var column = summaryColumn + 1; column <= lastColumn; column++)
             {
                 var cell = sheet.Cell(row, column);
@@ -900,14 +902,23 @@ public sealed class SummaryToolService : ISummaryToolService
                 }
 
                 var text = cell.GetString().Trim();
-                if (LooksLikeCatalogValue(text))
+                if (!LooksLikeCatalogValue(text))
                 {
-                    values.Add(text);
+                    continue;
+                }
+
+                values.Add(text);
+                if (ContainsDocumentKeyword(NormalizeKey(text)))
+                {
+                    keywordHits++;
                 }
             }
 
-            if (values.Count > best.Count)
+            // Ưu tiên hàng có nhiều từ khoá giấy tờ thật (bỏ hàng dữ liệu toàn TRUE/FALSE).
+            var score = keywordHits * 100 + values.Count;
+            if (keywordHits > 0 && score > bestScore)
             {
+                bestScore = score;
                 best = values;
             }
         }
@@ -923,6 +934,32 @@ public sealed class SummaryToolService : ISummaryToolService
         }
 
         if (text.StartsWith('=') || text.StartsWith('*') || text.StartsWith('#'))
+        {
+            return false;
+        }
+
+        // Không phải tên giấy tờ: giá trị boolean/thùng, ngày tháng, số, quyết định.
+        if (text.Equals("TRUE", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("FALSE", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("0", StringComparison.Ordinal)
+            || text.Equals("1", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+            || DateTime.TryParse(text, CultureInfo.GetCultureInfo("vi-VN"), DateTimeStyles.None, out _))
+        {
+            return false;
+        }
+
+        if (Regex.IsMatch(text, @"^\d+([./-]\d+)*$", RegexOptions.CultureInvariant))
+        {
+            return false;
+        }
+
+        if (Regex.IsMatch(text, @"Q[DĐ]\b", RegexOptions.IgnoreCase)
+            || text.Contains("/UBT", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
