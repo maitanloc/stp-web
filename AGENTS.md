@@ -19,6 +19,11 @@ Note: trong file thật, tiêu đề "Hồ sơ số" nằm ở cột C và B kh�
 nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B lẫn cột
 "Hồ sơ số" cho đúng mọi kiểu file.
 
+## Số tờ (cột G)
+- Ở sheet "file nhập", người dùng gõ "01-24" và Excel/WPS lưu thành ngày
+  01/01/2024 (serial 45292). Ứng dụng hiển thị lại dạng "MM-yy" (ví dụ
+  "01-24", "01-20") thay vì số serial thô.
+
 ## Lọc "Từ số – Đến số" + năm
 - Số hồ sơ + điều kiện năm kết hợp với nhau (AND).
 - Kiểm chứng với `DK KET HON (4).xlsx` qua API thật: lọc 775–785 +

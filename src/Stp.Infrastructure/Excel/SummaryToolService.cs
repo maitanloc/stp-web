@@ -1309,6 +1309,32 @@ public sealed class SummaryToolService : ISummaryToolService
         return true;
     }
 
+    /// <summary>
+    /// Đọc ô số tờ. Ở sheet "file nhập", cột ghi chú (G) chứa giá trị mà
+    /// Excel/WPS đã tự tính thành ngày từ "01-24" thành 01/01/2024
+    /// (serial 45292). Hiển thị lại dạng "MM-yy" ("01-24") thay vì số serial
+    /// để người dùng đọc được số tờ.
+    /// </summary>
+    private static string ReadSheetNumber(IXLCell cell)
+    {
+        if (cell.DataType == XLDataType.DateTime)
+        {
+            return cell.GetDateTime().ToString("MM-yy", CultureInfo.InvariantCulture);
+        }
+
+        if (cell.DataType == XLDataType.Number)
+        {
+            var serial = cell.GetDouble();
+            // Serial của ngày 01/01 các năm 19xx/20xx (ví dụ 45292 = 2024).
+            if (serial is >= 10000 and <= 50000)
+            {
+                return DateTime.FromOADate(serial).ToString("MM-yy", CultureInfo.InvariantCulture);
+            }
+        }
+
+        return cell.GetString().Trim();
+    }
+
     private static List<RawRow> ReadRawRows(
         IXLWorksheet sheet,
         int headerRow,
@@ -1329,7 +1355,7 @@ public sealed class SummaryToolService : ISummaryToolService
         {
             var numberLabel = sheet.Cell(rowNumber, numberColumn).GetString().Trim();
             var documentNumber = sheet.Cell(rowNumber, documentNumberColumn).GetString().Trim();
-            var sheetNumber = sheet.Cell(rowNumber, sheetNumberColumn).GetString().Trim();
+            var sheetNumber = ReadSheetNumber(sheet.Cell(rowNumber, sheetNumberColumn));
             var documentDate = ReadDateText(sheet.Cell(rowNumber, dateColumn));
             var documentCode = documentCodeColumn > 0
                 ? sheet.Cell(rowNumber, documentCodeColumn).GetString().Trim()
