@@ -803,8 +803,14 @@ public sealed class SummaryToolService : ISummaryToolService
 
         var numberColumn = DetectNumberColumn(sheet, lastRow);
         var documentNumberColumn = DetectDocumentNumberColumn(sheet, headerRow, lastColumn);
-        var sheetNumberColumn = DetectSheetNumberColumn(sheet, headerRow, lastRow, lastColumn);
         var dateColumn = DetectDateColumn(sheet, headerRow, lastColumn, summaryColumn);
+        var sheetNumberColumn = DetectSheetNumberColumn(
+            sheet,
+            headerRow,
+            lastRow,
+            lastColumn,
+            summaryColumn,
+            dateColumn);
         var documentCodeColumn = DetectDocumentCodeColumn(
             sheet,
             headerRow,
@@ -1053,13 +1059,20 @@ public sealed class SummaryToolService : ISummaryToolService
         IXLWorksheet sheet,
         int headerRow,
         int lastRow,
-        int lastColumn)
+        int lastColumn,
+        int summaryColumn,
+        int dateColumn)
     {
+        // Cột ngày chứa khoảng ngày dạng "06/01/1990-22/01/1990" và cột trích
+        // yếu chứa "(Tờ số 01 - 20)" — cả hai đều giống khoảng trang nhưng không
+        // phải số tờ, nên không được xét khi tìm cột số tờ (thường là G).
         var (bestColumn, _, _) = FindPageRangeColumn(
             sheet,
             headerRow,
             Math.Min(lastRow, headerRow + 600),
-            lastColumn);
+            lastColumn,
+            summaryColumn,
+            dateColumn);
 
         if (bestColumn > 0)
         {
@@ -1070,14 +1083,15 @@ public sealed class SummaryToolService : ISummaryToolService
     }
 
     /// <summary>
-    /// Tìm cột có nhiều giá trị giống khoảng trang (01-20) nhất. Trả về cả số ô
-    /// khớp để dùng khi chấm điểm chọn sheet dữ liệu sạch.
+    /// Tìm cột có nhiều giá trị giống khoảng trang (01-20) nhất.
+    /// Các cột bị loại (cột trích yếu, cột ngày) luôn bị bỏ qua.
     /// </summary>
     private static (int Column, int RangeCount, int TextCount) FindPageRangeColumn(
         IXLWorksheet sheet,
         int headerRow,
         int sampleEnd,
-        int lastColumn)
+        int lastColumn,
+        params int[] excludedColumns)
     {
         var bestColumn = 0;
         var bestScore = int.MinValue;
@@ -1086,6 +1100,11 @@ public sealed class SummaryToolService : ISummaryToolService
 
         for (var column = 1; column <= lastColumn; column++)
         {
+            if (excludedColumns.Contains(column))
+            {
+                continue;
+            }
+
             var rangeCount = 0;
             var textCount = 0;
 
@@ -1113,7 +1132,10 @@ public sealed class SummaryToolService : ISummaryToolService
                 ? 1
                 : 0;
 
-            if (rangeCount == 0 && headerScore == 0)
+            // Cột số tờ phải có khoảng trang thật trong dữ liệu. Tiêu đề
+            // "Số tờ" dễ gây nhầm (ở file DK cột F mang ký hiệu QĐ), nên
+            // không chấp nhận cột chỉ dựa vào tiêu đề.
+            if (rangeCount == 0)
             {
                 continue;
             }
