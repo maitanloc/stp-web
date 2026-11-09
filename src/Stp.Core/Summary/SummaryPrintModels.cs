@@ -20,7 +20,8 @@ public sealed record SummaryPrintRow(
     string DocumentCode,
     string SheetNumber,
     string Note,
-    string OriginalSummary);
+    string OriginalSummary,
+    bool IsAggregate = false);
 
 /// <summary>Thống kê mức sẵn sàng in của một năm sau khi áp dụng chỉnh sửa.</summary>
 public sealed record SummaryPrintYearStatus(

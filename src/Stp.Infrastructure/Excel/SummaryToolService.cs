@@ -19,6 +19,16 @@ public sealed class SummaryToolService : ISummaryToolService
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(12);
     private const string MarkerFileName = "summary-session.json";
     private const int MaxPreviewRows = 500;
+    private const int MinArchiveYear = 1900;
+    private const int MaxArchiveYear = 2100;
+
+    private static readonly Regex SummaryYearRegex = new(
+        @"\bnam\s+(\d{4})\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex SummarySheetNumberRegex = new(
+        @"t[ou]\s*so[:\s]*(\d{1,4})\s*[-–—]\s*(\d{1,4})",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly string[] DefaultCatalog =
     {
@@ -919,34 +929,57 @@ public sealed class SummaryToolService : ISummaryToolService
         };
     }
 
+    private sealed record SummarySheetMatch(
+        IXLWorksheet Sheet,
+        int HeaderRow,
+        int SummaryColumn,
+        string? Header,
+        int Score);
+
+    /// <summary>
+    /// Chọn sheet dữ liệu để bổ sung trích yếu. Nhiều workbook có cả sheet nhập
+    /// còn công thức (ví dụ "file nhập") và sheet đã dán dữ liệu sạch (ví dụ
+    /// "file dán"). Ta chấm điểm để chọn sheet có khoảng trang thật, có ngày và
+    /// nhiều hồ sơ nhất, thay vì lấy sheet đầu tiên có tiêu đề.
+    /// </summary>
     private static (IXLWorksheet Sheet, int HeaderRow, int SummaryColumn, string? Header) FindSummarySheet(
         XLWorkbook workbook)
     {
         var sheets = workbook.Worksheets.ToList();
+        var matches = new List<SummarySheetMatch>();
+
+        foreach (var sheet in sheets)
+        {
+            if (IsYearPrintSheet(sheet))
+            {
+                continue;
+            }
+
+            var header = FindSummaryHeader(sheet);
+            if (header is null)
+            {
+                continue;
+            }
+
+            matches.Add(new SummarySheetMatch(
+                sheet,
+                header.Value.Row,
+                header.Value.Column,
+                header.Value.Header,
+                ScoreSummarySheet(sheet, header.Value.Row, header.Value.Column)));
+        }
+
+        if (matches.Count > 0)
+        {
+            var best = matches
+                .OrderByDescending(match => match.Score)
+                .First();
+
+            return (best.Sheet, best.HeaderRow, best.SummaryColumn, best.Header);
+        }
+
         var preferred = sheets.FirstOrDefault(sheet =>
             string.Equals(sheet.Name, "ML", StringComparison.OrdinalIgnoreCase));
-
-        var candidates = preferred is null
-            ? sheets
-            : new[] { preferred }.Concat(sheets.Where(sheet => !ReferenceEquals(sheet, preferred)));
-
-        foreach (var sheet in candidates)
-        {
-            var lastRow = Math.Min(sheet.LastRowUsed()?.RowNumber() ?? 0, 20);
-            var lastColumn = Math.Min(sheet.LastColumnUsed()?.ColumnNumber() ?? 0, 80);
-
-            for (var row = 1; row <= lastRow; row++)
-            {
-                for (var column = 1; column <= lastColumn; column++)
-                {
-                    var text = sheet.Cell(row, column).GetString();
-                    if (IsSummaryHeader(text))
-                    {
-                        return (sheet, row, column, text.Trim());
-                    }
-                }
-            }
-        }
 
         if (preferred is not null)
         {
@@ -955,6 +988,158 @@ public sealed class SummaryToolService : ISummaryToolService
 
         throw new InvalidDataException(
             "Không tìm thấy sheet ML hoặc cột có tiêu đề 'Trích yếu nội dung' trong workbook.");
+    }
+
+    private static (int Row, int Column, string Header)? FindSummaryHeader(IXLWorksheet sheet)
+    {
+        var lastRow = Math.Min(sheet.LastRowUsed()?.RowNumber() ?? 0, 20);
+        var lastColumn = Math.Min(sheet.LastColumnUsed()?.ColumnNumber() ?? 0, 80);
+
+        for (var row = 1; row <= lastRow; row++)
+        {
+            for (var column = 1; column <= lastColumn; column++)
+            {
+                var text = sheet.Cell(row, column).GetString();
+                if (IsSummaryHeader(text))
+                {
+                    return (row, column, text.Trim());
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Sheet in năm do macro sinh ra hoặc sheet chỉ có tên năm.</summary>
+    private static bool IsYearPrintSheet(IXLWorksheet sheet)
+    {
+        if (Regex.IsMatch(sheet.Name.Trim(), @"^\d{4}\s*$", RegexOptions.CultureInvariant))
+        {
+            return true;
+        }
+
+        return string.Equals(
+            sheet.Cell("K1").GetString().Trim(),
+            "BANG_IN_HANG_LOAT",
+            StringComparison.Ordinal);
+    }
+
+    private static int ScoreSummarySheet(IXLWorksheet sheet, int headerRow, int summaryColumn)
+    {
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
+        var lastColumn = sheet.LastColumnUsed()?.ColumnNumber() ?? 0;
+        var name = NormalizeKey(sheet.Name);
+        var score = 0;
+
+        if (name == "ml")
+        {
+            score += 1_000_000;
+        }
+
+        if (name == "file dan")
+        {
+            score += 500_000;
+        }
+
+        if (name is "form" or "ds" or "gop" or "test")
+        {
+            score -= 500_000;
+        }
+
+        var sampleEnd = Math.Min(lastRow, headerRow + 600);
+        var (rangeColumn, rangeCount, _) =
+            FindPageRangeColumn(sheet, headerRow, sampleEnd, lastColumn);
+
+        if (rangeColumn > 0 && rangeCount > 0)
+        {
+            score += 200_000 + (Math.Min(rangeCount, 5_000) * 10);
+        }
+        else
+        {
+            score -= 50_000;
+        }
+
+        var dateColumn = DetectDateColumn(sheet, headerRow, lastColumn, summaryColumn);
+        var dateCount = CountDateLike(sheet, headerRow + 1, sampleEnd, dateColumn);
+        if (dateCount > 0)
+        {
+            score += 100_000 + (Math.Min(dateCount, 5_000) * 5);
+        }
+        else
+        {
+            score -= 20_000;
+        }
+
+        var dataRows = 0;
+        var dataEnd = Math.Min(lastRow, headerRow + 2_000);
+        for (var row = headerRow + 1; row <= dataEnd; row++)
+        {
+            if (!string.IsNullOrWhiteSpace(sheet.Cell(row, summaryColumn).GetString()))
+            {
+                dataRows++;
+            }
+        }
+
+        score += Math.Min(dataRows, 10_000);
+
+        if (headerRow == 1)
+        {
+            score += 5_000;
+        }
+
+        return score;
+    }
+
+    private static int CountDateLike(IXLWorksheet sheet, int firstRow, int lastRow, int column)
+    {
+        if (column <= 0)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        for (var row = firstRow; row <= lastRow; row++)
+        {
+            var cell = sheet.Cell(row, column);
+            if (cell.IsEmpty())
+            {
+                continue;
+            }
+
+            if (cell.DataType == XLDataType.DateTime)
+            {
+                count++;
+                continue;
+            }
+
+            if (cell.DataType == XLDataType.Number)
+            {
+                var serial = cell.GetDouble();
+                if (serial is > 20_000 and < 80_000)
+                {
+                    count++;
+                }
+
+                continue;
+            }
+
+            var text = cell.GetString().Trim();
+            if (DateTime.TryParse(
+                    text,
+                    CultureInfo.GetCultureInfo("vi-VN"),
+                    DateTimeStyles.None,
+                    out _)
+                || DateTime.TryParse(
+                    text,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out _))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private static int DetectNumberColumn(IXLWorksheet sheet, int lastRow)
@@ -1007,9 +1192,34 @@ public sealed class SummaryToolService : ISummaryToolService
         int lastRow,
         int lastColumn)
     {
-        var sampleEnd = Math.Min(lastRow, headerRow + 600);
+        var (bestColumn, _, _) = FindPageRangeColumn(
+            sheet,
+            headerRow,
+            Math.Min(lastRow, headerRow + 600),
+            lastColumn);
+
+        if (bestColumn > 0)
+        {
+            return bestColumn;
+        }
+
+        return lastColumn >= 7 ? 7 : Math.Max(1, lastColumn);
+    }
+
+    /// <summary>
+    /// Tìm cột có nhiều giá trị giống khoảng trang (01-20) nhất. Trả về cả số ô
+    /// khớp để dùng khi chấm điểm chọn sheet dữ liệu sạch.
+    /// </summary>
+    private static (int Column, int RangeCount, int TextCount) FindPageRangeColumn(
+        IXLWorksheet sheet,
+        int headerRow,
+        int sampleEnd,
+        int lastColumn)
+    {
         var bestColumn = 0;
         var bestScore = int.MinValue;
+        var bestRangeCount = 0;
+        var bestTextCount = 0;
 
         for (var column = 1; column <= lastColumn; column++)
         {
@@ -1050,15 +1260,12 @@ public sealed class SummaryToolService : ISummaryToolService
             {
                 bestScore = score;
                 bestColumn = column;
+                bestRangeCount = rangeCount;
+                bestTextCount = textCount;
             }
         }
 
-        if (bestColumn > 0)
-        {
-            return bestColumn;
-        }
-
-        return lastColumn >= 7 ? 7 : Math.Max(1, lastColumn);
+        return (bestColumn, bestRangeCount, bestTextCount);
     }
 
     /// <summary>
@@ -1264,11 +1471,10 @@ public sealed class SummaryToolService : ISummaryToolService
                 }
                 else
                 {
-                    var yearMatch = Regex.Match(text, @"^NĂM\s+(\d{4})", RegexOptions.IgnoreCase);
-                    if (yearMatch.Success
-                        && int.TryParse(yearMatch.Groups[1].Value, out var headerYear))
+                    var markerYear = TryReadYearMarker(text);
+                    if (markerYear.HasValue)
                     {
-                        currentYear = headerYear;
+                        currentYear = markerYear;
                         continue;
                     }
 
@@ -1291,7 +1497,23 @@ public sealed class SummaryToolService : ISummaryToolService
                 }
             }
 
-            var year = ReadYear(sheet.Cell(rowNumber, dateColumn)) ?? currentYear;
+            var summaryYear = TryReadSummaryYear(text);
+            var dateYear = ReadYear(sheet.Cell(rowNumber, dateColumn));
+            if (!dateYear.HasValue && summaryYear.HasValue)
+            {
+                documentDate = RepairDateYear(documentDate, summaryYear);
+            }
+
+            if (sheetNumber.Length == 0)
+            {
+                var summaryRange = TryExtractSheetNumberFromSummary(text);
+                if (summaryRange.Length > 0)
+                {
+                    sheetNumber = summaryRange;
+                }
+            }
+
+            var year = dateYear ?? summaryYear ?? currentYear;
             if (year.HasValue)
             {
                 currentYear = year;
@@ -1412,7 +1634,9 @@ public sealed class SummaryToolService : ISummaryToolService
 
         if (cell.DataType == XLDataType.DateTime)
         {
-            return cell.GetDateTime().Year;
+            return IsPlausibleArchiveYear(cell.GetDateTime().Year)
+                ? cell.GetDateTime().Year
+                : null;
         }
 
         if (cell.DataType == XLDataType.Number)
@@ -1420,16 +1644,17 @@ public sealed class SummaryToolService : ISummaryToolService
             var serial = cell.GetDouble();
             if (serial is > 1 and < 2_958_466)
             {
-                return DateTime.FromOADate(serial).Year;
+                var year = DateTime.FromOADate(serial).Year;
+                return IsPlausibleArchiveYear(year) ? year : null;
             }
         }
 
         var text = cell.GetString().Trim();
         if (text.Length >= 4
-            && int.TryParse(text.AsSpan(0, 4), out var year)
-            && year is >= 1900 and <= 2200)
+            && int.TryParse(text.AsSpan(0, 4), out var leadingYear)
+            && IsPlausibleArchiveYear(leadingYear))
         {
-            return year;
+            return leadingYear;
         }
 
         if (DateTime.TryParse(
@@ -1438,10 +1663,136 @@ public sealed class SummaryToolService : ISummaryToolService
                 DateTimeStyles.None,
                 out var date))
         {
-            return date.Year;
+            return IsPlausibleArchiveYear(date.Year) ? date.Year : null;
         }
 
         return null;
+    }
+
+    private static bool IsPlausibleArchiveYear(int year) =>
+        year is >= MinArchiveYear and <= MaxArchiveYear;
+
+    /// <summary>
+    /// Đọc năm từ trích yếu dạng "Năm 2001". Dùng để sửa các dòng bị gõ sai năm
+    /// trong cột ngày (ví dụ 05/02/2201 nhưng trích yếu ghi Năm 2001).
+    /// </summary>
+    private static int? TryReadSummaryYear(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var key = NormalizeKey(text);
+        var match = SummaryYearRegex.Match(key);
+        if (match.Success
+            && int.TryParse(match.Groups[1].Value, out var year)
+            && IsPlausibleArchiveYear(year))
+        {
+            return year;
+        }
+
+        return null;
+    }
+
+    /// <summary>Đọc năm từ dòng tiêu đề nhóm "NĂM 1990".</summary>
+    private static int? TryReadYearMarker(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(
+            NormalizeKey(text),
+            @"^nam\s+(\d{4})\b",
+            RegexOptions.CultureInvariant);
+        if (match.Success
+            && int.TryParse(match.Groups[1].Value, out var year)
+            && IsPlausibleArchiveYear(year))
+        {
+            return year;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sửa phần năm bị gõ thiếu/thừa trong chuỗi ngày (05/02/2201, 26/09/202,
+    /// 12/05/014) bằng năm lấy từ trích yếu cùng dòng. Chỉ thay khi năm hiện tại
+    /// không hợp lệ và năm thay thế hợp lệ, giữ nguyên ngày/tháng.
+    /// </summary>
+    private static string RepairDateYear(string dateText, int? summaryYear)
+    {
+        if (string.IsNullOrWhiteSpace(dateText) || summaryYear is null)
+        {
+            return dateText;
+        }
+
+        var match = Regex.Match(
+            dateText.Trim(),
+            @"^(?<d>\d{1,2})/(?<m>\d{1,2})/(?<y>\d{1,4})$",
+            RegexOptions.CultureInvariant);
+        if (!match.Success)
+        {
+            return dateText;
+        }
+
+        if (!int.TryParse(match.Groups["y"].Value, out var year)
+            || IsPlausibleArchiveYear(year))
+        {
+            return dateText;
+        }
+
+        var repaired = $"{match.Groups["d"].Value}/{match.Groups["m"].Value}/{summaryYear.Value}";
+        if (!DateTime.TryParseExact(
+                repaired,
+                "dd/MM/yyyy",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _))
+        {
+            return dateText;
+        }
+
+        return repaired;
+    }
+
+    /// <summary>
+    /// Trích khoảng trang từ trích yếu "(Tờ số 01 - 20)" cho các hồ sơ tổng hợp
+    /// không có cột số tờ riêng.
+    /// </summary>
+    private static string TryExtractSheetNumberFromSummary(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var match = SummarySheetNumberRegex.Match(NormalizeKey(text));
+        if (!match.Success)
+        {
+            return string.Empty;
+        }
+
+        return $"{match.Groups[1].Value}-{match.Groups[2].Value}";
+    }
+
+    /// <summary>
+    /// Hồ sơ tổng hợp dạng "HS 36" không có số ký hiệu văn bản riêng, nên không
+    /// tính là thiếu số ký hiệu khi kiểm tra mức sẵn sàng in.
+    /// </summary>
+    private static bool IsAggregateDocumentNumber(string? documentNumber)
+    {
+        if (string.IsNullOrWhiteSpace(documentNumber))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(
+            documentNumber.Trim(),
+            @"^HS\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static List<string> MergeCatalog(
@@ -1449,19 +1800,58 @@ public sealed class SummaryToolService : ISummaryToolService
         IReadOnlyDictionary<string, int> observed,
         IReadOnlyList<string> defaults)
     {
+        // Chọn dạng hiển thị có dấu cho mỗi khoá không dấu. Nhờ vậy tiêu đề cột
+        // kiểu "phieu de xuat" vẫn hiện đúng "phiếu đề xuất" trong danh mục.
+        var canonical = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        void Consider(string value)
+        {
+            var trimmed = Regex.Replace(value.Trim(), @"\s+", " ");
+            var key = NormalizeKey(trimmed);
+            if (key.Length == 0)
+            {
+                return;
+            }
+
+            if (!canonical.TryGetValue(key, out var existing))
+            {
+                canonical[key] = trimmed;
+                return;
+            }
+
+            if (HasDiacritics(trimmed) && !HasDiacritics(existing))
+            {
+                canonical[key] = trimmed;
+            }
+        }
+
+        foreach (var item in headerCatalog)
+        {
+            Consider(item);
+        }
+
+        foreach (var item in observed.Keys)
+        {
+            Consider(item);
+        }
+
+        foreach (var item in defaults)
+        {
+            Consider(item);
+        }
+
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         void Add(string value)
         {
-            var trimmed = Regex.Replace(value.Trim(), @"\s+", " ");
-            var key = NormalizeKey(trimmed);
+            var key = NormalizeKey(value);
             if (key.Length == 0 || !seen.Add(key))
             {
                 return;
             }
 
-            result.Add(trimmed);
+            result.Add(canonical.TryGetValue(key, out var display) ? display : value.Trim());
         }
 
         foreach (var item in headerCatalog)
@@ -1482,6 +1872,21 @@ public sealed class SummaryToolService : ISummaryToolService
         }
 
         return result.Take(200).ToList();
+    }
+
+    private static bool HasDiacritics(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        foreach (var character in decomposed)
+        {
+            if (character is 'đ' or 'Đ'
+                || CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static (string Base, List<string> Items, bool HasList) ParseSummary(
@@ -1624,6 +2029,14 @@ public sealed class SummaryToolService : ISummaryToolService
 
         foreach (var character in normalized)
         {
+            // 'đ' không phân rã thành d + dấu nên phải quy đổi riêng, nếu không
+            // "phiếu đề xuất" và "phieu de xuat" sẽ có khoá khác nhau.
+            if (character is 'đ' or 'Đ')
+            {
+                builder.Append('d');
+                continue;
+            }
+
             if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
             {
                 builder.Append(char.ToLowerInvariant(character));
@@ -1729,7 +2142,8 @@ public sealed class SummaryToolService : ISummaryToolService
                 row.DocumentCode,
                 SanitizeSheetNumberForPrint(plan.SheetNumber),
                 string.Empty,
-                row.OriginalSummary));
+                row.OriginalSummary,
+                IsAggregateDocumentNumber(plan.DocumentNumber)));
         }
 
         var statuses = rows
@@ -1739,13 +2153,14 @@ public sealed class SummaryToolService : ISummaryToolService
             {
                 var total = group.Count();
                 var missingNumber = group.Count(row => string.IsNullOrWhiteSpace(row.NumberLabel));
-                var missingDocumentCode = group.Count(row => string.IsNullOrWhiteSpace(row.DocumentCode));
+                var missingDocumentCode = group.Count(row =>
+                    !row.IsAggregate && string.IsNullOrWhiteSpace(row.DocumentCode));
                 var missingDate = group.Count(row => string.IsNullOrWhiteSpace(row.Date));
                 var missingSheetNumber = group.Count(row => string.IsNullOrWhiteSpace(row.SheetNumber));
                 var missingSummary = group.Count(row => string.IsNullOrWhiteSpace(row.Summary));
                 var ready = group.Count(row =>
                     !string.IsNullOrWhiteSpace(row.NumberLabel)
-                    && !string.IsNullOrWhiteSpace(row.DocumentCode)
+                    && (row.IsAggregate || !string.IsNullOrWhiteSpace(row.DocumentCode))
                     && !string.IsNullOrWhiteSpace(row.Date)
                     && !string.IsNullOrWhiteSpace(row.SheetNumber)
                     && !string.IsNullOrWhiteSpace(row.Summary));
@@ -1953,9 +2368,12 @@ public sealed class SummaryToolService : ISummaryToolService
         IReadOnlyList<string> catalog)
     {
         var catalogOrder = new Dictionary<string, int>(StringComparer.Ordinal);
+        var catalogDisplay = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < catalog.Count; index++)
         {
-            catalogOrder.TryAdd(NormalizeKey(catalog[index]), index);
+            var key = NormalizeKey(catalog[index]);
+            catalogOrder.TryAdd(key, index);
+            catalogDisplay.TryAdd(key, catalog[index]);
         }
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -1975,7 +2393,8 @@ public sealed class SummaryToolService : ISummaryToolService
                 continue;
             }
 
-            unique.Add((value, unique.Count, catalogOrder.GetValueOrDefault(key, int.MaxValue)));
+            var display = catalogDisplay.TryGetValue(key, out var canonical) ? canonical : value;
+            unique.Add((display, unique.Count, catalogOrder.GetValueOrDefault(key, int.MaxValue)));
         }
 
         return unique
