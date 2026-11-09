@@ -82,6 +82,12 @@ public sealed class SummaryRow
     /// <summary>Giá trị cột "số tờ" (G), thường là khoảng trang như "01-20".</summary>
     public string SheetNumber { get; init; } = string.Empty;
 
+    /// <summary>Ngày văn bản đọc từ cột ngày (thường E), đã chuẩn hoá dd/MM/yyyy khi đọc được.</summary>
+    public string DocumentDate { get; init; } = string.Empty;
+
+    /// <summary>Số ký hiệu văn bản đọc từ cột ký hiệu (thường F).</summary>
+    public string DocumentCode { get; init; } = string.Empty;
+
     /// <summary>Toàn bộ nội dung ô trích yếu ban đầu.</summary>
     public string OriginalSummary { get; init; } = string.Empty;
 
@@ -254,6 +260,25 @@ public interface ISummaryToolService
         SummaryScope scope,
         CancellationToken cancellationToken = default,
         string? outputFileName = null);
+
+    /// <summary>
+    /// Xem trước mức sẵn sàng in theo năm sau khi áp dụng các thay đổi hiện tại.
+    /// Dùng để cảnh báo trước khi xuất bản in.
+    /// </summary>
+    SummaryPrintPreview PreviewPrint(
+        Guid sessionId,
+        IReadOnlyList<SummaryChange> changes,
+        IReadOnlyList<int>? years = null);
+
+    /// <summary>
+    /// Xuất bản in: dựng workbook ML từ dữ liệu đã hoàn thiện, sinh sheet in năm
+    /// và chèn macro in/lọc. Trả về .xlsm hoặc .zip tuỳ <paramref name="options"/>.
+    /// </summary>
+    Task<SummaryPrintExportResult> ExportPrintAsync(
+        Guid sessionId,
+        IReadOnlyList<SummaryChange> changes,
+        SummaryPrintOptions options,
+        CancellationToken cancellationToken = default);
 
     bool DeleteSession(Guid sessionId);
 

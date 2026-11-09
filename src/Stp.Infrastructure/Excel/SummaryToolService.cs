@@ -128,12 +128,22 @@ public sealed class SummaryToolService : ISummaryToolService
 
     private readonly IFileStorage _storage;
     private readonly ILogger<SummaryToolService> _logger;
+    private readonly ISummaryPrintService? _printService;
     private readonly ConcurrentDictionary<Guid, SummaryWorkbook> _sessions = new();
 
     public SummaryToolService(IFileStorage storage, ILogger<SummaryToolService> logger)
+        : this(storage, logger, null)
+    {
+    }
+
+    public SummaryToolService(
+        IFileStorage storage,
+        ILogger<SummaryToolService> logger,
+        ISummaryPrintService? printService)
     {
         _storage = storage;
         _logger = logger;
+        _printService = printService;
     }
 
     public async Task<SummaryWorkbook> CreateSessionAsync(
@@ -673,6 +683,90 @@ public sealed class SummaryToolService : ISummaryToolService
         }
     }
 
+    public SummaryPrintPreview PreviewPrint(
+        Guid sessionId,
+        IReadOnlyList<SummaryChange> changes,
+        IReadOnlyList<int>? years = null)
+    {
+        var session = RequireSession(sessionId);
+        var built = BuildPrintRows(session, changes, years);
+
+        return new SummaryPrintPreview(
+            built.Statuses,
+            built.Rows.Count,
+            built.Statuses.Any(status => status.HasIssues));
+    }
+
+    public async Task<SummaryPrintExportResult> ExportPrintAsync(
+        Guid sessionId,
+        IReadOnlyList<SummaryChange> changes,
+        SummaryPrintOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        if (_printService is null)
+        {
+            throw new InvalidOperationException(
+                "Chức năng xuất bản in chưa được cấu hình trên máy chủ.");
+        }
+
+        var session = RequireSession(sessionId);
+        var built = BuildPrintRows(session, changes, options.Years);
+
+        if (built.Rows.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Không có hồ sơ nào trong các năm đã chọn để xuất bản in.");
+        }
+
+        if (!options.AllowIncomplete && built.Statuses.Any(status => status.HasIssues))
+        {
+            throw new InvalidOperationException(BuildPrintIncompleteMessage(built.Statuses));
+        }
+
+        var baseName = Path.GetFileNameWithoutExtension(session.FileName) + "_ban_in";
+        var request = new SummaryPrintBuildRequest(
+            built.Rows,
+            built.Statuses.Select(status => status.Year).ToList(),
+            options.Mode,
+            baseName);
+
+        var result = await _printService
+            .BuildAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+
+        var warnings = result.Warnings.ToList();
+        if (options.AllowIncomplete)
+        {
+            var issues = built.Statuses.Where(status => status.HasIssues).ToList();
+            if (issues.Count > 0)
+            {
+                warnings.Add(BuildPrintIncompleteMessage(issues));
+            }
+        }
+
+        var extension = Path.GetExtension(result.FileName);
+        var outputName = SanitizeOutputFileName(options.OutputFileName, result.FileName, extension);
+
+        _logger.LogInformation(
+            "Xuất bản in {FileName}: {Years} năm, {Rows} hồ sơ, {Changed} dòng sửa, {Normalized} dòng chuẩn hoá, {Bytes} byte.",
+            outputName,
+            result.Years.Count,
+            result.RowCount,
+            built.ChangedRows,
+            built.NormalizedRows,
+            result.Content.Length);
+
+        return new SummaryPrintExportResult(
+            result.Content,
+            outputName,
+            result.ContentType,
+            result.RowCount,
+            built.ChangedRows,
+            built.NormalizedRows,
+            result.Years,
+            warnings);
+    }
+
     public bool DeleteSession(Guid sessionId)
     {
         if (!_sessions.TryRemove(sessionId, out _))
@@ -700,6 +794,14 @@ public sealed class SummaryToolService : ISummaryToolService
         var numberColumn = DetectNumberColumn(sheet, lastRow);
         var documentNumberColumn = DetectDocumentNumberColumn(sheet, headerRow, lastColumn);
         var sheetNumberColumn = DetectSheetNumberColumn(sheet, headerRow, lastRow, lastColumn);
+        var dateColumn = DetectDateColumn(sheet, headerRow, lastColumn, summaryColumn);
+        var documentCodeColumn = DetectDocumentCodeColumn(
+            sheet,
+            headerRow,
+            lastColumn,
+            summaryColumn,
+            dateColumn,
+            sheetNumberColumn);
         var sheetNumberHeader = sheet.Cell(headerRow, sheetNumberColumn).GetString().Trim();
         var headerCatalog = ExtractHeaderCatalog(sheet, headerRow, summaryColumn, lastColumn);
         var rawRows = ReadRawRows(
@@ -709,7 +811,9 @@ public sealed class SummaryToolService : ISummaryToolService
             summaryColumn,
             numberColumn,
             documentNumberColumn,
-            sheetNumberColumn);
+            sheetNumberColumn,
+            dateColumn,
+            documentCodeColumn);
 
         var observed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var raw in rawRows)
@@ -753,6 +857,8 @@ public sealed class SummaryToolService : ISummaryToolService
                 NumberLabel = raw.NumberLabel,
                 DocumentNumber = raw.DocumentNumber,
                 SheetNumber = raw.SheetNumber,
+                DocumentDate = raw.DocumentDate,
+                DocumentCode = raw.DocumentCode,
                 OriginalSummary = raw.Text,
                 BaseSummary = baseSummary,
                 Items = items,
@@ -955,6 +1061,65 @@ public sealed class SummaryToolService : ISummaryToolService
         return lastColumn >= 7 ? 7 : Math.Max(1, lastColumn);
     }
 
+    /// <summary>
+    /// Nhận diện cột ngày văn bản. Ưu tiên tiêu đề "thời gian tài liệu"/"ngày";
+    /// nếu không có thì lấy cột ngay sau cột trích yếu (thường là E).
+    /// </summary>
+    private static int DetectDateColumn(
+        IXLWorksheet sheet,
+        int headerRow,
+        int lastColumn,
+        int summaryColumn)
+    {
+        for (var column = summaryColumn + 1; column <= lastColumn; column++)
+        {
+            var header = NormalizeKey(sheet.Cell(headerRow, column).GetString());
+            if (header.Contains("thoi gian tai lieu", StringComparison.Ordinal)
+                || header.Contains("ngay thang", StringComparison.Ordinal)
+                || header.Contains("ngay van ban", StringComparison.Ordinal)
+                || header.Contains("ngay ban hanh", StringComparison.Ordinal)
+                || header == "ngay")
+            {
+                return column;
+            }
+        }
+
+        return summaryColumn + 1 <= lastColumn ? summaryColumn + 1 : summaryColumn;
+    }
+
+    /// <summary>
+    /// Nhận diện cột số ký hiệu văn bản. Ưu tiên tiêu đề "số ký hiệu"; nếu không có
+    /// thì lấy cột ngay sau cột ngày (thường là F), trừ khi đó là cột số tờ.
+    /// </summary>
+    private static int DetectDocumentCodeColumn(
+        IXLWorksheet sheet,
+        int headerRow,
+        int lastColumn,
+        int summaryColumn,
+        int dateColumn,
+        int sheetNumberColumn)
+    {
+        for (var column = 1; column <= lastColumn; column++)
+        {
+            if (column == summaryColumn || column == dateColumn || column == sheetNumberColumn)
+            {
+                continue;
+            }
+
+            var header = NormalizeKey(sheet.Cell(headerRow, column).GetString());
+            if (header.Contains("so ky hieu", StringComparison.Ordinal)
+                || header.Contains("ky hieu van ban", StringComparison.Ordinal))
+            {
+                return column;
+            }
+        }
+
+        var fallback = dateColumn + 1;
+        return fallback <= lastColumn && fallback != sheetNumberColumn && fallback != summaryColumn
+            ? fallback
+            : 0;
+    }
+
     private static List<string> ExtractHeaderCatalog(
         IXLWorksheet sheet,
         int headerRow,
@@ -1059,7 +1224,9 @@ public sealed class SummaryToolService : ISummaryToolService
         int summaryColumn,
         int numberColumn,
         int documentNumberColumn,
-        int sheetNumberColumn)
+        int sheetNumberColumn,
+        int dateColumn,
+        int documentCodeColumn)
     {
         var rows = new List<RawRow>();
         string? currentGroup = null;
@@ -1071,6 +1238,10 @@ public sealed class SummaryToolService : ISummaryToolService
             var numberLabel = sheet.Cell(rowNumber, numberColumn).GetString().Trim();
             var documentNumber = sheet.Cell(rowNumber, documentNumberColumn).GetString().Trim();
             var sheetNumber = sheet.Cell(rowNumber, sheetNumberColumn).GetString().Trim();
+            var documentDate = ReadDateText(sheet.Cell(rowNumber, dateColumn));
+            var documentCode = documentCodeColumn > 0
+                ? sheet.Cell(rowNumber, documentCodeColumn).GetString().Trim()
+                : string.Empty;
             var summaryCell = sheet.Cell(rowNumber, summaryColumn);
             var text = summaryCell.GetString().Trim();
             var hasFormula = summaryCell.HasFormula;
@@ -1120,7 +1291,7 @@ public sealed class SummaryToolService : ISummaryToolService
                 }
             }
 
-            var year = ReadYear(sheet.Cell(rowNumber, 5)) ?? currentYear;
+            var year = ReadYear(sheet.Cell(rowNumber, dateColumn)) ?? currentYear;
             if (year.HasValue)
             {
                 currentYear = year;
@@ -1132,6 +1303,8 @@ public sealed class SummaryToolService : ISummaryToolService
                 numberLabel,
                 documentNumber,
                 sheetNumber,
+                documentDate,
+                documentCode,
                 text,
                 hasFormula,
                 currentGroup,
@@ -1154,6 +1327,80 @@ public sealed class SummaryToolService : ISummaryToolService
             or "ghi chu"
             or "so ky hieu"
             or "stt";
+    }
+
+    /// <summary>
+    /// Đọc ngày văn bản từ ô Excel và chuẩn hoá về dd/MM/yyyy khi nhận diện được.
+    /// Giữ nguyên chuỗi gốc nếu không phải ngày để người dùng còn thấy dữ liệu lạ.
+    /// </summary>
+    private static string ReadDateText(IXLCell cell)
+    {
+        if (cell.IsEmpty())
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            if (cell.DataType == XLDataType.DateTime)
+            {
+                return cell.GetDateTime().ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            }
+
+            if (cell.DataType == XLDataType.Number)
+            {
+                var serial = cell.GetDouble();
+                if (serial is > 1 and < 2_958_466
+                    && (LooksLikeDateNumber(serial) || LooksLikeDateFormat(cell.Style.DateFormat.Format)))
+                {
+                    return DateTime.FromOADate(serial)
+                        .ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+                }
+            }
+
+            var text = cell.GetString().Trim();
+            if (text.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            if (DateTime.TryParse(
+                    text,
+                    CultureInfo.GetCultureInfo("vi-VN"),
+                    DateTimeStyles.None,
+                    out var viDate))
+            {
+                return viDate.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            }
+
+            if (DateTime.TryParse(
+                    text,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var invariantDate))
+            {
+                return invariantDate.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            }
+
+            return text;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool LooksLikeDateNumber(double serial) => serial is > 20_000 and < 80_000;
+
+    private static bool LooksLikeDateFormat(string? format)
+    {
+        if (string.IsNullOrWhiteSpace(format))
+        {
+            return false;
+        }
+
+        var cleaned = Regex.Replace(format, @"""[^""]*""|\[[^\]]*\]", string.Empty);
+        return cleaned.IndexOfAny(new[] { 'd', 'm', 'y', 'D', 'M', 'Y' }) >= 0;
     }
 
     private static int? ReadYear(IXLCell cell)
@@ -1419,6 +1666,190 @@ public sealed class SummaryToolService : ISummaryToolService
         }
 
         return baseText + separator + "(" + list + ")";
+    }
+
+    private static PrintRowsResult BuildPrintRows(
+        SummaryWorkbook session,
+        IReadOnlyList<SummaryChange> changes,
+        IReadOnlyList<int>? years)
+    {
+        var byRow = session.Rows.ToDictionary(row => row.RowNumber);
+        foreach (var change in changes)
+        {
+            if (!byRow.ContainsKey(change.RowNumber))
+            {
+                throw new ArgumentException(
+                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
+            }
+        }
+
+        var changeMap = changes
+            .GroupBy(change => change.RowNumber)
+            .ToDictionary(group => group.Key, group => group.Last());
+        var yearFilter = years is { Count: > 0 } ? years.ToHashSet() : null;
+
+        var rows = new List<SummaryPrintRow>();
+        var changedRows = new HashSet<int>();
+        var normalizedRows = 0;
+
+        foreach (var row in session.Rows)
+        {
+            if (!row.Year.HasValue)
+            {
+                continue;
+            }
+
+            if (yearFilter is not null && !yearFilter.Contains(row.Year.Value))
+            {
+                continue;
+            }
+
+            changeMap.TryGetValue(row.RowNumber, out var change);
+            var plan = CreatePlan(row, change, session.Catalog);
+
+            if (plan.SummaryChanged
+                || plan.SheetNumberChanged
+                || plan.DocumentNumberChanged
+                || plan.NumberLabelChanged)
+            {
+                changedRows.Add(row.RowNumber);
+            }
+
+            if (plan.Normalized)
+            {
+                normalizedRows++;
+            }
+
+            rows.Add(new SummaryPrintRow(
+                row.Year.Value,
+                plan.NumberLabel ?? string.Empty,
+                plan.DocumentNumber ?? string.Empty,
+                plan.Summary,
+                row.DocumentDate,
+                row.DocumentCode,
+                SanitizeSheetNumberForPrint(plan.SheetNumber),
+                string.Empty,
+                row.OriginalSummary));
+        }
+
+        var statuses = rows
+            .GroupBy(row => row.Year)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var total = group.Count();
+                var missingNumber = group.Count(row => string.IsNullOrWhiteSpace(row.NumberLabel));
+                var missingDocumentCode = group.Count(row => string.IsNullOrWhiteSpace(row.DocumentCode));
+                var missingDate = group.Count(row => string.IsNullOrWhiteSpace(row.Date));
+                var missingSheetNumber = group.Count(row => string.IsNullOrWhiteSpace(row.SheetNumber));
+                var missingSummary = group.Count(row => string.IsNullOrWhiteSpace(row.Summary));
+                var ready = group.Count(row =>
+                    !string.IsNullOrWhiteSpace(row.NumberLabel)
+                    && !string.IsNullOrWhiteSpace(row.DocumentCode)
+                    && !string.IsNullOrWhiteSpace(row.Date)
+                    && !string.IsNullOrWhiteSpace(row.SheetNumber)
+                    && !string.IsNullOrWhiteSpace(row.Summary));
+
+                return new SummaryPrintYearStatus(
+                    group.Key,
+                    total,
+                    ready,
+                    missingNumber,
+                    missingDocumentCode,
+                    missingDate,
+                    missingSheetNumber,
+                    missingSummary);
+            })
+            .ToList();
+
+        return new PrintRowsResult(rows, statuses, changedRows.Count, normalizedRows);
+    }
+
+    private static string BuildPrintIncompleteMessage(
+        IReadOnlyList<SummaryPrintYearStatus> statuses)
+    {
+        var details = statuses
+            .Where(status => status.HasIssues)
+            .Select(status =>
+            {
+                var parts = new List<string>();
+                if (status.MissingNumber > 0)
+                {
+                    parts.Add($"{status.MissingNumber} thiếu số hồ sơ");
+                }
+
+                if (status.MissingDocumentCode > 0)
+                {
+                    parts.Add($"{status.MissingDocumentCode} thiếu số ký hiệu");
+                }
+
+                if (status.MissingDate > 0)
+                {
+                    parts.Add($"{status.MissingDate} thiếu ngày");
+                }
+
+                if (status.MissingSheetNumber > 0)
+                {
+                    parts.Add($"{status.MissingSheetNumber} thiếu số tờ");
+                }
+
+                if (status.MissingSummary > 0)
+                {
+                    parts.Add($"{status.MissingSummary} thiếu trích yếu");
+                }
+
+                return $"năm {status.Year}: {string.Join(", ", parts)}";
+            })
+            .ToList();
+
+        return "Chưa đủ dữ liệu để in: "
+            + string.Join("; ", details)
+            + ". Hãy bổ sung hoặc chọn “Vẫn xuất dù còn thiếu”.";
+    }
+
+    /// <summary>
+    /// Chỉ giữ giá trị giống khoảng trang thật (1-2000). Các serial Excel như
+    /// 43831 hoặc số năm như 2201 bị loại để không in sai vào cột "Tờ số".
+    /// </summary>
+    private static string SanitizeSheetNumberForPrint(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var text = Regex.Replace(value.Trim(), @"\s*[-–—]\s*", "-");
+        var range = Regex.Match(text, @"^(\d{1,4})-(\d{1,4})$");
+        if (range.Success
+            && IsPlausiblePageRange(range.Groups[1].Value, range.Groups[2].Value))
+        {
+            return text;
+        }
+
+        if (Regex.IsMatch(text, @"^\d{1,4}$")
+            && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var page)
+            && page is >= 1 and <= 2000)
+        {
+            return text;
+        }
+
+        var embedded = Regex.Match(text, @"(\d{1,4})\s*-\s*(\d{1,4})");
+        if (embedded.Success
+            && IsPlausiblePageRange(embedded.Groups[1].Value, embedded.Groups[2].Value))
+        {
+            return $"{embedded.Groups[1].Value}-{embedded.Groups[2].Value}";
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsPlausiblePageRange(string fromText, string toText)
+    {
+        return int.TryParse(fromText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var from)
+            && int.TryParse(toText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var to)
+            && from is >= 1 and <= 2000
+            && to is >= 1 and <= 2000
+            && to >= from;
     }
 
     private static SummaryPlan CreatePlan(
@@ -1791,6 +2222,8 @@ public sealed class SummaryToolService : ISummaryToolService
         string NumberLabel,
         string DocumentNumber,
         string SheetNumber,
+        string DocumentDate,
+        string DocumentCode,
         string Text,
         bool HasFormula,
         string? Group,
@@ -1842,6 +2275,12 @@ public sealed class SummaryToolService : ISummaryToolService
 
         return name.Length == 0 ? fallback : name;
     }
+
+    private sealed record PrintRowsResult(
+        List<SummaryPrintRow> Rows,
+        IReadOnlyList<SummaryPrintYearStatus> Statuses,
+        int ChangedRows,
+        int NormalizedRows);
 
     private sealed record SummaryPlan(
         SummaryRow Row,

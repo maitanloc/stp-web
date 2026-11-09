@@ -137,3 +137,31 @@ public sealed record SummaryFilteredPreviewResponse(
     int NormalizedRows,
     bool Truncated,
     IReadOnlyList<SummaryPreviewRowResponse> Items);
+
+/// <summary>Xem trước mức sẵn sàng in của các năm sau khi áp dụng chỉnh sửa.</summary>
+public sealed record SummaryPrintPreviewRequest(
+    IReadOnlyList<SummaryChangeRequest>? Changes,
+    IReadOnlyList<int>? Years = null);
+
+public sealed record SummaryPrintYearStatusResponse(
+    int Year,
+    int Total,
+    int Ready,
+    int MissingNumber,
+    int MissingDocumentCode,
+    int MissingDate,
+    int MissingSheetNumber,
+    int MissingSummary);
+
+public sealed record SummaryPrintPreviewResponse(
+    IReadOnlyList<SummaryPrintYearStatusResponse> Years,
+    int TotalRows,
+    bool HasIssues);
+
+/// <summary>Xuất bản in theo năm; mode = perYear (zip) hoặc combined (một .xlsm).</summary>
+public sealed record SummaryPrintExportRequest(
+    IReadOnlyList<SummaryChangeRequest>? Changes,
+    IReadOnlyList<int>? Years = null,
+    string? Mode = null,
+    bool AllowIncomplete = false,
+    string? OutputFileName = null);

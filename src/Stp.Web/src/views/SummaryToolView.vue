@@ -23,6 +23,9 @@ import type {
   SummaryInspectResponse,
   SummaryNumberMode,
   SummaryPreviewRowResponse,
+  SummaryPrintMode,
+  SummaryPrintPreviewResponse,
+  SummaryPrintYearStatusResponse,
   SummaryRowResponse,
   SummaryRowsResponse,
   SummaryScopeRequest,
@@ -150,6 +153,34 @@ const pendingExportMode = ref<'full' | 'filtered'>('full')
 // D3: báo cáo thiếu theo năm
 const yearReport = ref<Array<{ year: number; total: number; missingSheetNumber: number; missingDocumentNumber: number; missingNumber: number; needsNormalization: number }>>([])
 const reportLoading = ref(false)
+
+// E: xuất bản in theo năm (sheet BANG_IN_HANG_LOAT + macro lọc/in)
+const printOpen = ref(false)
+const printLoading = ref(false)
+const printExporting = ref(false)
+const printError = ref<string | null>(null)
+const printPreview = ref<SummaryPrintPreviewResponse | null>(null)
+const printYears = ref<number[]>([])
+const printMode = ref<SummaryPrintMode>('perYear')
+const printAllowIncomplete = ref(false)
+const printFileName = ref('')
+
+const printSelectedStatuses = computed<SummaryPrintYearStatusResponse[]>(() => {
+  const statuses = printPreview.value?.years ?? []
+  const chosen = new Set(printYears.value)
+  return statuses.filter((item) => chosen.has(item.year))
+})
+const printSelectedRows = computed(() =>
+  printSelectedStatuses.value.reduce((total, item) => total + item.total, 0),
+)
+const printSelectedMissing = computed(() =>
+  printSelectedStatuses.value.reduce((total, item) => total + item.missingNumber + item.missingDocumentCode + item.missingDate + item.missingSheetNumber + item.missingSummary, 0),
+)
+const printCanExport = computed(() =>
+  printYears.value.length > 0
+  && printSelectedRows.value > 0
+  && (printAllowIncomplete.value || printSelectedMissing.value === 0),
+)
 
 // Khôi phục phiên sau F5 / mất kết nối + lưu vào Kho + lịch sử quá trình
 const ACTIVE_SESSION_KEY = 'stp.summary.activeSession'
@@ -896,6 +927,121 @@ function exportYearReportCsv(): void {
   const baseName = session.value?.fileName.replace(/\.[^.]+$/, '') ?? 'bao-cao'
   saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${baseName}_bao-cao-theo-nam.csv`)
   toast.success('Đã xuất báo cáo', `${formatNumber(yearReport.value.length)} năm đã được ghi vào CSV.`)
+}
+
+function suggestedPrintFileName(): string {
+  const base = (session.value?.fileName ?? 'ban-in').replace(/\.[^.]+$/, '')
+  return `${base}_ban_in`
+}
+
+function openPrintDialog(): void {
+  const active = session.value
+  if (!active) return
+
+  printError.value = null
+  printPreview.value = null
+  printYears.value = yearReport.value.length > 0
+    ? yearReport.value.map((item) => item.year)
+    : active.years.map((item) => item.year)
+  printMode.value = 'perYear'
+  printAllowIncomplete.value = false
+  printFileName.value = suggestedPrintFileName()
+  printOpen.value = true
+  void fetchPrintPreview(true)
+}
+
+async function fetchPrintPreview(selectAll = false): Promise<void> {
+  const active = session.value
+  if (!active) return
+
+  printLoading.value = true
+  printError.value = null
+  try {
+    // Luôn lấy đủ mọi năm để danh sách checkbox không co lại khi bỏ chọn một năm.
+    printPreview.value = await request<SummaryPrintPreviewResponse>(
+      `/api/summary/${active.sessionId}/export-print/preview`,
+      { method: 'POST', body: { changes: allChanges.value } },
+    )
+
+    if (selectAll) {
+      printYears.value = (printPreview.value?.years ?? []).map((item) => item.year)
+    }
+  } catch (caught) {
+    printError.value = errorMessage(caught)
+  } finally {
+    printLoading.value = false
+  }
+}
+
+function togglePrintYear(year: number): void {
+  const next = new Set(printYears.value)
+  if (next.has(year)) {
+    next.delete(year)
+  } else {
+    next.add(year)
+  }
+  printYears.value = [...next].sort((a, b) => a - b)
+}
+
+function selectAllPrintYears(): void {
+  printYears.value = (printPreview.value?.years ?? []).map((item) => item.year)
+}
+
+function clearPrintYears(): void {
+  printYears.value = []
+}
+
+function printYearMissing(status: SummaryPrintYearStatusResponse): number {
+  return status.missingNumber
+    + status.missingDocumentCode
+    + status.missingDate
+    + status.missingSheetNumber
+    + status.missingSummary
+}
+
+async function exportPrint(): Promise<void> {
+  const active = session.value
+  if (!active) return
+
+  if (printYears.value.length === 0) {
+    printError.value = 'Chọn ít nhất một năm để xuất bản in.'
+    return
+  }
+
+  if (printSelectedMissing.value > 0 && !printAllowIncomplete.value) {
+    printError.value = 'Còn dữ liệu thiếu. Bổ sung hoặc chọn “Vẫn xuất dù còn thiếu”.'
+    return
+  }
+
+  printExporting.value = true
+  printError.value = null
+  try {
+    const result = await download(`/api/summary/${active.sessionId}/export-print`, {
+      method: 'POST',
+      body: {
+        changes: allChanges.value,
+        years: printYears.value,
+        mode: printMode.value,
+        allowIncomplete: printAllowIncomplete.value,
+        outputFileName: printFileName.value.trim() || undefined,
+      },
+    })
+
+    saveBlob(result.blob, result.fileName)
+    pushHistoryEntry(
+      'Xuất bản in',
+      `${result.fileName} · ${formatNumber(printSelectedRows.value)} hồ sơ`,
+    )
+    toast.success(
+      'Đã xuất bản in',
+      `${result.fileName} · ${formatNumber(printSelectedRows.value)} hồ sơ, ${formatNumber(printYears.value.length)} năm.`,
+    )
+    printOpen.value = false
+  } catch (caught) {
+    printError.value = errorMessage(caught)
+  } finally {
+    printExporting.value = false
+  }
 }
 
 function queryParams(): Record<string, string | number | boolean | null | undefined> {
@@ -2198,6 +2344,30 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Xuất bản in theo năm</div>
+            <div class="card-subtitle">
+              Sinh sheet in BANG_IN_HANG_LOAT kèm macro lọc/in cho từng năm, dùng đúng trích yếu đã chuẩn hoá.
+            </div>
+          </div>
+          <button class="btn btn-accent btn-sm" type="button" @click="openPrintDialog">
+            <FileSpreadsheet :size="14" />
+            Chuẩn bị bản in
+          </button>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-info" style="margin: 0">
+            <Info :size="15" />
+            <div class="grow">
+              Chọn năm, kiểm tra dữ liệu thiếu rồi tải về. Mỗi năm một file .xlsm (đóng gói .zip)
+              hoặc gộp tất cả vào một .xlsm. Macro in/lọc được chèn sẵn.
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div v-if="changedCount > 0" class="summary-actionbar">
         <div>
           <strong>{{ formatNumber(changedCount) }}</strong>
@@ -2440,6 +2610,147 @@ onBeforeUnmount(() => {
             >
               <Download :size="16" />
               {{ exporting ? 'Đang xuất file...' : 'Xuất file Excel' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- E: xuất bản in theo năm -->
+      <div v-if="printOpen" class="modal-backdrop" @click.self="printOpen = false">
+        <div class="modal" style="width: min(760px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title">Xuất bản in theo năm</div>
+              <div class="card-subtitle">
+                Bản in dùng trích yếu đã sửa, số tờ đã kiểm tra và macro lọc/in của phòng.
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="printOpen = false">
+              <X :size="18" />
+            </button>
+          </div>
+
+          <div class="modal-body stack" style="gap: 14px">
+            <div v-if="printLoading" class="loading-block" style="padding: 24px 0">
+              <span class="spinner" />
+              <span>Đang kiểm tra dữ liệu in...</span>
+            </div>
+
+            <template v-else>
+              <div v-if="printError" class="alert alert-danger">
+                <TriangleExclamationPoint :size="17" />
+                <div class="grow">{{ printError }}</div>
+              </div>
+
+              <div class="row-between wrap">
+                <div class="summary-preview-label">Năm xuất bản in</div>
+                <div class="row" style="gap: 6px">
+                  <button class="btn btn-ghost btn-sm" type="button" @click="selectAllPrintYears">
+                    Chọn tất cả
+                  </button>
+                  <button class="btn btn-ghost btn-sm" type="button" @click="clearPrintYears">
+                    Bỏ chọn
+                  </button>
+                </div>
+              </div>
+
+              <div class="stack" style="gap: 8px; max-height: 260px; overflow-y: auto">
+                <label v-for="item in printPreview?.years ?? []" :key="item.year" class="checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="printYears.includes(item.year)"
+                    @change="togglePrintYear(item.year)"
+                  />
+                  <span class="checkbox-text">
+                    <span class="checkbox-title">
+                      Năm {{ item.year }} · {{ formatNumber(item.total) }} hồ sơ
+                    </span>
+                    <span class="checkbox-desc">
+                      <template v-if="printYearMissing(item) === 0">
+                        Đủ dữ liệu in ({{ formatNumber(item.ready) }}/{{ formatNumber(item.total) }})
+                      </template>
+                      <template v-else>
+                        Còn thiếu: {{ formatNumber(item.missingNumber) }} số hồ sơ ·
+                        {{ formatNumber(item.missingDocumentCode) }} số ký hiệu ·
+                        {{ formatNumber(item.missingDate) }} ngày ·
+                        {{ formatNumber(item.missingSheetNumber) }} số tờ ·
+                        {{ formatNumber(item.missingSummary) }} trích yếu
+                      </template>
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="alert" :class="printSelectedMissing > 0 ? 'alert-warning' : 'alert-info'">
+                <TriangleExclamationPoint v-if="printSelectedMissing > 0" :size="17" />
+                <Info v-else :size="17" />
+                <div class="grow">
+                  <template v-if="printSelectedMissing > 0">
+                    Đang chọn {{ formatNumber(printYears.length) }} năm,
+                    {{ formatNumber(printSelectedRows) }} hồ sơ; còn
+                    {{ formatNumber(printSelectedMissing) }} trường thiếu. Bật “Vẫn xuất dù còn thiếu”
+                    nếu muốn in ngay.
+                  </template>
+                  <template v-else>
+                    Đang chọn {{ formatNumber(printYears.length) }} năm,
+                    {{ formatNumber(printSelectedRows) }} hồ sơ — đủ dữ liệu in.
+                  </template>
+                </div>
+              </div>
+
+              <label class="checkbox" :class="{ 'is-disabled': printSelectedMissing === 0 }">
+                <input
+                  v-model="printAllowIncomplete"
+                  type="checkbox"
+                  :disabled="printSelectedMissing === 0"
+                />
+                <span class="checkbox-text">
+                  <span class="checkbox-title">Vẫn xuất dù còn thiếu</span>
+                  <span class="checkbox-desc">Các ô thiếu sẽ để trống trong bản in.</span>
+                </span>
+              </label>
+
+              <div class="summary-scope-picker">
+                <div class="summary-preview-label">Cách đóng gói</div>
+                <div class="row wrap" style="gap: 8px">
+                  <label class="radio-card" :class="{ selected: printMode === 'perYear' }">
+                    <input v-model="printMode" value="perYear" type="radio" />
+                    <span class="checkbox-text">
+                      <span class="checkbox-title">Mỗi năm một file</span>
+                      <span class="checkbox-desc">Tải về .zip gồm các .xlsm theo từng năm.</span>
+                    </span>
+                  </label>
+                  <label class="radio-card" :class="{ selected: printMode === 'combined' }">
+                    <input v-model="printMode" value="combined" type="radio" />
+                    <span class="checkbox-text">
+                      <span class="checkbox-title">Gộp một file</span>
+                      <span class="checkbox-desc">Một .xlsm chứa tất cả sheet năm đã chọn.</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <label class="field">
+                <span class="label">Tên file (không gồm đuôi)</span>
+                <input v-model="printFileName" class="input" type="text" autocomplete="off" />
+              </label>
+            </template>
+          </div>
+
+          <div class="modal-footer">
+            <span class="hint grow">
+              <template v-if="printMode === 'perYear'">Kết quả: .zip nhiều .xlsm</template>
+              <template v-else>Kết quả: một .xlsm</template>
+            </span>
+            <button class="btn btn-secondary" type="button" @click="printOpen = false">Huỷ</button>
+            <button
+              class="btn btn-accent"
+              type="button"
+              :disabled="printExporting || printLoading || !printCanExport"
+              @click="exportPrint"
+            >
+              <Download :size="16" />
+              {{ printExporting ? 'Đang dựng bản in...' : 'Xuất bản in' }}
             </button>
           </div>
         </div>

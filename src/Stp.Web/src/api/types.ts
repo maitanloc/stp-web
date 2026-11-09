@@ -490,3 +490,35 @@ export interface SummaryFilteredPreviewResponse {
   items: SummaryPreviewRowResponse[]
 }
 
+export interface SummaryPrintPreviewRequest {
+  changes: SummaryChangeRequest[]
+  years?: number[] | null
+}
+
+export interface SummaryPrintYearStatusResponse {
+  year: number
+  total: number
+  ready: number
+  missingNumber: number
+  missingDocumentCode: number
+  missingDate: number
+  missingSheetNumber: number
+  missingSummary: number
+}
+
+export interface SummaryPrintPreviewResponse {
+  years: SummaryPrintYearStatusResponse[]
+  totalRows: number
+  hasIssues: boolean
+}
+
+export type SummaryPrintMode = 'perYear' | 'combined'
+
+export interface SummaryPrintExportRequest {
+  changes: SummaryChangeRequest[]
+  years?: number[] | null
+  mode: SummaryPrintMode
+  allowIncomplete: boolean
+  outputFileName?: string | null
+}
+

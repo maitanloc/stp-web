@@ -317,6 +317,111 @@ public sealed class SummaryToolController : ControllerBase
         }
     }
 
+    /// <summary>Xem trước mức sẵn sàng in theo năm sau khi áp dụng chỉnh sửa hiện tại.</summary>
+    [HttpPost("{sessionId:guid}/export-print/preview")]
+    public ActionResult<SummaryPrintPreviewResponse> PreviewPrint(
+        Guid sessionId,
+        [FromBody] SummaryPrintPreviewRequest request)
+    {
+        var changes = request.Changes ?? Array.Empty<SummaryChangeRequest>();
+        if (ValidateChanges(changes, allowEmpty: true) is { } validationError)
+        {
+            return validationError;
+        }
+
+        try
+        {
+            var preview = _summary.PreviewPrint(
+                sessionId,
+                changes.Select(ToChange).ToList(),
+                request.Years);
+
+            return Ok(new SummaryPrintPreviewResponse(
+                preview.Years
+                    .Select(item => new SummaryPrintYearStatusResponse(
+                        item.Year,
+                        item.Total,
+                        item.Ready,
+                        item.MissingNumber,
+                        item.MissingDocumentCode,
+                        item.MissingDate,
+                        item.MissingSheetNumber,
+                        item.MissingSummary))
+                    .ToList(),
+                preview.TotalRows,
+                preview.HasIssues));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFoundProblem(ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return InvalidProblem(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Xuất bản in theo năm: sinh sheet BANG_IN_HANG_LOAT + macro in/lọc.
+    /// perYear trả về .zip nhiều .xlsm; combined trả về một .xlsm.
+    /// </summary>
+    [HttpPost("{sessionId:guid}/export-print")]
+    public async Task<IActionResult> ExportPrint(
+        Guid sessionId,
+        [FromBody] SummaryPrintExportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var changes = request.Changes ?? Array.Empty<SummaryChangeRequest>();
+        if (ValidateChanges(changes, allowEmpty: true) is { } validationError)
+        {
+            return validationError;
+        }
+
+        var mode = SummaryPrintOutputMode.PerYear;
+        if (!string.IsNullOrWhiteSpace(request.Mode)
+            && !Enum.TryParse(request.Mode, ignoreCase: true, out mode))
+        {
+            return InvalidProblem("Kiểu xuất bản in không hợp lệ (perYear hoặc combined).");
+        }
+
+        try
+        {
+            var result = await _summary.ExportPrintAsync(
+                sessionId,
+                changes.Select(ToChange).ToList(),
+                new SummaryPrintOptions(
+                    request.Years,
+                    mode,
+                    request.AllowIncomplete,
+                    request.OutputFileName),
+                cancellationToken);
+
+            Response.Headers["X-Summary-Print-Rows"] =
+                result.RowCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Response.Headers["X-Summary-Print-Changed-Rows"] =
+                result.ChangedRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Response.Headers["X-Summary-Print-Normalized-Rows"] =
+                result.NormalizedRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Response.Headers["X-Summary-Print-Years"] =
+                string.Join(',', result.Years);
+            // Header HTTP chỉ nhận ASCII; mã hoá để vẫn chuyển được cảnh báo tiếng Việt.
+            Response.Headers["X-Summary-Print-Warnings"] =
+                Uri.EscapeDataString(string.Join(" | ", result.Warnings));
+
+            return File(result.Content, result.ContentType, result.FileName);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFoundProblem(ex.Message);
+        }
+        catch (Exception ex) when (ex is ArgumentException
+                                       or InvalidOperationException
+                                       or InvalidDataException)
+        {
+            return InvalidProblem(ex.Message);
+        }
+    }
+
     /// <summary>Báo cáo dữ liệu thiếu theo năm cho phiên hiện tại.</summary>
     [HttpGet("{sessionId:guid}/report")]
     public ActionResult<IReadOnlyList<SummaryYearReportResponse>> GetReport(Guid sessionId)
