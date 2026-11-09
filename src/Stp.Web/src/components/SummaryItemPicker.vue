@@ -21,11 +21,13 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const query = ref('')
+const debouncedQuery = ref('')
 const custom = ref('')
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const popoverRef = ref<HTMLDivElement | null>(null)
 const dropUp = ref(false)
 const position = ref({ top: 0, left: 0, width: 360 })
+const activeIndex = ref(-1)
 
 const selectedKeys = computed(() => new Set(props.modelValue.map(normalizeText)))
 
@@ -37,9 +39,53 @@ const options = computed(() => {
     }
   }
 
-  const term = normalizeText(query.value.trim())
+  const term = normalizeText(debouncedQuery.value.trim())
   return term ? items.filter((item) => normalizeText(item).includes(term)) : items
 })
+
+let searchTimer: number | undefined
+
+function onSearchInput(): void {
+  if (searchTimer) window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => {
+    debouncedQuery.value = query.value
+    activeIndex.value = options.value.length > 0 ? 0 : -1
+  }, 120)
+}
+
+function onListKeydown(event: KeyboardEvent): void {
+  if (!open.value) return
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    activeIndex.value = Math.min(activeIndex.value + 1, options.value.length - 1)
+    scrollActiveIntoView()
+    return
+  }
+
+  if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    activeIndex.value = Math.max(activeIndex.value - 1, 0)
+    scrollActiveIntoView()
+    return
+  }
+
+  if (event.key === 'Enter' && activeIndex.value >= 0) {
+    const item = options.value[activeIndex.value]
+    if (item) {
+      event.preventDefault()
+      toggle(item)
+    }
+  }
+}
+
+function scrollActiveIntoView(): void {
+  nextTick(() => {
+    popoverRef.value
+      ?.querySelector<HTMLElement>(`[data-active-index="${activeIndex.value}"]`)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
 
 const label = computed(() => {
   if (props.modelValue.length === 0) return props.placeholder
@@ -86,6 +132,7 @@ function openPopover(): void {
 
   open.value = true
   query.value = ''
+  debouncedQuery.value = ''
   nextTick(() => {
     const trigger = triggerRef.value
     if (!trigger) return
@@ -103,11 +150,13 @@ function openPopover(): void {
       left,
       width,
     }
+    activeIndex.value = 0
   })
 }
 
 function close(): void {
   open.value = false
+  activeIndex.value = -1
 }
 
 function onPointerDown(event: PointerEvent): void {
@@ -194,8 +243,10 @@ onBeforeUnmount(() => {
             v-model="query"
             class="input"
             type="search"
-            placeholder="Tìm giấy tờ..."
+            placeholder="Tìm giấy tờ... (↑↓ + Enter)"
             autofocus
+            @input="onSearchInput"
+            @keydown="onListKeydown"
           />
           <button
             v-if="modelValue.length > 0"
@@ -209,13 +260,16 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="ms-list">
+        <div class="ms-list" @keydown="onListKeydown">
           <p v-if="options.length === 0" class="ms-empty">Không có mục phù hợp.</p>
           <label
-            v-for="item in options"
+            v-for="(item, index) in options"
             :key="item"
             class="ms-option"
-            :class="{ checked: selectedKeys.has(normalizeText(item)) }"
+            :class="{ checked: selectedKeys.has(normalizeText(item)), active: index === activeIndex }"
+            :data-active-index="index"
+            @mousemove="activeIndex = index"
+            @click="activeIndex = index"
           >
             <input
               type="checkbox"
