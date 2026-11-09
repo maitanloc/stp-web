@@ -3002,6 +3002,18 @@ pre,
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
+.ms-option-text mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: #fef08a;
+  color: inherit;
+}
+
+[data-theme='dark'] .ms-option-text mark {
+  background: #713f12;
+  color: #fef08a;
+}
+
 .ms-empty {
   margin: 0;
   padding: 14px;

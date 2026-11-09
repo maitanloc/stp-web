@@ -39,9 +39,54 @@ const options = computed(() => {
     }
   }
 
-  const term = normalizeText(debouncedQuery.value.trim())
-  return term ? items.filter((item) => normalizeText(item).includes(term)) : items
+  const tokens = searchTokens(debouncedQuery.value)
+  if (tokens.length === 0) return items
+
+  const phrase = normalizeText(debouncedQuery.value.trim())
+  return items
+    .map((item, index) => {
+      const key = normalizeText(item)
+      const matched = tokens.every((token) => key.includes(token))
+      const phrasePos = key.indexOf(phrase)
+      const firstTokenPos = Math.min(...tokens.map((token) => key.indexOf(token)))
+      return { item, index, matched, phrasePos: phrasePos < 0 ? Number.MAX_SAFE_INTEGER : phrasePos, firstTokenPos: firstTokenPos < 0 ? Number.MAX_SAFE_INTEGER : firstTokenPos }
+    })
+    .filter((entry) => entry.matched)
+    .sort((a, b) => a.phrasePos - b.phrasePos || a.firstTokenPos - b.firstTokenPos || a.index - b.index)
+    .map((entry) => entry.item)
 })
+
+function searchTokens(queryText: string): string[] {
+  return normalizeText(queryText)
+    .split(' ')
+    .filter((token) => token.length > 0)
+}
+
+function highlightParts(item: string): Array<{ text: string; hit: boolean }> {
+  const tokens = searchTokens(debouncedQuery.value)
+  if (tokens.length === 0) return [{ text: item, hit: false }]
+
+  const key = normalizeText(item)
+  const segments: Array<{ text: string; hit: boolean }> = []
+  let cursor = 0
+
+  // Tô sáng cụm khớp dài nhất trong từng token (theo ký tự gốc).
+  const folded = key
+
+  for (const token of tokens) {
+    const pos = folded.indexOf(token, cursor)
+    if (pos < 0) continue
+    if (pos > cursor) segments.push({ text: item.slice(cursor, pos), hit: false })
+    segments.push({ text: item.slice(pos, pos + token.length), hit: true })
+    cursor = pos + token.length
+  }
+
+  if (cursor < item.length) {
+    segments.push({ text: item.slice(cursor), hit: false })
+  }
+
+  return segments.length > 0 ? segments : [{ text: item, hit: false }]
+}
 
 let searchTimer: number | undefined
 
@@ -279,7 +324,12 @@ onBeforeUnmount(() => {
             <span class="ms-checkbox">
               <Check :size="12" />
             </span>
-            <span class="ms-option-text">{{ item }}</span>
+            <span class="ms-option-text">
+              <template v-for="(part, partIndex) in highlightParts(item)" :key="partIndex">
+                <mark v-if="part.hit">{{ part.text }}</mark>
+                <template v-else>{{ part.text }}</template>
+              </template>
+            </span>
           </label>
         </div>
 
@@ -302,7 +352,8 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ms-hint">
-          Đã chọn {{ modelValue.length }} mục. Bấm từng mục để thêm hoặc bỏ.
+          Đã chọn {{ modelValue.length }} mục — {{ options.length }} kết quả.
+          Gõ “kết hôn” sẽ ra “chứng nhận kết hôn”, “giấy kết hôn”… Bấm từng mục để thêm hoặc bỏ.
         </div>
       </div>
     </Teleport>
