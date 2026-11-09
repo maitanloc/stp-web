@@ -2475,16 +2475,10 @@ public sealed class SummaryToolService : ISummaryToolService
         switch (scope.NumberMode)
         {
             case SummaryNumberMode.Range:
-                if (scope.NumberFrom.HasValue)
+                if (scope.NumberFrom.HasValue || scope.NumberTo.HasValue)
                 {
                     query = query.Where(row =>
-                        row.Number.HasValue && row.Number.Value >= scope.NumberFrom.Value);
-                }
-
-                if (scope.NumberTo.HasValue)
-                {
-                    query = query.Where(row =>
-                        row.Number.HasValue && row.Number.Value <= scope.NumberTo.Value);
+                        MatchesNumberRange(row, scope.NumberFrom, scope.NumberTo));
                 }
 
                 break;
@@ -2492,7 +2486,8 @@ public sealed class SummaryToolService : ISummaryToolService
             case SummaryNumberMode.Single:
                 if (scope.Number.HasValue)
                 {
-                    query = query.Where(row => row.Number == scope.Number.Value);
+                    query = query.Where(row =>
+                        MatchesNumberRange(row, scope.Number, scope.Number));
                 }
 
                 break;
@@ -2521,6 +2516,37 @@ public sealed class SummaryToolService : ISummaryToolService
                 out var number)
             ? number
             : null;
+    }
+
+    /// <summary>
+    /// Khớp khoảng số hồ sơ với phần đầu dạng số của cột "Hồ sơ số" (thường là C)
+    /// hoặc cột số thứ tự (thường là B). Nhờ vậy người dùng nhập số nhìn thấy
+    /// trong Excel ở cột Hồ sơ số vẫn lọc được, kể cả khi cột B là số thứ tự khác.
+    /// </summary>
+    private static bool MatchesNumberRange(SummaryRow row, int? from, int? to)
+    {
+        return IsInNumberRange(ParseNumberLabel(row.DocumentNumber), from, to)
+               || IsInNumberRange(row.Number, from, to);
+    }
+
+    private static bool IsInNumberRange(int? value, int? from, int? to)
+    {
+        if (!value.HasValue)
+        {
+            return false;
+        }
+
+        if (from.HasValue && value.Value < from.Value)
+        {
+            return false;
+        }
+
+        if (to.HasValue && value.Value > to.Value)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static string ScopeSuffix(SummaryScope scope)

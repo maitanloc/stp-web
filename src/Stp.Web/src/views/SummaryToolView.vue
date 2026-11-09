@@ -1925,7 +1925,8 @@ onBeforeUnmount(() => {
             </label>
 
             <div class="summary-number-hint hint">
-              Số hồ sơ lấy từ phần đầu cột B (ví dụ “36A” tính là 36). Bản lọc chỉ giữ sheet ML và
+              Số hồ sơ lấy từ phần đầu cột {{ session.documentNumberColumn }} (Hồ sơ số) hoặc cột
+              {{ session.numberColumn }} (ví dụ “36A” tính là 36). Bản lọc chỉ giữ sheet dữ liệu và
               các hồ sơ trong phạm vi.
             </div>
             </div>
