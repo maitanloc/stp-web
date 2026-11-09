@@ -49,12 +49,12 @@ public sealed class ExcelInspector : IExcelInspector
         var warnings = new List<string>();
         if (mlSheet is null)
         {
-            warnings.Add("Không tìm thấy sheet ML. File này chưa thuộc cấu trúc chuẩn của STP.");
+            warnings.Add("Không tìm thấy sheet dữ liệu (ML/file nhập). File này chưa thuộc cấu trúc chuẩn của STP.");
         }
 
         if (kind == WorkbookKind.MlOnly)
         {
-            warnings.Add("File chỉ có ML, chưa có các sheet in năm. Hệ thống sẽ tự sinh sheet in từ ML.");
+            warnings.Add("File chỉ có sheet dữ liệu, chưa có các sheet in năm. Hệ thống sẽ tự sinh sheet in từ dữ liệu.");
         }
 
         if (hasMacro)

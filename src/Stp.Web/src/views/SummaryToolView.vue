@@ -329,7 +329,20 @@ async function archiveLastExport(): Promise<void> {
       toast.error('Chưa lưu được vào Kho', result.errorMessage ?? 'Không rõ lỗi.')
     }
   } catch (caught) {
-    toast.error('Chưa lưu được vào Kho', errorMessage(caught))
+    // /api/sync trả SyncResponse dạng 422 có errorMessage — trích ra để hiện
+    // lý do thật thay vì dòng chung chung "Unprocessable Entity".
+    const payload =
+      caught && typeof caught === 'object'
+        ? (caught as { payload?: unknown }).payload
+        : null
+    const detail =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as { errorMessage?: unknown }).errorMessage
+        : null
+    toast.error(
+      'Chưa lưu được vào Kho',
+      typeof detail === 'string' && detail.length > 0 ? detail : errorMessage(caught),
+    )
   } finally {
     archiving.value = false
   }
@@ -1045,6 +1058,13 @@ async function exportPrint(): Promise<void> {
 }
 
 function queryParams(): Record<string, string | number | boolean | null | undefined> {
+  // Chỉ gửi numberMode khi bộ lọc số đủ dữ liệu — tránh 400
+  // "Nhập ít nhất một đầu của khoảng số hồ sơ." khi người dùng mới chọn chế độ.
+  const rangeReady =
+    numberMode.value === 'all' ||
+    (numberMode.value === 'range' && (numberFrom.value !== '' || numberTo.value !== ''))
+  const singleReady = numberMode.value !== 'single' || singleNumber.value !== ''
+
   return {
     year: year.value === '' ? undefined : year.value,
     yearFrom: yearFrom.value === '' ? undefined : yearFrom.value,
@@ -1052,7 +1072,7 @@ function queryParams(): Record<string, string | number | boolean | null | undefi
     type: type.value || undefined,
     search: search.value.trim() || undefined,
     onlyExisting: onlyExisting.value || undefined,
-    numberMode: numberMode.value === 'all' ? undefined : numberMode.value,
+    numberMode: rangeReady && singleReady && numberMode.value !== 'all' ? numberMode.value : undefined,
     numberFrom:
       numberMode.value === 'range' && numberFrom.value !== '' ? numberFrom.value : undefined,
     numberTo:
@@ -1071,6 +1091,9 @@ function queryParams(): Record<string, string | number | boolean | null | undefi
 
 async function fetchRows(): Promise<void> {
   const active = session.value
+  // Bộ lọc số chưa nhập đủ (chọn chế độ khoảng/số đơn mà để trống) thì không
+  // gọi API — server trả 400. Bảng hiển thị hướng dẫn nhập số hồ sơ.
+  if (!scopeReady.value) return
   if (!active) return
 
   loadingRows.value = true

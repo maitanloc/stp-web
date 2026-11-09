@@ -30,9 +30,26 @@ internal static class ExcelArchiveParser
             return exact;
         }
 
+        // Sheet "file nhập" (và bản xuất lọc chỉ giữ sheet này) có tiêu đề ở
+        // dòng 6 thay vì dòng 1, nên không khớp A1/D1. Quét hàng tiêu đề tự do
+        // theo vị trí: A = "Hộp số", D chứa "Trích yếu nội dung".
         return workbook.Worksheets.FirstOrDefault(w =>
-            CellText(w.Cell("A1")).Equals("Hộp số", StringComparison.OrdinalIgnoreCase)
-            && CellText(w.Cell("D1")).Contains("Trích yếu nội dung", StringComparison.OrdinalIgnoreCase));
+            !IsPrintSheet(w) && HasSummaryHeader(w));
+    }
+
+    private static bool HasSummaryHeader(IXLWorksheet worksheet)
+    {
+        var lastRow = Math.Min(worksheet.LastRowUsed()?.RowNumber() ?? 0, 20);
+        for (var row = 1; row <= lastRow; row++)
+        {
+            if (CellText(worksheet.Cell(row, 1)).Equals("Hộp số", StringComparison.OrdinalIgnoreCase)
+                && CellText(worksheet.Cell(row, 4)).Contains("Trích yếu nội dung", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static bool IsPrintSheet(IXLWorksheet worksheet)

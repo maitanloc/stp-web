@@ -52,7 +52,7 @@ public sealed class ArchiveSyncService : IArchiveSyncService
             if (snapshot.Kind == WorkbookKind.Other)
             {
                 throw new InvalidDataException(
-                    "File không có sheet ML nên không thể đồng bộ.");
+                    "File không có sheet dữ liệu (ML/file nhập) nên không thể đồng bộ.");
             }
 
             var fileHash = request.FileHash ?? await ComputeHashAsync(
