@@ -69,16 +69,35 @@ public sealed class SummaryToolService : ISummaryToolService
         "tờ báo cáo hôn thú",
         "lời khai về tình trạng hôn nhân",
         "giấy chứng nhận kết hôn",
+        "giấy chứng nhận đăng ký kết hôn",
+        "chứng nhận độc thân",
+        "giấy xác nhận tình trạng hôn nhân",
+        "giấy xác nhận cư trú",
+        "đơn xin cấp giấy chứng nhận kết hôn",
+        "đơn xin trích lục kết hôn",
+        "đơn xin ghi chú kết hôn",
+        "đơn xin cấp giấy kết hôn",
+        "bản sao giấy chứng nhận kết hôn",
+        "bản sao giấy khai sinh",
+        "bản sao chứng minh nhân dân",
+        "quyết định cho phép đăng ký kết hôn",
         "quyết định",
         "biên bản",
+        "biên bản họp",
+        "biên bản giao nhận",
         "biên lai thu lệ phí",
         "tờ khai đề nghị",
         "phiếu hẹn",
-        "bản sao hộ khẩu",
-        "tờ khai bổ sung",
         "giấy hẹn",
+        "phiếu hoàn trả",
+        "thông báo",
+        "bản sao hộ khẩu",
+        "sổ hộ khẩu gia đình",
+        "tờ khai bổ sung",
         "lý lịch tư pháp",
+        "lý lịch công tác",
         "giấy chứng nhận tạm trú",
+        "ảnh 4x6",
         "ghi chú",
         "trích lục ghi chú kết hôn"
     };
@@ -87,7 +106,8 @@ public sealed class SummaryToolService : ISummaryToolService
     {
         "giay", "don", "phieu", "chung", "khai", "ho khau", "cmnd", "cong ham",
         "thi thuc", "ho chieu", "so yeu", "trich luc", "quyet dinh", "bien nhan",
-        "xac nhan", "chuyen khoa", "kham suc khoe", "dang ky"
+        "xac nhan", "chuyen khoa", "kham suc khoe", "dang ky", "ban sao", "bien ban",
+        "bien lai", "thong bao", "hoan tra", "ly lich", "tuong trinh"
     };
 
     private readonly IFileStorage _storage;
@@ -1198,7 +1218,7 @@ public sealed class SummaryToolService : ISummaryToolService
             Add(item);
         }
 
-        return result.Take(80).ToList();
+        return result.Take(200).ToList();
     }
 
     private static (string Base, List<string> Items, bool HasList) ParseSummary(
