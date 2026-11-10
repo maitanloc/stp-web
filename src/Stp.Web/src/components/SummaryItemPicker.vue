@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, ChevronDown, Plus, Search, X } from '@lucide/vue'
 
 const props = withDefaults(
@@ -131,9 +131,21 @@ function onListKeydown(event: KeyboardEvent): void {
 
 function scrollActiveIntoView(): void {
   nextTick(() => {
-    popoverRef.value
-      ?.querySelector<HTMLElement>(`[data-active-index="${activeIndex.value}"]`)
-      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    const list = popoverRef.value?.querySelector<HTMLElement>('.ms-list')
+    const option = popoverRef.value?.querySelector<HTMLElement>(
+      `[data-active-index="${activeIndex.value}"]`,
+    )
+    if (!list || !option) return
+
+    // Cuộn CHỈ trong danh sách — scrollIntoView trên panel position:fixed
+    // vẫn có thể kéo theo trang phía sau (hiện tượng "kéo cột" khi chọn).
+    const listRect = list.getBoundingClientRect()
+    const optionRect = option.getBoundingClientRect()
+    if (optionRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - optionRect.top
+    } else if (optionRect.bottom > listRect.bottom) {
+      list.scrollTop += optionRect.bottom - listRect.bottom
+    }
   })
 }
 
@@ -192,25 +204,57 @@ function openPopover(): void {
   query.value = ''
   debouncedQuery.value = ''
   nextTick(() => {
-    const trigger = triggerRef.value
-    if (!trigger) return
-
-    const rect = trigger.getBoundingClientRect()
-    const width = Math.min(390, window.innerWidth - 24)
-    const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12))
-    const estimatedHeight = 430
-    const below = window.innerHeight - rect.bottom
-    const above = rect.top
-    dropUp.value = below < Math.min(estimatedHeight, 360) && above > below
-
-    position.value = {
-      top: dropUp.value ? rect.top - 8 : rect.bottom + 8,
-      left,
-      width,
-    }
+    place()
     activeIndex.value = 0
   })
 }
+
+/**
+ * Đặt vị trí panel: đo chiều cao THẬT sau render thay vì ước lượng 430, rồi
+ * chặn panel luôn nằm trọn viewport. Bug cũ: trigger thấp gần đáy màn hình thì
+ * panel mở xuôi tràn ra ngoài — hàng "Thêm giấy tờ khác" + hint chìm dưới đáy.
+ */
+function place(): void {
+  const trigger = triggerRef.value
+  const panel = popoverRef.value
+  if (!open.value || !trigger || !panel) return
+
+  const rect = trigger.getBoundingClientRect()
+  const width = Math.min(390, window.innerWidth - 24)
+  const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12))
+
+  const height = panel.offsetHeight || 430
+  const gap = 8
+  const spaceBelow = window.innerHeight - rect.bottom
+  const spaceAbove = rect.top
+
+  let top: number
+  if (spaceBelow < height && spaceAbove > spaceBelow) {
+    dropUp.value = true
+    top = rect.top - gap
+  } else {
+    dropUp.value = false
+    top = rect.bottom + gap
+  }
+
+  if (dropUp.value) {
+    // translateY(-100%): mép hiển thị = top - height. Chặn để panel trọn viewport.
+    top = Math.min(Math.max(top, height + 12), window.innerHeight - 12)
+  } else {
+    top = Math.max(12, Math.min(top, window.innerHeight - height - 12))
+  }
+
+  position.value = { top, left, width }
+}
+
+// Chọn/bỏ chọn một mục làm chips lớn ra → layout dịch → panel fixed đứng yên
+// ở toạ độ cũ trông như "tách rời, để trống". Mồi lại vị trí theo trigger mới.
+watch(
+  () => props.modelValue.length,
+  () => {
+    if (open.value) nextTick(place)
+  },
+)
 
 function close(): void {
   open.value = false

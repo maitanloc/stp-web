@@ -186,9 +186,21 @@ function onListKeydown(event: KeyboardEvent): void {
 
 function scrollActiveIntoView(): void {
   nextTick(() => {
-    popoverRef.value
-      ?.querySelector<HTMLElement>(`[data-index="${activeIndex.value}"]`)
-      ?.scrollIntoView({ block: 'nearest' })
+    const list = popoverRef.value?.querySelector<HTMLElement>('.cs-list')
+    const option = popoverRef.value?.querySelector<HTMLElement>(
+      `[data-index="${activeIndex.value}"]`,
+    )
+    if (!list || !option) return
+
+    // Cuộn CHỈ trong danh sách — scrollIntoView trên panel position:fixed
+    // có thể kéo theo cả trang phía sau (hiện tượng "kéo cột").
+    const listRect = list.getBoundingClientRect()
+    const optionRect = option.getBoundingClientRect()
+    if (optionRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - optionRect.top
+    } else if (optionRect.bottom > listRect.bottom) {
+      list.scrollTop += optionRect.bottom - listRect.bottom
+    }
   })
 }
 

@@ -439,6 +439,16 @@ badge tần suất)** của mục 3 — nên làm liền nhau một đợt.
   chặn panel trong viewport (clamp top), `scrollActiveIntoView()` lúc
   mở. Kiểm chứng browser thật tại scrollY=900: panel top≈12, 7 option trọn
   viewport; chọn xong layout đứng yên (table top 1214.8 không đổi).
+- `SummaryItemPicker.vue` (picker chọn giấy tờ, chip ×N) fix cùng loạt lỗi:
+  bỏ ước lượng 430 → đo cao thật + clamp trọn viewport (bug cũ: trigger thấp
+  gần đáy thì panel mở xuôi tràn đáy, hàng "Thêm giấy tờ khác" + hint chìm
+  ngoài màn hình); **tự mồi lại vị trí sau khi chọn** (mục chọn làm chips lớn
+  ra, layout dịch, panel fixed đứng yên trông như tách rời/trống — đúng ảnh
+  user gửi 11/11); `scrollActiveIntoView` cuộn CHỈ trong `.ms-list` thay
+  `scrollIntoView` toàn cục (nguyên nhân kéo cả trang phía sau). Kiểm chứng
+  browser thật: trigger cách đáy 80px → panel mở LÊN trọn viewport; chọn xong
+  scrollY 831.2 không đổi, panel theo trigger; ArrowDown ×50 list cuộn nội bộ
+  scrollTop 1538, trang đứng yên. AppSelect dùng chung cách cuộn giới hạn.
 
 ### 7.2 Còn lại (P1 — làm tiếp)
 
