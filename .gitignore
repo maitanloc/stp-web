@@ -40,3 +40,6 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# SPA build output (target CopySpaDistToWwwroot sinh lai tu Stp.Web/dist)
+src/Stp.Api/wwwroot/
