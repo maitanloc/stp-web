@@ -41,6 +41,19 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   xoay quanh nhóm này.
 - Mục năng động thứ tự hiển thị theo tần suất thật (`UsageCount`): item hay gặp
   ("giấy khai sinh" ×21.102) đứng đầu picker với badge ×N.
+
+## Nền tảng nhóm (người dùng xác nhận "Cả 3 luôn" 2026-11-10)
+- Tên người dùng tự khai 1 lần (`localStorage stp.user.name`), mọi request kèm
+  header `X-Stp-User`; tên tiếng Việt phải `encodeURIComponent` phía client và
+  backend `Uri.UnescapeDataString()` — header HTTP chỉ nhận Latin-1, trả nguyên
+  văn sẽ văng lỗi fetch (đã thực tế gặp với tên "lộc").
+- Chat tổng lưu bảng `ChatMessages`; Nhật ký hoạt động dùng bảng `AuditLogs`
+  có sẵn, writer fire-and-forget (lỗi ghi không được làm rớt thao tác thật).
+- Presence chỉ in-memory (`TeamPresence` singleton): TTL online 75s, dấu dòng
+  65s; client tick 3 giây, ping 8s khi đang sửa dòng / 20s idle; gọi ngay khi
+  mở/đóng bảng sửa.
+- Hai người sửa cùng 1 dòng v1 chỉ banner cảnh báo, chưa khoá cứng.
+- Chi tiết đầy đủ: `docs/phan-tich-ux-trich-yeu.md` mục 8.
 - Biến thể không dấu ("GIAY TAM TRU CUA VO") luôn gộp về canonical có dấu qua
   `CatalogKey.Normalize` — nhưng **không sửa lỗi chính tả** ("đơn xi" ≠ "đơn xin").
 - Seed từ Kho mặc định nạp mục tần suất ≥50 (17 mục Learned). Band 2–49 đã
