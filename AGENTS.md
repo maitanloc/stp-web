@@ -29,3 +29,19 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
 - Kiểm chứng với `DK KET HON (4).xlsx` qua API thật: lọc 775–785 +
   năm 1994 phải ra đúng 11 dòng ở dòng 764–774 của sheet `file nhập`.
 - Không đổi cách chọn sheet trở lại `file dán` nếu chưa kiểm bằng file thật.
+
+## Danh mục học được (công cụ trích yếu — người dùng xác nhận 2026-11-10)
+- **Mục giấy tờ người dùng tự gõ = tự lưu database ngay**: gõ Enter thì vừa
+  thêm chip vào dòng vừa `POST /api/summary/catalog/items` (bảng `CatalogItems`).
+  Không có kịch bản "thêm vào session rồi mất" — không thêm nút/bước lưu riêng.
+- Không ép cứng bộ 7 chuẩn: chỉ là nút gợi ý "Bộ 7 chuẩn" trong bulk bar, người
+  dùng có thể tự chọn; áp hàng loạt phải qua preview người dùng xác nhận.
+- Thiết kế nhận định thống kê: 92,4% hồ sơ là "Đăng ký kết hôn" (gấp ~19 lần loại
+  kế tiếp); bộ 7 giấy tờ chiếm 98,3% hồ sơ có danh sách — mọi gợi ý mặc định
+  xoay quanh nhóm này.
+- Mục năng động thứ tự hiển thị theo tần suất thật (`UsageCount`): item hay gặp
+  ("giấy khai sinh" ×21.102) đứng đầu picker với badge ×N.
+- Biến thể không dấu ("GIAY TAM TRU CUA VO") luôn gộp về canonical có dấu qua
+  `CatalogKey.Normalize` — nhưng **không sửa lỗi chính tả** ("đơn xi" ≠ "đơn xin").
+- Seed từ Kho chỉ nạp mục tần suất ≥50 (17 mục Learned); band 2–49 để dev review
+  qua checkbox; count ≤1 là nhiễu (tên người) không nạp.

@@ -649,7 +649,10 @@ public sealed class SummaryToolController : ControllerBase
             workbook.Types
                 .Select(item => new SummaryTypeResponse(item.Name, item.Count))
                 .ToList(),
-            workbook.NumberColumn);
+            workbook.NumberColumn,
+            workbook.CatalogMeta
+                .Select(item => new SummaryCatalogMetaResponse(item.Name, item.UsageCount, item.Source))
+                .ToList());
 
     private static SummaryPreviewRowResponse ToResponse(SummaryPreviewRow row) =>
         new(

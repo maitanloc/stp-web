@@ -8,15 +8,20 @@ const props = withDefaults(
     catalog: string[]
     placeholder?: string
     disabled?: boolean
+    /** Số lần loại giấy tờ được gặp (badge ×N). Key đã chuẩn hoá như normalizeText. */
+    counts?: Record<string, number>
   }>(),
   {
     placeholder: 'Chọn giấy tờ',
     disabled: false,
+    counts: undefined,
   },
 )
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: string[]): void
+  /** Người dùng thêm mục ngoài danh mục — view tự lưu database (danh mục học được). */
+  (event: 'custom-added', value: string): void
 }>()
 
 const open = ref(false)
@@ -169,7 +174,15 @@ function addCustom(): void {
     emit('update:modelValue', [...props.modelValue, value])
   }
 
+  // Danh mục học được: mọi mục tự nhập đều được phát cho view để lưu bền.
+  emit('custom-added', value)
+
   custom.value = ''
+}
+
+function usageFor(item: string): number {
+  if (!props.counts) return 0
+  return props.counts[normalizeText(item)] ?? 0
 }
 
 function openPopover(): void {
@@ -329,6 +342,9 @@ onBeforeUnmount(() => {
                 <mark v-if="part.hit">{{ part.text }}</mark>
                 <template v-else>{{ part.text }}</template>
               </template>
+            </span>
+            <span v-if="usageFor(item) > 0" class="ms-usage" title="Số lần gặp trong dữ liệu thật">
+              ×{{ usageFor(item) }}
             </span>
           </label>
         </div>

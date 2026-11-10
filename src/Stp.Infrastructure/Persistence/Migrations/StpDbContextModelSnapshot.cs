@@ -244,6 +244,55 @@ namespace Stp.Infrastructure.Persistence.Migrations
                     b.ToTable("BatchJobItems", (string)null);
                 });
 
+            modelBuilder.Entity("Stp.Core.Domain.CatalogItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("DossierTypeHint")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDisabled")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("LastUsedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("NormalizedKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("UsageCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDisabled");
+
+                    b.HasIndex("NormalizedKey")
+                        .IsUnique();
+
+                    b.HasIndex("IsDisabled", "UsageCount");
+
+                    b.ToTable("CatalogItems", (string)null);
+                });
+
             modelBuilder.Entity("Stp.Core.Domain.DocumentLine", b =>
                 {
                     b.Property<Guid>("Id")

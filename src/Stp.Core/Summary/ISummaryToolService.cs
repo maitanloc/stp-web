@@ -37,6 +37,13 @@ public sealed class SummaryWorkbook
 
     public IReadOnlyList<string> Catalog { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// Meta tần suất + nguồn của từng mục trong <see cref="Catalog"/> để UI gợi ý
+    /// "hay gặp nhất" (badge ×N) và nhóm mục người dùng từng lưu.
+    /// </summary>
+    public IReadOnlyList<SummaryCatalogMeta> CatalogMeta { get; init; } =
+        Array.Empty<SummaryCatalogMeta>();
+
     public IReadOnlyList<SummaryRow> Rows { get; init; } = Array.Empty<SummaryRow>();
 
     public IReadOnlyList<SummaryYearCount> Years { get; init; } = Array.Empty<SummaryYearCount>();

@@ -36,6 +36,8 @@ public sealed class StpDbContext : DbContext
 
     public DbSet<SyncChange> SyncChanges => Set<SyncChange>();
 
+    public DbSet<CatalogItem> CatalogItems => Set<CatalogItem>();
+
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

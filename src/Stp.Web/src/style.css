@@ -3076,6 +3076,17 @@ pre,
   word-break: break-word;
 }
 
+.ms-usage {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-3);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
 .ms-custom {
   display: flex;
   gap: 8px;

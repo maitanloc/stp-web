@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Stp.Core.Summary;
 using Stp.Core.Sync;
 
 namespace Stp.Infrastructure.Persistence;
@@ -16,7 +17,9 @@ public static class PersistenceServiceCollectionExtensions
     {
         var connectionString = configuration.GetConnectionString("StpArchive") ?? DefaultConnectionString;
 
-        services.AddDbContext<StpDbContext>(options =>
+        // DbContextFactory thay cho AddDbContext: singleton ISummaryToolService cần
+        // mở DbContext riêng (CatalogStore) thay vì mượn scoped.
+        services.AddDbContextFactory<StpDbContext>(options =>
             options.UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsAssembly(typeof(StpDbContext).Assembly.FullName);
@@ -24,6 +27,7 @@ public static class PersistenceServiceCollectionExtensions
             }));
 
         services.AddScoped<IArchiveSyncService, ArchiveSyncService>();
+        services.AddSingleton<ICatalogDictionary, CatalogStore>();
         return services;
     }
 }

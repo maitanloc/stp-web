@@ -140,6 +140,7 @@ public sealed class SummaryToolService : ISummaryToolService
     private readonly ILogger<SummaryToolService> _logger;
     private readonly ISummaryPrintService? _printService;
     private readonly ConcurrentDictionary<Guid, SummaryWorkbook> _sessions = new();
+    private readonly ICatalogDictionary? _catalogDictionary;
 
     public SummaryToolService(IFileStorage storage, ILogger<SummaryToolService> logger)
         : this(storage, logger, null)
@@ -149,11 +150,13 @@ public sealed class SummaryToolService : ISummaryToolService
     public SummaryToolService(
         IFileStorage storage,
         ILogger<SummaryToolService> logger,
-        ISummaryPrintService? printService)
+        ISummaryPrintService? printService,
+        ICatalogDictionary? catalogDictionary = null)
     {
         _storage = storage;
         _logger = logger;
         _printService = printService;
+        _catalogDictionary = catalogDictionary;
     }
 
     public async Task<SummaryWorkbook> CreateSessionAsync(
@@ -852,7 +855,9 @@ public sealed class SummaryToolService : ISummaryToolService
             }
         }
 
-        var catalog = MergeCatalog(headerCatalog, observed, DefaultCatalog);
+        var dictionaryEntries = _catalogDictionary?.GetActive() ?? Array.Empty<CatalogEntry>();
+        var catalog = MergeCatalog(headerCatalog, observed, DefaultCatalog, dictionaryEntries);
+        var catalogMeta = BuildCatalogMeta(catalog, observed, dictionaryEntries);
         var rows = rawRows.Select(raw =>
         {
             var (baseSummary, items, hasDocumentList) = ParseSummary(raw.Text, catalog);
@@ -911,6 +916,7 @@ public sealed class SummaryToolService : ISummaryToolService
             DocumentNumberColumn = sheet.Column(documentNumberColumn).ColumnLetter(),
             NumberColumn = sheet.Column(numberColumn).ColumnLetter(),
             Catalog = catalog,
+            CatalogMeta = catalogMeta,
             Rows = rows,
             Years = rows
                 .Where(row => row.Year.HasValue)
@@ -1709,7 +1715,8 @@ public sealed class SummaryToolService : ISummaryToolService
     private static List<string> MergeCatalog(
         IReadOnlyList<string> headerCatalog,
         IReadOnlyDictionary<string, int> observed,
-        IReadOnlyList<string> defaults)
+        IReadOnlyList<string> defaults,
+        IReadOnlyList<CatalogEntry>? dictionaryEntries = null)
     {
         // Chọn dạng hiển thị có dấu cho mỗi khoá không dấu. Nhờ vậy tiêu đề cột
         // kiểu "phieu de xuat" vẫn hiện đúng "phiếu đề xuất" trong danh mục.
@@ -1767,22 +1774,92 @@ public sealed class SummaryToolService : ISummaryToolService
 
         foreach (var item in headerCatalog)
         {
+            // Tiêu đề in sẵn trong sheet — luôn giữ, không tính vào mức 200.
             Add(item);
+        }
+
+        // Mục người dùng tự lưu (database) — chỉ đứng sau tiêu đề sheet,
+        // sắp theo tần suất "hay gặp nhất" rồi thời gian gần dùng.
+        if (dictionaryEntries is { Count: > 0 })
+        {
+            foreach (var entry in dictionaryEntries
+                         .OrderByDescending(entry => entry.UsageCount)
+                         .ThenByDescending(entry => entry.LastUsedAt))
+            {
+                Consider(entry.DisplayName);
+                Add(entry.DisplayName);
+            }
         }
 
         foreach (var item in observed
                      .OrderByDescending(pair => pair.Value)
                      .ThenBy(pair => pair.Key, StringComparer.CurrentCultureIgnoreCase))
         {
+            Consider(item.Key);
             Add(item.Key);
         }
 
         foreach (var item in defaults)
         {
+            Consider(item);
             Add(item);
         }
 
-        return result.Take(200).ToList();
+        // Mức 200 trước đây cắt cả mục người dùng; giờ chỉ trần tổng để hiển thị
+        // hợp lý — header + mục user không bao giờ bị văng khỏi danh mục.
+        if (result.Count > 400)
+        {
+            result.RemoveRange(400, result.Count - 400);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Dựng meta tần suất + nguồn cho từng mục của danh mục phiên hiện tại —
+    /// dùng cho badge "×N" và nhóm "Đã lưu của người dùng" trong UI.
+    /// </summary>
+    private static List<SummaryCatalogMeta> BuildCatalogMeta(
+        IReadOnlyList<string> catalog,
+        IReadOnlyDictionary<string, int> observed,
+        IReadOnlyList<CatalogEntry>? dictionaryEntries)
+    {
+        var meta = new List<SummaryCatalogMeta>(catalog.Count);
+        var byKey = new Dictionary<string, CatalogEntry>(StringComparer.Ordinal);
+        if (dictionaryEntries is { Count: > 0 })
+        {
+            foreach (var entry in dictionaryEntries)
+            {
+                byKey[entry.NormalizedKey] = entry;
+            }
+        }
+
+        foreach (var item in catalog)
+        {
+            var key = NormalizeKey(item);
+            var usage = 0;
+            foreach (var raw in observed)
+            {
+                if (string.Equals(NormalizeKey(raw.Key), key, StringComparison.Ordinal))
+                {
+                    usage = Math.Max(usage, raw.Value);
+                }
+            }
+
+            var source = usage > 0 ? "file" : "default";
+
+            if (byKey.TryGetValue(key, out var entry))
+            {
+                // Usage thực từ data học được → đồng tài sản; номинал file nhỏ hơn thì
+                // lấy giá trị lớn hơn để badge phản ánh tần suất tổng.
+                usage = Math.Max(usage, entry.UsageCount);
+                source = entry.Source == CatalogEntrySource.User ? "user" : "learned";
+            }
+
+            meta.Add(new SummaryCatalogMeta(item, usage, source));
+        }
+
+        return meta;
     }
 
     private static bool HasDiacritics(string value)
@@ -1933,29 +2010,7 @@ public sealed class SummaryToolService : ISummaryToolService
         text.Contains("#REF!", StringComparison.OrdinalIgnoreCase)
         || text.StartsWith("=\"", StringComparison.Ordinal);
 
-    private static string NormalizeKey(string value)
-    {
-        var normalized = value.Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(normalized.Length);
-
-        foreach (var character in normalized)
-        {
-            // 'đ' không phân rã thành d + dấu nên phải quy đổi riêng, nếu không
-            // "phiếu đề xuất" và "phieu de xuat" sẽ có khoá khác nhau.
-            if (character is 'đ' or 'Đ')
-            {
-                builder.Append('d');
-                continue;
-            }
-
-            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
-            {
-                builder.Append(char.ToLowerInvariant(character));
-            }
-        }
-
-        return Regex.Replace(builder.ToString(), @"\s+", " ").Trim();
-    }
+    private static string NormalizeKey(string value) => CatalogKey.Normalize(value);
 
     private static string BuildSummary(
         SummaryRow row,

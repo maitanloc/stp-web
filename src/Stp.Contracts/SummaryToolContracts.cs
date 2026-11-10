@@ -22,7 +22,8 @@ public sealed record SummaryInspectResponse(
     IReadOnlyList<string> Catalog,
     IReadOnlyList<SummaryYearResponse> Years,
     IReadOnlyList<SummaryTypeResponse> Types,
-    string NumberColumn = "B");
+    string NumberColumn = "B",
+    IReadOnlyList<SummaryCatalogMetaResponse>? CatalogMeta = null);
 
 public sealed record SummaryYearResponse(int Year, int Count);
 
@@ -165,3 +166,29 @@ public sealed record SummaryPrintExportRequest(
     string? Mode = null,
     bool AllowIncomplete = false,
     string? OutputFileName = null);
+
+/// <summary>Meta một mục trong danh mục phiên: tần suất + nguồn ("user"/"learned"/"file"/"default").</summary>
+public sealed record SummaryCatalogMetaResponse(string Name, int UsageCount, string Source);
+
+/// <summary>Mục trong danh mục học được (database).</summary>
+public sealed record SummaryCatalogItemResponse(
+    Guid Id,
+    string DisplayName,
+    int UsageCount,
+    string Source,
+    DateTimeOffset LastUsedAt,
+    string? DossierTypeHint);
+
+public sealed record SummaryCatalogListResponse(IReadOnlyList<SummaryCatalogItemResponse> Items);
+
+public sealed record SummaryCatalogUpsertRequest(
+    string DisplayName,
+    string? DossierTypeHint = null);
+
+public sealed record SummaryCatalogPatchRequest(
+    string? DisplayName = null,
+    bool? IsDisabled = null);
+
+public sealed record SummaryCatalogSeedRequest(int MinCount = 50);
+
+public sealed record SummaryCatalogSeedResponse(int AddedCount, int UpdatedCount, int MinCount);

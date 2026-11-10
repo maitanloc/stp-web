@@ -359,9 +359,25 @@ export interface SummaryInspectResponse {
   missingNumberCount: number
   normalizableCount: number
   catalog: string[]
+  catalogMeta?: SummaryCatalogMetaResponse[]
   years: SummaryYearResponse[]
   types: SummaryTypeResponse[]
   numberColumn?: string | null
+}
+
+export interface SummaryCatalogMetaResponse {
+  name: string
+  usageCount: number
+  source: 'user' | 'learned' | 'file' | 'default'
+}
+
+export interface SummaryCatalogItem {
+  id: string
+  displayName: string
+  usageCount: number
+  source: 'user' | 'learned'
+  lastUsedAt: string
+  dossierTypeHint: string | null
 }
 
 export interface SummaryRowResponse {

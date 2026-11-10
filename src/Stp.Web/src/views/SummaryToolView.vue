@@ -13,11 +13,13 @@ import {
   Info,
   RefreshCw,
   Search,
+  Star,
   TriangleExclamationPoint,
   X,
 } from '@lucide/vue'
 import { download, queryString, request, saveBlob } from '../api/client'
 import type {
+  SummaryCatalogItem,
   SummaryChangeRequest,
   SummaryFilteredPreviewResponse,
   SummaryInspectResponse,
@@ -581,6 +583,74 @@ function orderItems(items: string[]): string[] {
       return leftOrder - rightOrder || left.index - right.index
     })
     .map((item) => item.value)
+}
+
+/**
+ * Bộ 7 giấy tờ xuất hiện cùng nhau ở 98% hồ sơ "Đăng ký kết hôn" có danh sách
+ * (theo thống kê thật 2026-11: 20.798/21.132 hồ sơ). Dùng cho áp nhanh hàng loạt.
+ */
+const STANDARD_SEVEN = [
+  'giấy khai sinh',
+  'sơ yếu lý lịch',
+  'bản công hàm',
+  'phiếu đề xuất',
+  'hộ khẩu',
+  'giấy khai đăng ký kết hôn',
+  'chứng chỉ chuyên khoa',
+]
+
+/** Tần suất từng mục theo meta phiên → badge ×N trong picker "hay gặp nhất". */
+const catalogCounts = computed<Record<string, number>>(() => {
+  const map: Record<string, number> = {}
+  for (const meta of session.value?.catalogMeta ?? []) {
+    map[normalizeText(meta.name)] = meta.usageCount
+  }
+  return map
+})
+
+/** Chọn sẵn bộ 7 chuẩn cho bulk picker (bấm "Áp dụng" để áp). */
+function bulkApplyStandardSeven(): void {
+  if (!session.value) return
+  bulkItems.value = [...STANDARD_SEVEN]
+  toast.info('Đã chọn bộ 7 chuẩn', 'Bấm "Áp dụng cho dòng đã chọn" để xác nhận.')
+}
+
+/**
+ * Lưu mục người dùng tự gõ vào "danh mục học được" — tự lưu ngay,
+ * không cần bước riêng; thất bại chỉ hiện cảnh báo, chip vẫn dùng được.
+ */
+async function persistCatalogCustom(display: string): Promise<void> {
+  const active = session.value
+  if (!display.trim()) return
+
+  const key = normalizeText(display)
+  const known = (active?.catalogMeta ?? []).some((meta) => normalizeText(meta.name) === key)
+  if (known) return
+
+  try {
+    const created = await request<SummaryCatalogItem>('/api/summary/catalog/items', {
+      method: 'POST',
+      body: { displayName: display, dossierTypeHint: type.value || null },
+    })
+
+    if (session.value) {
+      const next = [...(session.value.catalogMeta ?? [])]
+      next.unshift({
+        name: created.displayName,
+        usageCount: created.usageCount,
+        source: 'user',
+      })
+      if (!session.value.catalog.some((name) => normalizeText(name) === normalizeText(created.displayName))) {
+        session.value = { ...session.value, catalog: [...session.value.catalog, created.displayName] }
+      }
+      session.value = { ...session.value, catalogMeta: next }
+    }
+  } catch (caught) {
+    toast.warning(
+      'Mục chưa lưu được vào danh mục',
+      `${display}: ${errorMessage(caught)}. Dùng tạm cho dòng này.`,
+    )
+  }
 }
 
 /** Phần tiền tố hiển thị: dùng bản đã chuẩn hoá nếu backend phát hiện cần sửa. */
@@ -2068,11 +2138,23 @@ onBeforeUnmount(() => {
                 <SummaryItemPicker
                   v-model="bulkItems"
                   :catalog="session.catalog"
+                  :counts="catalogCounts"
                   placeholder="Giấy tờ áp dụng hàng loạt..."
+                  @custom-added="persistCatalogCustom"
                 />
                 <button class="btn btn-primary btn-sm" type="button" :disabled="bulkApplying" @click="applyBulk">
                   <Check :size="14" />
                   Áp dụng cho dòng đã chọn
+                </button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  type="button"
+                  :disabled="bulkApplying"
+                  title="7 giấy tờ luôn xuất hiện cùng nhau ở 98% hồ sơ đăng ký kết hôn có danh sách — đánh dấu từ dữ liệu thật"
+                  @click="bulkApplyStandardSeven"
+                >
+                  <Star :size="14" />
+                  Bộ 7 chuẩn
                 </button>
                 <button
                   v-if="selectedNormalizableCount > 0"
@@ -2215,8 +2297,10 @@ onBeforeUnmount(() => {
                         <SummaryItemPicker
                           :model-value="itemsFor(row)"
                           :catalog="session.catalog"
+                          :counts="catalogCounts"
                           :placeholder="row.hasDocumentList ? 'Sửa danh mục...' : 'Chọn giấy tờ...'"
                           @update:model-value="(items) => setRowItems(row, items)"
+                          @custom-added="persistCatalogCustom"
                         />
 
                         <div v-if="itemsFor(row).length > 0" class="summary-chips" :title="itemsFor(row).join(', ')">
