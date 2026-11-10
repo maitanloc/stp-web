@@ -462,3 +462,77 @@ badge tần suất)** của mục 3 — nên làm liền nhau một đợt.
 - Badge chip xác nhận "đã lưu danh mục" mờ dần sau 2s (chi tiết thẩm mỹ).
 - AuditLog cho thao tác thêm/rename/disable (chốt 4: mọi người dùng được thêm).
 
+
+
+---
+
+## 8. Nền tảng nhóm (14/11/2026)
+
+> Mục tiêu người dùng: "giống Google Sheets — ai làm ở đâu mình biết, có kênh chat
+> tổng để anh em làm việc với nhau trong app". Chốt "Cả 3 luôn": tên người dùng +
+> nhật ký hoạt động + chat tổng + badge ai đang sửa dòng nào.
+
+### 8.1 Ai làm gì — khai tên 1 lần
+
+- Không có hệ thống tài khoản ở giai đoạn này. Mở app lần đầu → modal
+  **"Mình gọi bạn là gì?"** (UserNameModal) — gõ tên, máy nhớ trong
+  `localStorage stp.user.name`, mở lại không hỏi nữa.
+- Tên được gửi kèm **mọi request** qua header `X-Stp-User` (thêm trong
+  `request()` lẫn `download()` của `api/client.ts`) — backend đọc tên ở
+  `TeamAudit.ActorFromHeader`.
+- Có nút "avatar + Đổi tên" trên dock để sửa tên (gửi kèm `X-Stp-User` mới).
+
+### 8.2 Nhật ký hoạt động (tab "Hoạt động")
+
+- Ghi vào bảng `AuditLogs` (bảng có sẵn, trước đó trống) — **không thêm bảng
+  mới**, đội backend writer `TeamAudit` fire-and-forget: nhật ký gãy không bao
+  giờ làm rớt thao tác thật.
+- Sự kiện được ghi đúng 4 loại (theo chốt): `export`, `export-filtered`,
+  `export-print` (SummaryToolController) và `sync` (SyncController sau khi
+  Upload thành công) — ai → làm gì → số dòng/chi tiết → lúc nào.
+- Endpoint: `GET /api/team/activity?take=60` (mới nhất lên đầu).
+- UI: tab trong dock, hiển thị "Nam · Xuất bản lọc · DK KET HON (5).xlsx:
+  20642 dòng sửa · 5 phút trước".
+
+### 8.3 Chat tổng (tab "Chat")
+
+- Bảng mới duy nhất `ChatMessages` (migration `AddChatMessages`, EF
+  standard — migration tournament chưa chạy không ảnh hưởng).
+- Endpoint: `GET /api/team/chat?take=100` (tối đa 100 tin, cũ → mới),
+  `POST /api/team/chat` (`actor` ≤ 100, `body` ≤ 500 ký tự).
+- UI: dock góc phải (TeamDock) — pill thu gọn + panel 2 tab; tin của mình
+  bubble teal bên phải, người khác avatar màu + tên bên trái. Enter để gửi.
+- Dò tin 3 giây khi panel mở, 12 giây khi thu gọn (vẫn đếm số chưa đọc,
+  badge đỏ trên pill lẫn tab). Lưu DB nên F5/đổi máy vẫn đọc được lịch sử.
+
+### 8.4 Ai đang sửa dòng nào (mảnh "Google Sheets")
+
+- Backend `TeamPresence` (singleton, **in-memory**, không DB — dấu tự tàn):
+  `POST /api/team/presence` heartbeat. TTL online 75 giây, TTL dấu dòng
+  65 giây; dọn mục quá hạn ngay lúc ping.
+- Client ping từ `useTeamPresence`: tick 3 giây, đáo hạn mới gọi — gửi
+  8 giây/lần khi đang sửa dòng, 20 giây/lần khi chỉ đứng xem. Mở/đóng bảng
+  sửa → gội ping ngay lập tức (không đợi nhịp).
+- Dòng nào đang có người khác sửa: nền xanh + thẻ tên "Lan đang nắn" ngay
+  dưới số dòng; mở đúng dòng đó → banner cảnh báo "Lan cũng đang mở dòng
+  này. Ai lưu sau sẽ ghi đè" — v1 chỉ cảnh báo, chưa khoá cứng (chốt).
+- Người đóng bảng (rowNumber trống + sessionId có): server chủ động gỡ dấu
+  các dòng của chính người đó; dấu người khác vẫn giữ.
+- `sessionId` = `SummaryInspectResponse.sessionId`, dòng =
+  `SummaryRowResponse.rowNumber` — hai người mở cùng file mới thấy nhau.
+
+### 8.5 Share link + chạy qua tunnel
+
+- App serve SPA từ `wwwroot` 1 cổng 5215 (deep link `/trich-yeu` OK qua
+  MapFallback, `/api/*` 404 thật).
+- Tunnel `cloudflared tunnel --url http://localhost:5215 --no-autoupdate`
+  — free URL **đổi mỗi lần restart cloudflared** (đã xác minh lần 2).
+- Polling thuần HTTP nên chạy được qua tunnel như mọi endpoint khác.
+
+### 8.6 Cần hậu mãi (không chặn)
+
+- Khoá cứng dòng khi 2 người cùng sửa (hiện chỉ banner cảnh báo).
+- Presence in-memory: restart API mất dấu online vài chục giây (các truy vấn
+  session/dữ liệu không mất — FileStorage giữ toàn bộ).
+- Tên tự khai chưa phân quyền: ai gõ tên gì thì log ghi tên đó — đủ dùng cho
+  nhóm nội bộ nhỏ, làm quyền thật khi cần.

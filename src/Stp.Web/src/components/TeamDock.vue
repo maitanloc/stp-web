@@ -1,0 +1,696 @@
+<script setup lang="ts">
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { getUserName, request } from '../api/client'
+import type { ActivityEventResponse, ChatMessageResponse } from '../api/types'
+import { errorMessage } from '../lib/errors'
+import { actionLabel, clockTime, colorForName, initialsFor, relativeTime } from '../lib/team'
+import { pingPresence, startTeamPresence, teamOnline } from '../composables/useTeamPresence'
+import { useToast } from '../composables/useToast'
+import UserNameModal from './UserNameModal.vue'
+
+// Nhịp dò: chat 3 giây khi mở, 12 giây khi thu gọn (vẫn đếm tin chưa đọc);
+// hoạt động 12 giây khi đang mở panel.
+const CHAT_OPEN_MS = 3000
+const CHAT_HIDDEN_MS = 12000
+const ACTIVITY_MS = 12000
+
+const toast = useToast()
+
+const open = ref(false)
+const tab = ref<'chat' | 'activity'>('chat')
+
+const userName = ref<string | null>(null)
+const nameModalOpen = ref(false)
+
+const messages = ref<ChatMessageResponse[]>([])
+const activities = ref<ActivityEventResponse[]>([])
+const draft = ref('')
+const sending = ref(false)
+
+const listElement = ref<HTMLElement | null>(null)
+let lastSeenAt: number | null = null
+
+const unread = computed(() => {
+  if (lastSeenAt === null) return 0
+  return messages.value.filter((message) => new Date(message.createdAt).getTime() > lastSeenAt!).length
+})
+
+const onlineOthers = computed(() =>
+  teamOnline.value.filter((entry) => entry.actor !== userName.value),
+)
+
+function avatarStyle(name: string): Record<string, string> {
+  return { background: colorForName(name) }
+}
+
+function markChatRead(): void {
+  lastSeenAt = Date.now()
+}
+
+async function scrollChatBottom(): Promise<void> {
+  await nextTick()
+  const element = listElement.value
+  if (element) {
+    element.scrollTop = element.scrollHeight
+  }
+}
+
+async function fetchChat(): Promise<void> {
+  try {
+    const response = await request<{ items: ChatMessageResponse[] }>('/api/team/chat?take=100')
+    messages.value = response.items
+    if (open.value && tab.value === 'chat') {
+      markChatRead()
+      void scrollChatBottom()
+    }
+  } catch {
+    // Bỏ qua blip — lỗi gửi tin mới toast rõ.
+  }
+}
+
+async function fetchActivity(): Promise<void> {
+  try {
+    const response = await request<{ items: ActivityEventResponse[] }>('/api/team/activity?take=60')
+    activities.value = response.items
+  } catch {
+    // Bỏ qua blip, nhịp sau thử lại.
+  }
+}
+
+async function sendDraft(): Promise<void> {
+  const actor = userName.value
+  const body = draft.value.trim()
+  if (!actor) {
+    nameModalOpen.value = true
+    return
+  }
+  if (body.length === 0 || sending.value) return
+
+  sending.value = true
+  try {
+    await request('/api/team/chat', { method: 'POST', body: { actor, body } })
+    draft.value = ''
+    markChatRead()
+    await fetchChat()
+    void scrollChatBottom()
+  } catch (error) {
+    toast.error('Không gửi được tin nhắn', errorMessage(error))
+  } finally {
+    sending.value = false
+  }
+}
+
+function toggleOpen(): void {
+  open.value = !open.value
+  if (open.value) {
+    markChatRead()
+    void fetchChat()
+    void fetchActivity()
+    if (tab.value === 'chat') void scrollChatBottom()
+  }
+}
+
+function onModalClosed(): void {
+  // "Để sau" — dock vẫn hoạt động, chat/presence đợi tới khi có tên.
+  nameModalOpen.value = false
+}
+
+function saveName(name: string): void {
+  userName.value = name
+  nameModalOpen.value = false
+  void pingPresence()
+  void fetchChat()
+  toast.success(`Đã dùng tên "${name}"`)
+}
+
+function onDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && open.value && !nameModalOpen.value) {
+    open.value = false
+  }
+}
+
+let chatTimer: ReturnType<typeof setInterval> | null = null
+let activityTimer: ReturnType<typeof setInterval> | null = null
+
+function restartChatTimer(): void {
+  if (chatTimer) clearInterval(chatTimer)
+  chatTimer = setInterval(() => void fetchChat(), open.value ? CHAT_OPEN_MS : CHAT_HIDDEN_MS)
+}
+
+onMounted(() => {
+  userName.value = getUserName()
+  if (!userName.value) {
+    nameModalOpen.value = true
+  }
+  startTeamPresence()
+  void fetchChat()
+  void fetchActivity()
+  restartChatTimer()
+  activityTimer = setInterval(() => {
+    if (open.value) void fetchActivity()
+  }, ACTIVITY_MS)
+  window.addEventListener('keydown', onDocumentKeydown)
+})
+
+onUnmounted(() => {
+  if (chatTimer) clearInterval(chatTimer)
+  if (activityTimer) clearInterval(activityTimer)
+  window.removeEventListener('keydown', onDocumentKeydown)
+})
+
+watch(open, () => restartChatTimer())
+
+watch(tab, (value) => {
+  if (open.value && value === 'chat') {
+    markChatRead()
+    void scrollChatBottom()
+  }
+})
+</script>
+
+<template>
+  <div class="team-dock">
+    <!-- Panel chính -->
+    <section v-if="open" class="dock-panel" aria-label="Liên lạc nhóm">
+      <header class="dock-head">
+        <div class="head-title">
+          <span class="panel-title">Nhóm làm việc</span>
+          <span class="online-count">
+            <span class="online-dot"></span>
+            {{ onlineOthers.length + (userName ? 1 : 0) }} online
+          </span>
+        </div>
+        <div class="head-tools">
+          <button type="button" class="tool" title="Đổi tên hiển thị" @click="nameModalOpen = true">
+            <span class="tool-avatar" :style="userName ? avatarStyle(userName) : {}">
+              {{ userName ? initialsFor(userName) : '?' }}
+            </span>
+          </button>
+          <button type="button" class="tool slim" title="Thu gọn" @click="open = false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <nav class="dock-tabs">
+        <button type="button" class="tab" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">
+          Chat
+          <span v-if="unread > 0" class="unread-badge">{{ unread > 9 ? '9+' : unread }}</span>
+        </button>
+        <button
+          type="button"
+          class="tab"
+          :class="{ active: tab === 'activity' }"
+          @click="tab = 'activity'"
+        >
+          Hoạt động
+        </button>
+      </nav>
+
+      <!-- Tab: Chat -->
+      <div v-show="tab === 'chat'" class="chat-area">
+        <div ref="listElement" class="chat-list">
+          <p v-if="messages.length === 0" class="blank">
+            Chưa có tin nhắn nào — chào cả nhóm ở đây nhé.
+          </p>
+          <div
+            v-for="message in messages"
+            :key="message.id"
+            class="chat-line"
+            :class="{ own: message.actor === userName }"
+          >
+            <span
+              v-if="message.actor !== userName"
+              class="avatar"
+              :style="avatarStyle(message.actor)"
+            >
+              {{ initialsFor(message.actor) }}
+            </span>
+            <div class="bubble">
+              <span v-if="message.actor !== userName" class="who" :style="{ color: colorForName(message.actor) }">
+                {{ message.actor }}
+              </span>
+              <p class="body">{{ message.body }}</p>
+              <span class="time">{{ clockTime(message.createdAt) }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="chat-compose">
+          <textarea
+            v-model="draft"
+            rows="1"
+            :placeholder="userName ? 'Nhập tin nhắn cho cả nhóm...' : 'Khai tên trước để chat'"
+            @keydown.enter.exact.prevent="sendDraft()"
+          />
+          <button
+            type="button"
+            class="send"
+            :disabled="sending || draft.trim().length === 0"
+            @click="sendDraft()"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2L11 13" />
+              <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab: Hoạt động -->
+      <div v-show="tab === 'activity'" class="activity-area">
+        <p v-if="activities.length === 0" class="blank">
+          Chưa có sự kiện nào — xuất file hoặc đồng bộ sẽ hiện ở đây.
+        </p>
+        <ol v-else class="activity-list">
+          <li v-for="event in activities" :key="event.id">
+            <span class="event-dot" :style="avatarStyle(event.actor)"></span>
+            <div class="event-main">
+              <span class="event-head">
+                <span class="event-actor" :style="{ color: colorForName(event.actor) }">{{ event.actor }}</span>
+                <span class="event-action">{{ actionLabel(event.action) }}</span>
+                <span class="event-time">{{ relativeTime(event.timestamp) }}</span>
+              </span>
+              <span v-if="event.details" class="event-detail">{{ event.details }}</span>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- Pill thu gọn -->
+    <button v-else type="button" class="dock-pill" @click="toggleOpen()">
+      <span v-if="onlineOthers.length > 0" class="pill-avatars">
+        <span
+          v-for="entry in onlineOthers.slice(0, 3)"
+          :key="entry.actor"
+          class="avatar mini"
+          :style="avatarStyle(entry.actor)"
+          :title="entry.actor + ' · ' + entry.where"
+        >
+          {{ initialsFor(entry.actor) }}
+        </span>
+        <span v-if="onlineOthers.length > 3" class="pill-more">+{{ onlineOthers.length - 3 }}</span>
+      </span>
+      <span v-else class="pill-icon">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      </span>
+      <span v-if="onlineOthers.length === 0" class="pill-label">Chat nhóm</span>
+      <span v-if="unread > 0" class="unread-badge strong">{{ unread > 9 ? '9+' : unread }}</span>
+    </button>
+
+    <UserNameModal :open="nameModalOpen" @saved="saveName" @closed="onModalClosed" />
+  </div>
+</template>
+
+<style scoped>
+.team-dock {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  font-family: var(--font-sans);
+}
+
+/* ===== Pill thu gọn ===== */
+.dock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 9px 14px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.dock-pill:hover {
+  border-color: var(--brand);
+  color: var(--brand-text);
+}
+
+.pill-avatars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.pill-more {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.pill-icon {
+  display: inline-flex;
+  color: var(--brand-text);
+}
+
+.pill-label {
+  font-weight: 600;
+}
+
+/* ===== Panel ===== */
+.dock-panel {
+  width: 344px;
+  max-height: min(520px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.dock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.head-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.panel-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.online-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.online-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.head-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tool:hover {
+  border-color: var(--brand);
+  color: var(--brand-text);
+}
+
+.tool-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.dock-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--brand-text);
+  border-bottom-color: var(--brand);
+}
+
+.unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+/* ===== Chat ===== */
+.chat-area {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.chat-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.blank {
+  margin: 24px 8px;
+  text-align: center;
+  color: var(--muted-2);
+  font-size: 12.5px;
+}
+
+.chat-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-line.own {
+  justify-content: flex-end;
+}
+
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.bubble {
+  max-width: 78%;
+  padding: 7px 11px 6px;
+  border-radius: 12px;
+  background: var(--surface-3);
+}
+
+.chat-line.own .bubble {
+  background: var(--brand);
+}
+
+.who {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-line.own .body {
+  color: #fff;
+}
+
+.time {
+  display: block;
+  font-size: 10px;
+  color: var(--muted-2);
+  text-align: right;
+  margin-top: 2px;
+}
+
+.chat-line.own .time {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.chat-compose {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  align-items: flex-end;
+}
+
+.chat-compose textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 8px 10px;
+  max-height: 90px;
+  outline: none;
+}
+
+.chat-compose textarea:focus {
+  border-color: var(--brand);
+}
+
+.send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  cursor: pointer;
+}
+
+.send:hover {
+  background: var(--brand-strong);
+}
+
+.send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ===== Hoạt động ===== */
+.activity-area {
+  overflow-y: auto;
+  padding: 10px 14px 14px;
+}
+
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-list li {
+  display: flex;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.activity-list li:last-child {
+  border-bottom: none;
+}
+
+.event-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  margin-top: 5px;
+}
+
+.event-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.event-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.event-actor {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.event-action {
+  font-size: 12.5px;
+  color: var(--text-soft);
+  font-weight: 600;
+}
+
+.event-time {
+  font-size: 10.5px;
+  color: var(--muted-2);
+  margin-left: auto;
+}
+
+.event-detail {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+</style>

@@ -2744,6 +2744,34 @@ pre,
   background: #3f2f10;
 }
 
+/* Dòng đang có người khác nắn — nền xanh dịu + thẻ tên ngay dưới số dòng. */
+.summary-table tr.is-team-marked,
+.summary-table tr.is-team-marked:hover {
+  background: var(--info-soft);
+}
+
+[data-theme='dark'] .summary-table tr.is-team-marked,
+[data-theme='dark'] .summary-table tr.is-team-marked:hover {
+  background: rgba(3, 105, 161, 0.22);
+}
+
+.team-lock-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--info);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .summary-chips {
   display: flex;
   flex-wrap: wrap;

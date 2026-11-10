@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Stp.Api.Services;
 using Stp.Core.Security;
 using Stp.Infrastructure.Excel;
 using Stp.Infrastructure.Jobs;
@@ -17,6 +18,8 @@ builder.Services.AddStpPersistence(builder.Configuration);
 builder.Services.AddStpExcel(builder.Configuration);
 builder.Services.AddStpStorage(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddStpJobs();
+builder.Services.AddSingleton<TeamPresence>();
+builder.Services.AddSingleton<TeamAudit>();
 
 var developerAuthOptions = builder.Configuration
     .GetSection(DeveloperAuthOptions.SectionName)

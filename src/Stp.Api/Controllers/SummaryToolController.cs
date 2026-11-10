@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Stp.Contracts;
 using Stp.Core.Summary;
+using Stp.Api.Services;
 
 namespace Stp.Api.Controllers;
 
@@ -16,10 +17,12 @@ public sealed class SummaryToolController : ControllerBase
     private const int MaxSheetNumberLength = 40;
 
     private readonly ISummaryToolService _summary;
+    private readonly TeamAudit _audit;
 
-    public SummaryToolController(ISummaryToolService summary)
+    public SummaryToolController(ISummaryToolService summary, TeamAudit audit)
     {
         _summary = summary;
+        _audit = audit;
     }
 
     /// <summary>Mở workbook và tách danh mục giấy tờ trong cột trích yếu.</summary>
@@ -208,6 +211,14 @@ public sealed class SummaryToolController : ControllerBase
                 cancellationToken,
                 request.OutputFileName,
                 request.OnlyRowNumbers);
+
+            _audit.Write(
+                TeamAudit.ActorFromHeader(Request),
+                "export",
+                "SummarySession",
+                sessionId.ToString(),
+                $"{result.FileName}: {result.ChangedRows} dòng sửa, {result.NormalizedRows} dòng chuẩn hoá");
+
             return File(result.Content, result.ContentType, result.FileName);
         }
         catch (KeyNotFoundException ex)
@@ -302,6 +313,13 @@ public sealed class SummaryToolController : ControllerBase
                 result.IgnoredChanges.ToString(System.Globalization.CultureInfo.InvariantCulture);
             Response.Headers["X-Summary-Normalized-Rows"] =
                 result.NormalizedRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            _audit.Write(
+                TeamAudit.ActorFromHeader(Request),
+                "export-filtered",
+                "SummarySession",
+                sessionId.ToString(),
+                $"{result.FileName}: {result.TotalRows} hồ sơ, {result.ChangedRows} dòng sửa, {result.NormalizedRows} dòng chuẩn hoá");
 
             return File(result.Content, result.ContentType, result.FileName);
         }
@@ -407,6 +425,13 @@ public sealed class SummaryToolController : ControllerBase
             // Header HTTP chỉ nhận ASCII; mã hoá để vẫn chuyển được cảnh báo tiếng Việt.
             Response.Headers["X-Summary-Print-Warnings"] =
                 Uri.EscapeDataString(string.Join(" | ", result.Warnings));
+
+            _audit.Write(
+                TeamAudit.ActorFromHeader(Request),
+                "export-print",
+                "SummarySession",
+                sessionId.ToString(),
+                $"{result.FileName}: {result.RowCount} hồ sơ in hàng loạt ({string.Join(", ", result.Years)})");
 
             return File(result.Content, result.ContentType, result.FileName);
         }

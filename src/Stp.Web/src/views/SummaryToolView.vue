@@ -41,6 +41,12 @@ import AppSelect from '../components/AppSelect.vue'
 import FilePicker from '../components/FilePicker.vue'
 import SummaryItemPicker from '../components/SummaryItemPicker.vue'
 import { useToast } from '../composables/useToast'
+import {
+  clearTeamEditingState,
+  setTeamEditingState,
+  teamRowMarks,
+} from '../composables/useTeamPresence'
+import { getUserName } from '../api/client'
 
 interface RowEdit {
   row: SummaryRowResponse
@@ -111,6 +117,34 @@ const bulkApplying = ref(false)
 
 const editingSummaryRow = ref<number | null>(null)
 const summaryDraft = ref('')
+
+// ===== Presence nhóm: dòng nào đang có ai sửa =====
+// Map dòng → tên người đang giữ (bỏ qua dấu của chính mình).
+const teamMarkRows = computed(() => {
+  const sessionId = session.value?.sessionId
+  const map = new Map<number, string>()
+  if (!sessionId) return map
+  const self = getUserName()
+  for (const mark of teamRowMarks.value) {
+    if (mark.sessionId === sessionId && mark.actor && mark.actor !== self) {
+      map.set(mark.rowNumber, mark.actor)
+    }
+  }
+  return map
+})
+
+// Người khác đang giữ đúng dòng mình đang mở → banner cảnh báo trong bảng sửa.
+const editingConflict = computed(() =>
+  editingSummaryRow.value != null ? (teamMarkRows.value.get(editingSummaryRow.value) ?? null) : null,
+)
+
+// Báo cho vòng presence biết mình đang mở dòng nào của phiên nào.
+watch(
+  [session, editingSummaryRow],
+  ([currentSession, currentRow]) => {
+    setTeamEditingState(currentSession?.sessionId ?? null, currentRow)
+  },
+)
 
 const previewOpen = ref(false)
 const previewMode = ref<'full' | 'filtered'>('full')
@@ -1713,6 +1747,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  clearTeamEditingState()
   if (searchTimer) window.clearTimeout(searchTimer)
   if (filterTimer) window.clearTimeout(filterTimer)
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
@@ -2195,7 +2230,12 @@ onBeforeUnmount(() => {
                 </thead>
                 <tbody>
                   <template v-for="row in rows" :key="row.rowNumber">
-                    <tr :class="{ 'is-edited': edits.has(row.rowNumber) }">
+                    <tr
+                      :class="{
+                        'is-edited': edits.has(row.rowNumber),
+                        'is-team-marked': teamMarkRows.has(row.rowNumber),
+                      }"
+                    >
                       <td>
                         <input
                           type="checkbox"
@@ -2210,6 +2250,13 @@ onBeforeUnmount(() => {
                           HS {{ row.documentNumber }}
                         </div>
                         <div class="hint">Dòng {{ row.rowNumber }}</div>
+                        <div
+                          v-if="teamMarkRows.get(row.rowNumber)"
+                          class="team-lock-tag"
+                          :title="`${teamMarkRows.get(row.rowNumber)} đang sửa dòng này`"
+                        >
+                          {{ teamMarkRows.get(row.rowNumber) }} đang nắn
+                        </div>
                       </td>
                       <td>
                         <span class="badge badge-neutral">{{ row.year ?? '—' }}</span>
@@ -2319,6 +2366,14 @@ onBeforeUnmount(() => {
                           <div class="summary-editor-head">
                             <strong>Sửa toàn bộ trích yếu · dòng {{ row.rowNumber }}</strong>
                             <span class="hint">Hồ sơ {{ row.numberLabel || '—' }}</span>
+                          </div>
+                          <div v-if="editingConflict" class="alert alert-warning" style="margin: 0">
+                            <TriangleExclamationPoint :size="15" />
+                            <div class="grow">
+                              <strong>{{ editingConflict }}</strong> cũng đang mở dòng này. Ai lưu sau
+                              sẽ ghi đè phần của người trước — nhắn nhau 1 câu trong khung chat nhóm
+                              rồi mới nắn.
+                            </div>
                           </div>
                           <div v-if="row.needsNormalization" class="alert alert-info" style="margin: 0">
                             <Info :size="15" />

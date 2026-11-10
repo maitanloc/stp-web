@@ -163,3 +163,17 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.HasIndex(x => x.Timestamp);
     }
 }
+
+public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
+{
+    public void Configure(EntityTypeBuilder<ChatMessage> builder)
+    {
+        builder.ToTable("ChatMessages");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Actor).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Body).HasMaxLength(500).IsRequired();
+
+        builder.HasIndex(x => x.CreatedAt);
+    }
+}

@@ -538,3 +538,55 @@ export interface SummaryPrintExportRequest {
   outputFileName?: string | null
 }
 
+// ===== Nền tảng nhóm: presence / chat / nhật ký hoạt động =====
+
+export interface PresencePingRequest {
+  actor: string
+  where: string
+  sessionId?: string | null
+  rowNumber?: number | null
+}
+
+export interface PresenceEntryResponse {
+  actor: string
+  where: string
+  lastSeenSecondsAgo: number
+}
+
+export interface PresenceRowMarkResponse {
+  sessionId: string
+  rowNumber: number
+  actor: string
+  lastSeenSecondsAgo: number
+}
+
+export interface PresencePingResponse {
+  online: PresenceEntryResponse[]
+  rowMarks: PresenceRowMarkResponse[]
+}
+
+export interface ChatMessagesResponse {
+  items: ChatMessageResponse[]
+}
+
+export interface ChatMessageResponse {
+  id: string
+  actor: string
+  body: string
+  createdAt: string
+}
+
+export interface ActivityEventsResponse {
+  items: ActivityEventResponse[]
+}
+
+export interface ActivityEventResponse {
+  id: string
+  actor: string
+  action: string
+  entityType: string | null
+  entityId: string | null
+  details: string | null
+  timestamp: string
+}
+

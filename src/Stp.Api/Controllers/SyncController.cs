@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Stp.Api.Models;
+using Stp.Api.Services;
 using Stp.Contracts;
 using Stp.Core.Storage;
 using Stp.Core.Sync;
@@ -17,15 +18,18 @@ public sealed class SyncController : ControllerBase
     private readonly IArchiveSyncService _sync;
     private readonly IFileStorage _storage;
     private readonly StpDbContext _db;
+    private readonly TeamAudit _audit;
 
     public SyncController(
         IArchiveSyncService sync,
         IFileStorage storage,
-        StpDbContext db)
+        StpDbContext db,
+        TeamAudit audit)
     {
         _sync = sync;
         _storage = storage;
         _db = db;
+        _audit = audit;
     }
 
     /// <summary>
@@ -94,6 +98,13 @@ public sealed class SyncController : ControllerBase
         {
             return UnprocessableEntity(response);
         }
+
+        _audit.Write(
+            TeamAudit.ActorFromHeader(Request),
+            "sync",
+            "SyncSession",
+            outcome.SyncSessionId.ToString(),
+            $"{stored.FileName}: thêm {outcome.AddedCount}, sửa {outcome.UpdatedCount}, xoá {outcome.DeletedCount}, xung đột {outcome.ConflictCount}");
 
         return Ok(response);
     }

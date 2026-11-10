@@ -1,5 +1,39 @@
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
 const DEV_TOKEN_KEY = 'stp.dev.token'
+const USER_NAME_KEY = 'stp.user.name'
+
+/** Tên người dùng tự khai — nhớ 1 lần trong máy, gửi kèm mọi request qua header X-Stp-User. */
+export function getUserName(): string | null {
+  try {
+    const value = localStorage.getItem(USER_NAME_KEY)
+    return value && value.trim().length > 0 ? value.trim() : null
+  } catch {
+    return null
+  }
+}
+
+export function setUserName(name: string | null): void {
+  try {
+    if (name && name.trim().length > 0) {
+      localStorage.setItem(USER_NAME_KEY, name.trim())
+    } else {
+      localStorage.removeItem(USER_NAME_KEY)
+    }
+  } catch {
+    // localStorage có thể bị chặn; app vẫn chạy, chỉ thiếu tên hiển thị.
+  }
+}
+
+function userNameHeader(): Headers {
+  const headers = new Headers()
+  const name = getUserName()
+  if (name) {
+    // Giá trị header chỉ nhận Latin-1; tên tiếng Việt cần mã hoá để fetch
+    // không văng lỗi, backend Uri.UnescapeDataString() giải lại.
+    headers.set('X-Stp-User', encodeURIComponent(name))
+  }
+  return headers
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -63,7 +97,7 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { body, form, headers: extraHeaders, ...init } = options
-  const headers = new Headers(extraHeaders)
+  const headers = new Headers([...userNameHeader(), ...new Headers(extraHeaders)])
 
   if (body !== undefined) {
     headers.set('Content-Type', 'application/json')
@@ -131,7 +165,7 @@ export interface DownloadResponse {
 
 export async function download(path: string, options: RequestOptions = {}): Promise<DownloadResponse> {
   const { body, form, headers: extraHeaders, ...init } = options
-  const headers = new Headers(extraHeaders)
+  const headers = new Headers([...userNameHeader(), ...new Headers(extraHeaders)])
 
   if (body !== undefined) {
     headers.set('Content-Type', 'application/json')
