@@ -38,6 +38,9 @@ public sealed class CatalogDictionaryTests
             _entries.FirstOrDefault(entry =>
                 entry.NormalizedKey == CatalogKey.Normalize(normalizedKey));
 
+        public CatalogEntry? GetById(Guid id) =>
+            _entries.FirstOrDefault(entry => entry.Id == id);
+
         public CatalogEntry Upsert(
             string displayName,
             string? dossierTypeHint,
@@ -152,6 +155,15 @@ public sealed class CatalogDictionaryTests
             Assert.NotNull(defaultMeta);
             Assert.Equal("default", defaultMeta.Source);
             Assert.Equal(0, defaultMeta.UsageCount);
+
+            // Các họ tiền tố người dùng yêu cầu (10/11): cam kết, chứng minh,
+            // biến thể thật "đơn xin cấp giấy chứng nhận độc thân" — đều có mặt
+            // ngay cả khi file không chứa (đệm compose DefaultCatalog).
+            Assert.Contains("cam kết hôn nhân thực tế", session.Catalog);
+            Assert.Contains("đơn xin xác nhận độc thân", session.Catalog);
+            Assert.Contains("đơn xin cấp giấy chứng nhận độc thân", session.Catalog);
+            Assert.Contains("chứng minh nhân dân", session.Catalog);
+            Assert.Contains("quyết định nuôi con nuôi", session.Catalog);
         }
         finally
         {

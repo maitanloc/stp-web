@@ -32,6 +32,9 @@ public interface ICatalogDictionary
     /// <summary>Tìm theo khoá chuẩn hoá — trả về cách viết canonical.</summary>
     CatalogEntry? Find(string normalizedKey);
 
+    /// <summary>Lấy một mục theo id, kể cả khi đã bị ẩn (disable) — phục vụ PATCH response.</summary>
+    CatalogEntry? GetById(Guid id);
+
     /// <summary>
     /// Thêm chưa có (theo khoá chuẩn hoá) hay tăng bộ đếm nếu đã có.
     /// Trả về entry canonical sau cập nhật (có thể là cách viết cũ).

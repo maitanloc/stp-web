@@ -83,6 +83,7 @@ function openPopover(): void {
 
   nextTick(() => {
     const trigger = triggerRef.value
+    const panel = popoverRef.value
     if (!trigger) return
 
     const rect = trigger.getBoundingClientRect()
@@ -91,19 +92,36 @@ function openPopover(): void {
       Math.min(420, window.innerWidth - 24),
     )
     const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12))
-    const estimatedHeight = 360
-    const below = window.innerHeight - rect.bottom
-    const above = rect.top
-    dropUp.value = below < estimatedHeight && above > below
-    position.value = {
-      top: dropUp.value ? rect.top - 8 : rect.bottom + 8,
-      left,
-      width,
+
+    // Dùng chiều cao THẬT của panel sau render (ước lượng cố định 360 làm panel
+    // mở lên bị cắt khuất trên thanh trang: các option đầu biến mất khỏi screen).
+    const height = panel?.offsetHeight ?? 320
+    const gap = 8
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+
+    let top: number
+    if (spaceBelow < height && spaceAbove > spaceBelow) {
+      dropUp.value = true
+      top = rect.top - gap
+    } else {
+      dropUp.value = false
+      top = rect.bottom + gap
     }
+
+    if (dropUp.value) {
+      // translateY(-100%): mép hiển thị = top - height. Chặn để panel luôn nằm trọn viewport.
+      top = Math.min(Math.max(top, height + 12), window.innerHeight - 12)
+    } else {
+      top = Math.max(12, Math.min(top, window.innerHeight - height - 12))
+    }
+
+    position.value = { top, left, width }
 
     if (showSearch.value) {
       searchRef.value?.focus()
     }
+    scrollActiveIntoView()
   })
 }
 

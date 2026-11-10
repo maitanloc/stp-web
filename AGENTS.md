@@ -43,5 +43,7 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   ("giấy khai sinh" ×21.102) đứng đầu picker với badge ×N.
 - Biến thể không dấu ("GIAY TAM TRU CUA VO") luôn gộp về canonical có dấu qua
   `CatalogKey.Normalize` — nhưng **không sửa lỗi chính tả** ("đơn xi" ≠ "đơn xin").
-- Seed từ Kho chỉ nạp mục tần suất ≥50 (17 mục Learned); band 2–49 để dev review
-  qua checkbox; count ≤1 là nhiễu (tên người) không nạp.
+- Seed từ Kho mặc định nạp mục tần suất ≥50 (17 mục Learned). Band 2–49 đã
+  nạp lần đầu (23 mục kèm lọc từ khóa giấy tờ `LabelKeywords`); 5 mục rác
+  thuật toán bị nhận ra seed đã soft-disable (IsDisabled, còn trong DB);
+  count ≤1 là nhiễu (tên người) không nạp. Chạy lại seed idempotent.

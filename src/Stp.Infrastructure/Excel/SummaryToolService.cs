@@ -125,7 +125,53 @@ public sealed class SummaryToolService : ISummaryToolService
         "giấy chứng nhận tạm trú",
         "ảnh 4x6",
         "ghi chú",
-        "trích lục ghi chú kết hôn"
+        "trích lục ghi chú kết hôn",
+
+        // ==== Bổ sung 10/11/2026: phủ đầy đủ các họ tiền tố (yêu cầu người dùng:
+        // giấy, cam kết, xác nhận, chứng nhận, chứng minh... đủ kiểu) ====
+
+        // Họ "cam kết" — trước đây lọt hoàn toàn, gồm loại thật "cam kết hôn nhân thực tế".
+        "cam kết",
+        "cam kết hôn nhân thực tế",
+        "cam kết tình trạng hôn nhân",
+        "cam kết cư trú",
+        "bản cam kết",
+
+        // Họ "chứng minh" / giấy tờ tùy thân.
+        "chứng minh nhân dân",
+        "căn cước công dân",
+        "CCCD",
+        "giấy tờ tùy thân",
+
+        // Họ "đơn" — biến thể thật trong kho (đơn xin cấp giấy chứng nhận độc thân ×6).
+        "đơn xin cấp giấy chứng nhận độc thân",
+        "đơn khai sinh",
+        "đơn khai tử",
+        "đơn kết hôn",
+
+        // Họ "giấy" — biến thể hộ tịch còn thiếu.
+        "giấy chứng nhận không có trú ngụ trong việc kết hôn",
+        "giấy lưu trú",
+        "giấy chuyển hộ",
+        "giấy nuôi con nuôi",
+        "giấy chứng nhận nuôi con nuôi",
+
+        // Họ "quyết định" / "trích lục" — nuôi con nuôi, khai sinh/khai tử.
+        "quyết định nuôi con nuôi",
+        "quyết định cho phép nuôi con nuôi",
+        "trích lục hộ tịch",
+        "trích lục khai sinh",
+        "trích lục khai tử",
+
+        // Họ "chứng nhận" / "bản" / quốc tịch (bổ sung sâu hơn).
+        "chứng nhận cư trú",
+        "chứng nhận tạm trú",
+        "chứng nhận thành hôn",
+        "giấy chứng nhận độc thân",
+        "bản tường trình",
+        "tờ khai danh dạ khai sinh",
+        "xác nhận quốc tịch",
+        "giấy xác nhận quốc tịch"
     };
 
     private static readonly string[] DocumentKeywords =

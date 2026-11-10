@@ -99,9 +99,7 @@ public sealed class SummaryCatalogController : ControllerBase
             }
         }
 
-        var entry = _catalog
-            .GetActive()
-            .FirstOrDefault(item => item.Id == id);
+        var entry = _catalog.GetById(id);
         if (entry is null)
         {
             return NotFound(new ProblemDetails
@@ -116,14 +114,16 @@ public sealed class SummaryCatalogController : ControllerBase
     }
 
     /// <summary>
-    /// Nạp danh mục học được từ kho hồ sơ (mức MinCount, mặc định 50): idempotent —
-    /// chạy lại cũng chỉ cập nhật UsageCount khi dữ liệu mới nhiều hơn.
+    /// Nạp danh mục học được từ kho hồ sơ: mục có count ≥ MinCount (mặc định 50)
+    /// tự nạp Source=Learned; khi có MaxCount thì chỉ nạp band [MinCount, MaxCount]
+    /// kèm bộ lọc từ khóa (band review 2–49). Idempotent — chạy lại chỉ cập nhật.
     /// </summary>
     [HttpPost("seed")]
     public ActionResult<SummaryCatalogSeedResponse> Seed(
         [FromBody] SummaryCatalogSeedRequest? request)
     {
         var minCount = request?.MinCount ?? 50;
+        var maxCount = request?.MaxCount;
         if (minCount < 2)
         {
             return BadRequest(new ProblemDetails
@@ -134,10 +134,52 @@ public sealed class SummaryCatalogController : ControllerBase
             });
         }
 
+        if (maxCount.HasValue && maxCount.Value < minCount)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Ngưỡng không hợp lệ",
+                Detail = "maxCount phải ≥ minCount.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
         var (added, updated) = CatalogSeeder.SeedFromArchive(
             HttpContext.RequestServices.GetRequiredService<IDbContextFactory<StpDbContext>>(),
-            minCount);
+            minCount,
+            maxCount);
         return Ok(new SummaryCatalogSeedResponse(added, updated, minCount));
+    }
+
+    /// <summary>
+    /// Xem những mục có khả năng nạp cho band [minCount, maxCount] (mặc định 2–49)
+    /// mà CHƯA nằm trong danh mục — dùng để dev duyệt trước, không ghi DB.
+    /// </summary>
+    [HttpGet("suggestions")]
+    public ActionResult<SummaryCatalogSuggestionsResponse> Suggestions(
+        [FromQuery(Name = "minCount")] int? minCount,
+        [FromQuery(Name = "maxCount")] int? maxCount)
+    {
+        var min = minCount ?? 2;
+        var max = maxCount ?? 49;
+        if (min < 1 || max < min)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Ngưỡng không hợp lệ",
+                Detail = "Cần minCount ≥ 1 và maxCount ≥ minCount.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var items = CatalogSeeder.Suggest(
+            HttpContext.RequestServices.GetRequiredService<IDbContextFactory<StpDbContext>>(),
+            min,
+            max);
+        return Ok(new SummaryCatalogSuggestionsResponse(
+            items.Select(item => new SummaryCatalogSuggestionResponse(item.DisplayName, item.Count)).ToList(),
+            min,
+            max));
     }
 
     private static SummaryCatalogItemResponse ToResponse(CatalogEntry entry) =>

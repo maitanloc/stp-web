@@ -55,6 +55,13 @@ public sealed class CatalogStore : ICatalogDictionary
         return item is null ? null : ToEntry(item);
     }
 
+    public CatalogEntry? GetById(Guid id)
+    {
+        using var db = _factory.CreateDbContext();
+        var item = db.CatalogItems.Find(id);
+        return item is null ? null : ToEntry(item);
+    }
+
     public CatalogEntry Upsert(
         string displayName,
         string? dossierTypeHint,

@@ -407,13 +407,48 @@ badge tần suất)** của mục 3 — nên làm liền nhau một đợt.
   - `inspect DK KET HON (4).xlsx` → catalog 106 mục, meta learned đứng đầu;
     mục user ×2 có trong meta.
 
+**Đợt mở rộng 10/11 (chiều — "đủ kiểu theo họ tiền tố" + fix dropdown):**
+
+- `DefaultCatalog` mở rộng +37 mục phủ đủ họ tiền tố: **giấy, cam kết** (kể cả
+  đích danh "cam kết hôn nhân thực tế", "cam kết cư trú"), **xác nhận**
+  ("đơn xin xác nhận độc thân", "xác nhận quốc tịch", "giấy xác nhận tình trạng
+  hôn nhân"), **chứng nhận** ("đơn xin cấp giấy chứng nhận độc thân"),
+  **chứng minh** ("chứng minh nhân dân", "căn cước công dân", "CCCD"),
+  **tờ khai / bản khai** ("tờ khai tình trạng gia đình"), **trích lục**
+  (hộ tịch/khai sinh/khai tử), **quyết định** ("quyết định nuôi con nuôi",
+  "quyết định công nhận thuận tình ly hôn"), giấy chuyển hộ, giấy thông hành…
+  Test `CatalogDictionaryTests` assert đích danh 5 mục user chỉ định.
+- `CatalogSeeder`: tách `ComputeCounts`, seed nhận `maxCount` (band) + bộ
+  `LabelKeywords` lọc nhiễu tên người (chỉ áp khi seed có maxCount — seed
+  mặc định ≥50 giữ nguyên hành vi); thêm `Suggest()` không ghi DB.
+- Endpoint `GET api/summary/catalog/suggestions?minCount=&maxCount=`
+  (mặc định 2/49) xem trước danh mục đề xuất; `POST seed` nhận `MaxCount`.
+- `ICatalogDictionary.GetById(id)` (kể cả mục đã ẩn): PATCH disable giờ trả
+  **200** thay vì 404-đó sau khi ẩn thành công.
+- Chạy thật band 2–49 trên DB `StpArchive`: suggestions ra 23 mục thật
+  ("đơn xin xác nhận tình trạng hôn nhân" ×32, "tờ khai danh dạ về khai
+  sinh" ×22, "tờ khai tình trạng gia đình" ×16, "giấy thông hành" ×12,
+  "đơn xin xác nhận đính hôn" ×6, "đơn xin cấp giấy chứng nhận độc thân" ×2…);
+  `POST seed {minCount:2,maxCount:49}` → added 23, tổng 43 mục. 5 mục rác
+  thuật toán ("CMND đơn xin đăng ký kết hôn", "CMND sơ yếu lí lịch",
+  "đơn xi hộ khẩu", "giấy chứng tứ", "giấy xác nhận không có trở ngại")
+  soft-disable qua `IsDisabled` (không xoá, hoàn tác được) — **38 active**.
+- `AppSelect.vue` fix dropdown "Loại hồ sơ" bị cắt khi cuộn gần đỉnh trang
+  (bug "kéo cột"): đo chiều cao panel THẬT sau render (thay ước lượng
+  cứng 360 gây flip dropUp nhầm), flip dropUp theo khoảng trống thật,
+  chặn panel trong viewport (clamp top), `scrollActiveIntoView()` lúc
+  mở. Kiểm chứng browser thật tại scrollY=900: panel top≈12, 7 option trọn
+  viewport; chọn xong layout đứng yên (table top 1214.8 không đổi).
+
 ### 7.2 Còn lại (P1 — làm tiếp)
 
 - Piggyback UsageCount: increment khi áp hàng loạt / xuất / lưu Kho (tầng 3) —
   hiện chỉ tự tăng khi user gõ lại mục đã có.
 - Preset `CatalogSet` (bộ chỉ định có tên) + "Lưu bộ đang chọn thành preset" trong bulk.
 - Panel "Nạp danh mục đề xuất" band 2–49 cho dev review trong Workspace
-  (mục 6.2bis tầng 2 — ≈20 mục hộ tịch thật đã liệt kê sẵn ở trên).
+  (mục 6.2bis tầng 2) — **API đã sẵn**: GET suggestions view trước, POST
+  seed giờ nhận MaxCount; chỉ còn thiếu UI panel (dữ liệu đã nạp tay qua
+  API: 23 mục, 5 mục rác đã ẩn).
 - Badge chip xác nhận "đã lưu danh mục" mờ dần sau 2s (chi tiết thẩm mỹ).
 - AuditLog cho thao tác thêm/rename/disable (chốt 4: mọi người dùng được thêm).
 

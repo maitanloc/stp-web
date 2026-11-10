@@ -14,13 +14,109 @@ namespace Stp.Infrastructure.Persistence;
 public static class CatalogSeeder
 {
     /// <summary>
+    /// Từ khóa nhận diện "thứ đọc ra như một loại giấy tờ" — dùng để lọc nhiễu khi
+    /// nạp band hẹp (2–49): tên người ("NGUYEN TRI", "LE PASCAL") không chứa kiểu
+    /// từ khóa nào nên bị loại; loại thật thường chứa ít nhất một từ này.
+    /// </summary>
+    private static readonly string[] LabelKeywords =
+    {
+        "giay", "don", "phieu", "chung", "khai", "ho khau", "cmnd", "cccd", "cong ham",
+        "thi thuc", "ho chieu", "so yeu", "trich luc", "quyet dinh", "bien nhan",
+        "xac nhan", "chuyen khoa", "kham suc khoe", "dang ky", "ban sao", "bien ban",
+        "bien lai", "thong bao", "hoan tra", "ly lich", "tuong trinh",
+        // Bổ sung cho các họ người dùng chỉ định: cam kết, căn cước, công chứng.
+        "cam ket", "can cuoc", "cong chung", "to khai", "ban khai", "nuoi con"
+    };
+
+    /// <summary>
     /// Đếm tần suất từng loại giấy tờ trong toàn bộ trích yếu đã đồng bộ,
     /// nạp những mục đạt <paramref name="minCount"/> lần vào CatalogItems.
     /// Idempotent: mục đã có chỉ cập nhật UsageCount khi lớn hơn.
+    /// Khi có <paramref name="maxCount"/> (band review 2–49), chỉ nạp mục trong
+    /// khoảng [minCount, maxCount] và có dấu hiệu là loại giấy tờ (LabelKeywords).
     /// </summary>
     public static (int Added, int Updated) SeedFromArchive(
         IDbContextFactory<StpDbContext> factory,
-        int minCount = 50)
+        int minCount = 50,
+        int? maxCount = null)
+    {
+        var counts = ComputeCounts(factory);
+
+        var added = 0;
+        var updated = 0;
+        using var save = factory.CreateDbContext();
+        foreach (var (key, (usage, display)) in counts)
+        {
+            if (usage < minCount || (maxCount.HasValue && usage > maxCount.Value))
+            {
+                continue;
+            }
+
+            if (maxCount.HasValue && !LooksLikeDocumentLabel(key))
+            {
+                continue;
+            }
+
+            var item = save.CatalogItems.FirstOrDefault(candidate => candidate.NormalizedKey == key);
+            if (item is null)
+            {
+                save.CatalogItems.Add(new CatalogItem
+                {
+                    Id = Guid.NewGuid(),
+                    NormalizedKey = key,
+                    DisplayName = display,
+                    Source = "Learned",
+                    UsageCount = usage,
+                    LastUsedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow
+                });
+                added++;
+            }
+            else if (usage > item.UsageCount)
+            {
+                item.UsageCount = usage;
+                item.LastUsedAt = DateTime.UtcNow;
+                updated++;
+            }
+        }
+
+        save.SaveChanges();
+        return (added, updated);
+    }
+
+    /// <summary>
+    /// Đề xuất nạp cho band review [minCount, maxCount] — chỉ liệt kê (không ghi DB):
+    /// mục chưa có trong CatalogItems, đếm từ dữ liệu thật, lọc nhiễu theo từ khóa.
+    /// Dùng cho panel dev review; gọi lại seed với maxCount để nạp phần đã duyệt.
+    /// </summary>
+    public static List<(string DisplayName, int Count)> Suggest(
+        IDbContextFactory<StpDbContext> factory,
+        int minCount,
+        int maxCount,
+        int take = 300)
+    {
+        using var db = factory.CreateDbContext();
+        var existingKeys = db.CatalogItems
+            .Select(item => item.NormalizedKey)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var counts = ComputeCounts(factory);
+        var result = counts
+            .Where(pair => pair.Value.Usage >= minCount
+                           && pair.Value.Usage <= maxCount
+                           && LooksLikeDocumentLabel(pair.Key)
+                           && !existingKeys.Contains(pair.Key))
+            .OrderByDescending(pair => pair.Value.Usage)
+            .ThenBy(pair => pair.Key, StringComparer.Ordinal)
+            .Take(take)
+            .Select(pair => (pair.Value.Display, pair.Value.Usage))
+            .ToList();
+
+        return result;
+    }
+
+    private static Dictionary<string, (int Usage, string Display)> ComputeCounts(
+        IDbContextFactory<StpDbContext> factory)
     {
         List<string> summaries;
         using (var db = factory.CreateDbContext())
@@ -60,42 +156,15 @@ public static class CatalogSeeder
             }
         }
 
-        var added = 0;
-        var updated = 0;
-        using var save = factory.CreateDbContext();
-        foreach (var (key, (usage, display)) in counts)
-        {
-            if (usage < minCount)
-            {
-                continue;
-            }
-
-            var item = save.CatalogItems.FirstOrDefault(candidate => candidate.NormalizedKey == key);
-            if (item is null)
-            {
-                save.CatalogItems.Add(new CatalogItem
-                {
-                    Id = Guid.NewGuid(),
-                    NormalizedKey = key,
-                    DisplayName = display,
-                    Source = "Learned",
-                    UsageCount = usage,
-                    LastUsedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
-                });
-                added++;
-            }
-            else if (usage > item.UsageCount)
-            {
-                item.UsageCount = usage;
-                item.LastUsedAt = DateTime.UtcNow;
-                updated++;
-            }
-        }
-
-        save.SaveChanges();
-        return (added, updated);
+        return counts;
     }
+
+    /// <summary>
+    /// Mục hành nghề "như một loại giấy tờ": chứa ít nhất một từ khóa nhận diện
+    /// (giấy, đơn, phiếu, cam kết…). Chặn mục rác dạng tên người, câu rời rạc.
+    /// </summary>
+    private static bool LooksLikeDocumentLabel(string normalizedKey) =>
+        LabelKeywords.Any(keyword => normalizedKey.Contains(keyword, StringComparison.Ordinal));
 
     /// <summary>
     /// Đoạn ngoặc cuối trong "Câu (giấy tờ, giấy tờ)" — replicate đúng logic

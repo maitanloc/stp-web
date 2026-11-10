@@ -189,6 +189,18 @@ public sealed record SummaryCatalogPatchRequest(
     string? DisplayName = null,
     bool? IsDisabled = null);
 
-public sealed record SummaryCatalogSeedRequest(int MinCount = 50);
+public sealed record SummaryCatalogSeedRequest(
+    int MinCount = 50,
+    int? MaxCount = null);
 
 public sealed record SummaryCatalogSeedResponse(int AddedCount, int UpdatedCount, int MinCount);
+
+/// <summary>Mục đề xuất nạp từ Kho (dùng cho band review 2–49 của dev).</summary>
+public sealed record SummaryCatalogSuggestionResponse(
+    string DisplayName,
+    int Count);
+
+public sealed record SummaryCatalogSuggestionsResponse(
+    IReadOnlyList<SummaryCatalogSuggestionResponse> Items,
+    int MinCount,
+    int MaxCount);
