@@ -21,4 +21,19 @@
     <ProjectReference Include="..\Stp.Infrastructure\Stp.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!--
+    Giao diện SPA: "npm run build" ở src/Stp.Web tạo dist/, target này dồn vào
+    wwwroot để API serve trọn gói một cổng (share link được luôn).
+    Chưa npm build lần nào thì bỏ qua — API vẫn chạy thuần như cũ.
+  -->
+  <Target Name="CopySpaDistToWwwroot" AfterTargets="Build"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\Stp.Web\dist\index.html')">
+    <ItemGroup>
+      <SpaAsset Include="$(MSBuildThisFileDirectory)..\Stp.Web\dist\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SpaAsset)"
+          DestinationFiles="@(SpaAsset->'$(MSBuildThisFileDirectory)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

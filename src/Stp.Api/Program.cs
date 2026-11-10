@@ -86,6 +86,17 @@ else
     app.UseHsts();
 }
 
+// Serve SPA build (copy của src/Stp.Web/dist) khi có wwwroot/index.html —
+// cho phép chia sẻ app qua một cổng duy nhất (API + giao diện gốc /api mọi nơi).
+// Không có wwwroot thì vẫn như cũ: API thuần, UI chạy qua dev server Vite.
+var spaRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+var spaIndex = Path.Combine(spaRoot, "index.html");
+if (File.Exists(spaIndex))
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
+
 app.UseCors("Spa");
 app.UseAuthentication();
 app.UseAuthorization();
@@ -103,7 +114,38 @@ app.MapGet("/api/health", async (StpDbContext db, CancellationToken cancellation
     });
 });
 
-app.MapGet("/", () => Results.Redirect("/api/health"));
+app.MapGet("/", () =>
+{
+    // Có SPA build thì trả giao diện; chưa có thì redirect health như cũ.
+    var spaIndex = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "index.html");
+    if (File.Exists(spaIndex))
+    {
+        return Results.File(spaIndex, "text/html");
+    }
+
+    return Results.Redirect("/api/health");
+});
+
+// Deep link (/trich-yeu, /kho…) và refresh trang: trả index.html của SPA,
+// nhưng /api/* không có route vẫn phải là 404 thật, không nuốt vào index.
+app.MapFallback(context =>
+{
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return Task.CompletedTask;
+    }
+
+    var spaIndex = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "index.html");
+    if (!File.Exists(spaIndex))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return Task.CompletedTask;
+    }
+
+    context.Response.ContentType = "text/html; charset=utf-8";
+    return context.Response.SendFileAsync(spaIndex);
+});
 
 app.Run();
 
