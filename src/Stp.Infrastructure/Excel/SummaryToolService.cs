@@ -1280,6 +1280,22 @@ public sealed class SummaryToolService : ISummaryToolService
             dateColumn,
             sheetNumberColumn);
         var sheetNumberHeader = sheet.Cell(headerRow, sheetNumberColumn).GetString().Trim();
+
+        if (year.HasValue)
+        {
+            // Quy ước cột CỐ ĐỊNH của sheet năm (phòng STP 11/11/2026 — tiêu đề
+            // cột trong bảng bị sai nên KHÔNG được tin): B=hồ sơ số, D=trích
+            // yếu, E=thời gian tài liệu, F=ghi chú (bỏ), G=số tờ. Cột A và C
+            // của sheet năm là dữ liệu phụ, không dùng.
+            numberColumn = 2;
+            documentNumberColumn = 2;
+            dateColumn = 5;
+            sheetNumberColumn = 7;
+            documentCodeColumn = 0;
+            summaryColumn = 4;
+            sheetNumberHeader = sheet.Cell(headerRow, sheetNumberColumn).GetString().Trim();
+        }
+
         var headerCatalog = ExtractHeaderCatalog(sheet, headerRow, summaryColumn, lastColumn);
         var rawRows = ReadRawRows(
             sheet,

@@ -23,6 +23,11 @@
   (file nhập 18.944 + 1995ok 394 + 1996 528 + 1997 784 + 1998 813 + 1999 1.137),
   lọc năm 1997 → 784 hồ sơ lấy từ sheet "1997" (badge sheet hiện trong UI),
   file nhập còn 1990–1994 + 2000–2025 + null; tests 86/86 xanh; tunnel 200.
+- [x] A4. **Quy ước cột CỐ ĐỊNH sheet năm (anh nói 11/11/2026 — nhớ mãi):**
+  tiêu đề cột trong bảng bị SAI nên không tin tên cột; ánh xạ cứng cho sheet
+  năm: **B=hồ sơ số, D=trích yếu, E=thời gian tài liệu, F=ghi chú (bỏ),
+  G=số tờ** — cột A/C là phụ, không dùng. Verify file thật: 1997 đọc
+  num/doc=1866 (B), số tờ=01-56 (G) ✓; file nhập giữ nhận dạng cũ.
 
 ### Nhóm B — Pha 0 Workspace 2.0 (motion + lazy)
 - [x] B1. Modal transition (LoginModal, UserNameModal, preview/print/export-name/save-archive modal)

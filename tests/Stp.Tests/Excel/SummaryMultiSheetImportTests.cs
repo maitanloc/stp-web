@@ -62,6 +62,14 @@ public sealed class SummaryMultiSheetImportTests
             Assert.DoesNotContain(
                 session.Rows,
                 row => row.SheetName == "file nhập" && row.Year is 1995 or 1997);
+
+            // Quy ước cột cố định của sheet năm (tiêu đề cột bị sai): B=hồ sơ
+            // số, D=trích yếu, G=số tờ (dù tiêu đề G ghi "Ghi chú" — bỏ qua).
+            var yearSheetRow = session.Rows.Single(row => row.RowNumber == 7);
+            Assert.Equal("1866", yearSheetRow.NumberLabel);
+            Assert.Equal("1866", yearSheetRow.DocumentNumber);
+            Assert.Equal("01-56", yearSheetRow.SheetNumber);
+            Assert.Equal(1866, yearSheetRow.Number);
         }
         finally
         {
@@ -303,13 +311,17 @@ public sealed class SummaryMultiSheetImportTests
         var year1995 = workbook.AddWorksheet("1995ok");
         WriteHeaders(year1995);
         year1995.Cell("D2").Value = "Trích yếu của sheet mười chín chín năm (phiếu đề xuất)";
-        year1995.Cell("B2").Value = 1;
+        year1995.Cell("B2").Value = 1865; // hồ sơ số (quy ước sheet năm: B=hồ sơ số)
+        year1995.Cell("F2").Value = "32/UBT"; // ghi chú (F) — tiêu đề ghi nhầm "Số tờ"
+        year1995.Cell("G2").Value = "01-41"; // số tờ (G) — tiêu đề ghi nhầm "Ghi chú"
         year1995.Cell("E2").Value = new DateTime(1995, 1, 12);
 
         var year1997 = workbook.AddWorksheet("1997");
         WriteHeaders(year1997);
         year1997.Cell("D2").Value = "Trích yếu của sheet năm riêng (hộ chiếu)";
-        year1997.Cell("B2").Value = 1;
+        year1997.Cell("B2").Value = 1866; // hồ sơ số
+        year1997.Cell("F2").Value = "46/UBT"; // ghi chú
+        year1997.Cell("G2").Value = "01-56"; // số tờ
         year1997.Cell("E2").Value = new DateTime(1997, 2, 2);
 
         workbook.SaveAs(path);
