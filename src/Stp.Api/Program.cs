@@ -169,14 +169,19 @@ if (requireTeamLogin)
 app.UseAuthorization();
 app.MapControllers();
 
+// Trạng thái migration dùng cho health: migrate hỏng thì báo degraded nhưng
+// service vẫn chạy (log lỗi chi tiết, không crash).
+var startupMigrationError = (Exception?)null;
+
 app.MapGet("/api/health", async (StpDbContext db, CancellationToken cancellationToken) =>
 {
     var databaseOk = await db.Database.CanConnectAsync(cancellationToken);
     return Results.Ok(new
     {
-        status = databaseOk ? "ok" : "degraded",
+        status = databaseOk && startupMigrationError is null ? "ok" : "degraded",
         database = databaseOk ? "connected" : "unavailable",
         databaseName = db.Database.GetDbConnection().Database,
+        migrations = startupMigrationError is null ? "applied" : "failed",
         utc = DateTimeOffset.UtcNow
     });
 });
@@ -213,6 +218,32 @@ app.MapFallback(context =>
     context.Response.ContentType = "text/html; charset=utf-8";
     return context.Response.SendFileAsync(spaIndex);
 });
+
+// Áp migration lúc khởi động (idempotent — chạy lại không làm gì). Repo trước
+// đây KHÔNG tự chạy Database.Migrate: thêm bảng/cột mới mà quên áp tay thì API
+// chạy trên schema cũ và chỉ vỡ lúc runtime. Migration hỏng chỉ log lỗi, không
+// chặn service; health sẽ báo degraded cho đến khi khởi động lại thành công.
+try
+{
+    using var migrateDb = app.Services.GetRequiredService<IDbContextFactory<StpDbContext>>().CreateDbContext();
+    var pendingMigrations = new List<string>(
+        await migrateDb.Database.GetPendingMigrationsAsync());
+    await migrateDb.Database.MigrateAsync();
+    if (pendingMigrations.Count > 0)
+    {
+        app.Logger.LogInformation(
+            "Đã áp {Count} migration lúc khởi động: {Migrations}",
+            pendingMigrations.Count,
+            string.Join(", ", pendingMigrations));
+    }
+}
+catch (Exception migrateError)
+{
+    startupMigrationError = migrateError;
+    app.Logger.LogError(
+        migrateError,
+        "Áp migration thất bại lúc khởi động — API vẫn chạy nhưng bảng/cột mới có thể thiếu. Kiểm tra kết nối SQL Server rồi khởi động lại.");
+}
 
 // Seed tài khoản quản trị đầu tiên khi bảng Users còn trống. Mật khẩu mặc định
 // chỉ ghi trong log khởi động — quản trị đổi ngay trong trang Quản lý tài khoản.

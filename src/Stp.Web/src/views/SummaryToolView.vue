@@ -93,6 +93,19 @@ const pageSize = ref(20)
 const loadingRows = ref(false)
 const rowsError = ref<string | null>(null)
 
+/** Phiên ghép nhiều sheet (file nhập + sheet năm) → hiện badge sheet từng dòng. */
+const multiSheet = computed(() => (session.value?.sheets?.length ?? 0) > 1)
+
+function sheetBadgeFor(row: SummaryRowResponse): string {
+  return row.sheet || session.value?.sheetName || ''
+}
+
+function sourceRowLabelFor(row: SummaryRowResponse): string {
+  return row.sourceRowNumber && row.sourceRowNumber !== row.rowNumber
+    ? `dòng ${row.sourceRowNumber} của file Excel gốc`
+    : `dòng ${row.rowNumber}`
+}
+
 const year = ref<number | ''>('')
 const yearFrom = ref<number | ''>('')
 const yearTo = ref<number | ''>('')
@@ -2260,6 +2273,13 @@ onBeforeUnmount(() => {
                       </td>
                       <td>
                         <span class="badge badge-neutral">{{ row.year ?? '—' }}</span>
+                        <span
+                          v-if="multiSheet"
+                          class="badge badge-neutral summary-sheet-badge"
+                          :title="`Sheet ${sheetBadgeFor(row)} — ${sourceRowLabelFor(row)}`"
+                        >
+                          {{ sheetBadgeFor(row) }}
+                        </span>
                       </td>
                       <td>
                         <input

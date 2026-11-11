@@ -23,11 +23,15 @@ public sealed record SummaryInspectResponse(
     IReadOnlyList<SummaryYearResponse> Years,
     IReadOnlyList<SummaryTypeResponse> Types,
     string NumberColumn = "B",
-    IReadOnlyList<SummaryCatalogMetaResponse>? CatalogMeta = null);
+    IReadOnlyList<SummaryCatalogMetaResponse>? CatalogMeta = null,
+    IReadOnlyList<SummarySheetResponse>? Sheets = null);
 
 public sealed record SummaryYearResponse(int Year, int Count);
 
 public sealed record SummaryTypeResponse(string Name, int Count);
+
+/// <summary>Một sheet dữ liệu tạo nên phiên (file nhập có Year = null).</summary>
+public sealed record SummarySheetResponse(string Name, int? Year, int RowCount);
 
 /// <summary>Một dòng hồ sơ kèm phần trích yếu đã tách khỏi danh mục giấy tờ.</summary>
 public sealed record SummaryRowResponse(
@@ -46,7 +50,9 @@ public sealed record SummaryRowResponse(
     string? Type,
     bool NeedsNormalization = false,
     string NormalizedSummary = "",
-    string NormalizedBaseSummary = "");
+    string NormalizedBaseSummary = "",
+    string Sheet = "",
+    int SourceRowNumber = 0);
 
 public sealed record SummaryRowsResponse(
     IReadOnlyList<SummaryRowResponse> Items,

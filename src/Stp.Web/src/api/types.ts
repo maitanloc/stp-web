@@ -363,6 +363,15 @@ export interface SummaryInspectResponse {
   years: SummaryYearResponse[]
   types: SummaryTypeResponse[]
   numberColumn?: string | null
+  /** Các sheet dữ liệu tạo nên phiên (file nhập + sheet năm); 1 mục = bản cũ một sheet. */
+  sheets?: SummarySheetResponse[]
+}
+
+export interface SummarySheetResponse {
+  name: string
+  /** null = sheet "file nhập"; số = sheet mang tên năm. */
+  year: number | null
+  rowCount: number
 }
 
 export interface SummaryCatalogMetaResponse {
@@ -397,6 +406,10 @@ export interface SummaryRowResponse {
   needsNormalization: boolean
   normalizedSummary: string
   normalizedBaseSummary: string
+  /** Sheet nguồn của dòng (riêng biệt khi phiên ghép nhiều sheet). */
+  sheet?: string
+  /** Số dòng Excel thật trong sheet nguồn; bản một sheet thì bằng rowNumber. */
+  sourceRowNumber?: number
 }
 
 export interface SummaryRowsResponse {

@@ -504,68 +504,17 @@ public sealed class SummaryToolService : ISummaryToolService
         var changeMap = changes
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
-        var patches = new List<SummaryCellPatch>();
-        var changedRows = new HashSet<int>();
-        var normalizedRows = 0;
         var allowed = onlyRowNumbers is null || onlyRowNumbers.Count == 0
             ? null
             : onlyRowNumbers.ToHashSet();
 
         // Xuất toàn bộ: chuẩn hoá mọi dòng đăng ký kết hôn thuộc workbook,
         // trừ khi người dùng chọn "chỉ dòng đã chọn" thì chỉ quét các dòng đó.
-        foreach (var row in session.Rows)
-        {
-            if (allowed is not null && !allowed.Contains(row.RowNumber))
-            {
-                continue;
-            }
+        var build = BuildSheetPatches(session, session.Rows, changeMap, allowed);
+        var changedRows = build.ChangedRows;
+        var normalizedRows = build.NormalizedRows;
 
-            changeMap.TryGetValue(row.RowNumber, out var change);
-            var plan = CreatePlan(row, change, session.Catalog);
-
-            if (plan.SummaryChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.SummaryColumn,
-                    plan.Summary));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.SheetNumberChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.SheetNumberColumn,
-                    plan.SheetNumber ?? string.Empty));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.DocumentNumberChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.DocumentNumberColumn,
-                    plan.DocumentNumber ?? string.Empty));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.NumberLabelChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.NumberColumn,
-                    plan.NumberLabel ?? string.Empty));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.Normalized)
-            {
-                normalizedRows++;
-            }
-        }
-
-        if (patches.Count == 0)
+        if (build.PatchesBySheet.Count == 0)
         {
             throw new InvalidOperationException(
                 "Nội dung đã chọn trùng với trích yếu hiện có, không cần xuất file.");
@@ -584,8 +533,9 @@ public sealed class SummaryToolService : ISummaryToolService
             SummaryXlsxPatcher.Apply(
                 session.FilePath,
                 outputPath,
-                session.SheetName,
-                patches);
+                build.PatchesBySheet
+                    .Select(item => new SummarySheetPatches(item.Key, item.Value))
+                    .ToList());
 
             var content = await File
                 .ReadAllBytesAsync(outputPath, cancellationToken)
@@ -641,57 +591,11 @@ public sealed class SummaryToolService : ISummaryToolService
         var changeMap = changes
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
-        var patches = new List<SummaryCellPatch>();
-        var changedRows = new HashSet<int>();
         var ignored = changes.Count(change => !allowed.Contains(change.RowNumber));
-        var normalizedRows = 0;
 
-        foreach (var row in scopedRows)
-        {
-            changeMap.TryGetValue(row.RowNumber, out var change);
-            var plan = CreatePlan(row, change, session.Catalog);
-
-            if (plan.SummaryChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.SummaryColumn,
-                    plan.Summary));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.SheetNumberChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.SheetNumberColumn,
-                    plan.SheetNumber ?? string.Empty));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.DocumentNumberChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.DocumentNumberColumn,
-                    plan.DocumentNumber ?? string.Empty));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.NumberLabelChanged)
-            {
-                patches.Add(new SummaryCellPatch(
-                    row.RowNumber,
-                    session.NumberColumn,
-                    plan.NumberLabel ?? string.Empty));
-                changedRows.Add(row.RowNumber);
-            }
-
-            if (plan.Normalized)
-            {
-                normalizedRows++;
-            }
-        }
+        var build = BuildSheetPatches(session, scopedRows, changeMap, null);
+        var changedRows = build.ChangedRows;
+        var normalizedRows = build.NormalizedRows;
 
         var outputDirectory = _storage.GetJobOutputDirectory(sessionId);
         Directory.CreateDirectory(outputDirectory);
@@ -709,10 +613,7 @@ public sealed class SummaryToolService : ISummaryToolService
             SummaryXlsxPatcher.ApplyFiltered(
                 session.FilePath,
                 outputPath,
-                session.SheetName,
-                session.HeaderRow,
-                allowed,
-                patches);
+                BuildFilteredSheets(session, build.PatchesBySheet, scopedRows));
 
             var content = await File
                 .ReadAllBytesAsync(outputPath, cancellationToken)
@@ -741,6 +642,159 @@ public sealed class SummaryToolService : ISummaryToolService
             TryDelete(outputPath);
         }
     }
+
+    /// <summary>
+    /// Dựng các ô cần ghi theo sheet nguồn: RowNumber của patch là SỐ DÒNG
+    /// EXCEL THẬT trong sheet đó (<see cref="SummaryRow.SourceRowNumber"/>),
+    /// chữ ký cột lấy theo nhận diện của từng sheet (các sheet năm có thể lệch
+    /// cột so với file nhập). Phiên một sheet thì SourceRowNumber == RowNumber
+    /// và cột trùng giá trị cũ nên hành vi không đổi.
+    /// </summary>
+    private static SummarySheetPatchBuild BuildSheetPatches(
+        SummaryWorkbook session,
+        IEnumerable<SummaryRow> rows,
+        IReadOnlyDictionary<int, SummaryChange> changeMap,
+        ISet<int>? allowedRowNumbers)
+    {
+        var patchesBySheet = new Dictionary<string, List<SummaryCellPatch>>(StringComparer.Ordinal);
+        var changedRows = new HashSet<int>();
+        var normalizedRows = 0;
+        var columnsBySheet = new Dictionary<string, SummarySheetInfo>(StringComparer.Ordinal);
+
+        SummarySheetInfo ColumnsFor(string sheetName)
+        {
+            if (!columnsBySheet.TryGetValue(sheetName, out var info))
+            {
+                info = SheetInfoFor(session, sheetName);
+                columnsBySheet[sheetName] = info;
+            }
+
+            return info;
+        }
+
+        void AddPatch(string sheetName, int sourceRowNumber, string column, string text)
+        {
+            if (!patchesBySheet.TryGetValue(sheetName, out var list))
+            {
+                list = new List<SummaryCellPatch>();
+                patchesBySheet[sheetName] = list;
+            }
+
+            list.Add(new SummaryCellPatch(sourceRowNumber, column, text));
+        }
+
+        foreach (var row in rows)
+        {
+            if (allowedRowNumbers is not null && !allowedRowNumbers.Contains(row.RowNumber))
+            {
+                continue;
+            }
+
+            changeMap.TryGetValue(row.RowNumber, out var change);
+            var plan = CreatePlan(row, change, session.Catalog);
+            var columns = ColumnsFor(row.SheetName);
+
+            if (plan.SummaryChanged)
+            {
+                AddPatch(row.SheetName, row.SourceRowNumber, columns.SummaryColumn, plan.Summary);
+                changedRows.Add(row.RowNumber);
+            }
+
+            if (plan.SheetNumberChanged)
+            {
+                AddPatch(
+                    row.SheetName,
+                    row.SourceRowNumber,
+                    columns.SheetNumberColumn,
+                    plan.SheetNumber ?? string.Empty);
+                changedRows.Add(row.RowNumber);
+            }
+
+            if (plan.DocumentNumberChanged)
+            {
+                AddPatch(
+                    row.SheetName,
+                    row.SourceRowNumber,
+                    columns.DocumentNumberColumn,
+                    plan.DocumentNumber ?? string.Empty);
+                changedRows.Add(row.RowNumber);
+            }
+
+            if (plan.NumberLabelChanged)
+            {
+                AddPatch(
+                    row.SheetName,
+                    row.SourceRowNumber,
+                    columns.NumberColumn,
+                    plan.NumberLabel ?? string.Empty);
+                changedRows.Add(row.RowNumber);
+            }
+
+            if (plan.Normalized)
+            {
+                normalizedRows++;
+            }
+        }
+
+        return new SummarySheetPatchBuild(patchesBySheet, changedRows, normalizedRows);
+    }
+
+    /// <summary>Danh sách sheet cần lọc cho bản xuất lọc: mỗi sheet giữ dòng tiêu đề + dòng được phép của nó.</summary>
+    private static List<SummaryFilteredSheet> BuildFilteredSheets(
+        SummaryWorkbook session,
+        Dictionary<string, List<SummaryCellPatch>> patchesBySheet,
+        IReadOnlyList<SummaryRow> scopedRows)
+    {
+        var allowedBySheet = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+        foreach (var row in scopedRows)
+        {
+            if (!allowedBySheet.TryGetValue(row.SheetName, out var rows))
+            {
+                rows = new HashSet<int>();
+                allowedBySheet[row.SheetName] = rows;
+            }
+
+            rows.Add(row.SourceRowNumber);
+        }
+
+        return allowedBySheet
+            .Select(item => new SummaryFilteredSheet(
+                item.Key,
+                SheetInfoFor(session, item.Key).HeaderRow,
+                item.Value,
+                patchesBySheet.TryGetValue(item.Key, out var patches)
+                    ? patches
+                    : Array.Empty<SummaryCellPatch>()))
+            .ToList();
+    }
+
+    /// <summary>Meta cột của một sheet; không tìm thấy thì dùng meta cấp workbook (phòng hờ).</summary>
+    private static SummarySheetInfo SheetInfoFor(SummaryWorkbook session, string sheetName)
+    {
+        var sheet = session.Sheets.FirstOrDefault(item =>
+            string.Equals(item.Name, sheetName, StringComparison.Ordinal));
+        if (sheet is not null)
+        {
+            return sheet;
+        }
+
+        return new SummarySheetInfo(
+            sheetName,
+            null,
+            0,
+            session.HeaderRow,
+            session.SummaryColumn,
+            session.SummaryHeader,
+            session.SheetNumberColumn,
+            session.SheetNumberHeader,
+            session.DocumentNumberColumn,
+            session.NumberColumn);
+    }
+
+    private sealed record SummarySheetPatchBuild(
+        Dictionary<string, List<SummaryCellPatch>> PatchesBySheet,
+        HashSet<int> ChangedRows,
+        int NormalizedRows);
 
     public SummaryPrintPreview PreviewPrint(
         Guid sessionId,
@@ -837,6 +891,13 @@ public sealed class SummaryToolService : ISummaryToolService
         return true;
     }
 
+    /// <summary>
+    /// Đọc workbook thành phiên trích yếu. Luật chọn sheet của nhà STP (11/11/2026):
+    /// dữ liệu 1990–1995 nằm ở sheet "file nhập"; từ 1996 trở đi lấy sheet mang
+    /// tên năm (vd "1996", "1997", "1995ok" là năm 1995) — KHÔNG lấy "file nhập"
+    /// cho các năm đã có sheet năm riêng. Workbook không có sheet nào mang tên
+    /// năm thì giữ nguyên hành vi cũ: đọc một sheet duy nhất.
+    /// </summary>
     private SummaryWorkbook Parse(
         Guid sessionId,
         string filePath,
@@ -844,6 +905,41 @@ public sealed class SummaryToolService : ISummaryToolService
         long fileSizeBytes)
     {
         using var workbook = new XLWorkbook(filePath);
+
+        var yearSheets = workbook.Worksheets
+            .Select(sheet => (Sheet: sheet, Year: TryReadSheetYear(sheet)))
+            .Where(item => item.Year.HasValue && !IsMacroPrintSheet(item.Sheet))
+            .Select(item => (item.Sheet, Year: item.Year!.Value))
+            .ToList();
+
+        if (yearSheets.Count == 0)
+        {
+            return ParseSingleSheet(sessionId, filePath, fileName, fileSizeBytes, workbook);
+        }
+
+        var inputSheet = workbook.Worksheets.FirstOrDefault(sheet =>
+            NormalizeKey(sheet.Name) is "file nhap")
+            ?? workbook.Worksheets.FirstOrDefault(sheet =>
+                string.Equals(sheet.Name, "ML", StringComparison.OrdinalIgnoreCase));
+
+        return ParseMultiSheet(
+            sessionId,
+            filePath,
+            fileName,
+            fileSizeBytes,
+            workbook,
+            inputSheet,
+            yearSheets);
+    }
+
+    /// <summary>Hành vi cũ: workbook chỉ có một sheet dữ liệu (hoặc không có sheet năm).</summary>
+    private SummaryWorkbook ParseSingleSheet(
+        Guid sessionId,
+        string filePath,
+        string fileName,
+        long fileSizeBytes,
+        XLWorkbook workbook)
+    {
         var (sheet, headerRow, summaryColumn, summaryHeader) = FindSummarySheet(workbook);
 
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
@@ -904,41 +1000,15 @@ public sealed class SummaryToolService : ISummaryToolService
         var dictionaryEntries = _catalogDictionary?.GetActive() ?? Array.Empty<CatalogEntry>();
         var catalog = MergeCatalog(headerCatalog, observed, DefaultCatalog, dictionaryEntries);
         var catalogMeta = BuildCatalogMeta(catalog, observed, dictionaryEntries);
-        var rows = rawRows.Select(raw =>
-        {
-            var (baseSummary, items, hasDocumentList) = ParseSummary(raw.Text, catalog);
-            var isBroken = LooksLikeBrokenSummary(raw.Text);
-            var needsNormalization = MarriageSummaryNormalizer.NeedsNormalization(raw.Text);
-            var normalizedSummary = needsNormalization
-                ? MarriageSummaryNormalizer.NormalizeIfNeeded(raw.Text)
-                : raw.Text;
-            var normalizedBaseSummary = needsNormalization
-                ? NormalizeBaseSummary(normalizedSummary, hasDocumentList)
-                : baseSummary;
-
-            return new SummaryRow
-            {
-                RowNumber = raw.RowNumber,
-                Year = raw.Year,
-                Number = ParseNumberLabel(raw.NumberLabel),
-                NumberLabel = raw.NumberLabel,
-                DocumentNumber = raw.DocumentNumber,
-                SheetNumber = raw.SheetNumber,
-                DocumentDate = raw.DocumentDate,
-                DocumentCode = raw.DocumentCode,
-                OriginalSummary = raw.Text,
-                BaseSummary = baseSummary,
-                Items = items,
-                HasDocumentList = hasDocumentList,
-                HasFormula = raw.HasFormula,
-                IsBrokenSummary = isBroken,
-                NeedsNormalization = needsNormalization,
-                NormalizedSummary = normalizedSummary,
-                NormalizedBaseSummary = normalizedBaseSummary,
-                Group = raw.Group,
-                Type = raw.Type
-            };
-        }).ToList();
+        var rows = rawRows
+            .Select(raw => CreateSummaryRow(
+                sheet.Name,
+                raw.RowNumber,
+                raw.RowNumber,
+                raw.Year,
+                raw,
+                catalog))
+            .ToList();
 
         _logger.LogInformation(
             "Đọc trích yếu {FileName}: sheet {Sheet}, {Rows} hồ sơ, {Catalog} loại giấy tờ.",
@@ -963,6 +1033,20 @@ public sealed class SummaryToolService : ISummaryToolService
             NumberColumn = sheet.Column(numberColumn).ColumnLetter(),
             Catalog = catalog,
             CatalogMeta = catalogMeta,
+            Sheets = new[]
+            {
+                new SummarySheetInfo(
+                    sheet.Name,
+                    null,
+                    rows.Count,
+                    headerRow,
+                    summaryColumnLetter,
+                    summaryHeader,
+                    sheet.Column(sheetNumberColumn).ColumnLetter(),
+                    sheetNumberHeader,
+                    sheet.Column(documentNumberColumn).ColumnLetter(),
+                    sheet.Column(numberColumn).ColumnLetter())
+            },
             Rows = rows,
             Years = rows
                 .Where(row => row.Year.HasValue)
@@ -984,6 +1068,322 @@ public sealed class SummaryToolService : ISummaryToolService
             MissingDocumentNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.DocumentNumber)),
             MissingNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.NumberLabel)),
             NormalizableCount = rows.Count(row => row.NeedsNormalization)
+        };
+    }
+
+    /// <summary>
+    /// Workbook có sheet mang tên năm: ghép nhiều sheet thành một phiên.
+    /// Thứ tự: các dòng giữ lại của "file nhập" trước, rồi từng sheet năm theo
+    /// năm tăng dần. Sheet năm ép mọi dòng của nó về đúng năm của sheet; file
+    /// nhập chỉ giữ dòng không có năm hoặc năm CHƯA được sheet năm nào phủ
+    /// (1997 rác bị loại khi có sheet "1997"; 1990–1994 giữ nguyên; 1995 bị
+    /// "1995ok" phủ thì loại). Sheet năm trống không phủ năm gì.
+    /// </summary>
+    private SummaryWorkbook ParseMultiSheet(
+        Guid sessionId,
+        string filePath,
+        string fileName,
+        long fileSizeBytes,
+        XLWorkbook workbook,
+        IXLWorksheet? inputSheet,
+        List<(IXLWorksheet Sheet, int Year)> yearSheets)
+    {
+        var inputRead = inputSheet is null ? null : ReadSummarySheet(inputSheet, null);
+        var yearReads = yearSheets
+            .Select(item => (Read: ReadSummarySheet(item.Sheet, item.Year), item.Year))
+            // Sheet tên năm chỉ được phủ năm của nó khi sheet có ÍT NHẤT MỘT dòng
+            // trích yếu không rỗng (sheet "1991" rác chỉ có vài ô rải rác không
+            // phải dữ liệu → không được xoá dòng 1991 của file nhập).
+            .Where(item => item.Read.RawRows.Any(row => row.Text.Length > 0))
+            .OrderBy(item => item.Year)
+            .ToList();
+
+        if (yearReads.Count == 0)
+        {
+            // Không sheet năm nào có dòng dữ liệu (sheet tên năm rác): rơi về
+            // hành vi một sheet cũ, giữ nguyên cách đánh số dòng như trước.
+            return ParseSingleSheet(sessionId, filePath, fileName, fileSizeBytes, workbook);
+        }
+
+        var coveredYears = yearReads.Select(item => item.Year).ToHashSet();
+        var keptInputRows = inputRead is null
+            ? new List<RawRow>()
+            : inputRead.RawRows
+                .Where(row => !row.Year.HasValue || !coveredYears.Contains(row.Year.Value))
+                .ToList();
+
+        var ordered = new List<(SheetRead Sheet, IReadOnlyList<RawRow> Rows)>();
+        if (inputRead is not null && keptInputRows.Count > 0)
+        {
+            ordered.Add((inputRead, keptInputRows));
+        }
+
+        foreach (var item in yearReads)
+        {
+            ordered.Add((item.Read, item.Read.RawRows));
+        }
+
+        if (ordered.Count == 0)
+        {
+            // Không đọc được dòng dữ liệu nào từ mọi sheet — rơi về hành vi cũ
+            // để báo lỗi workbook như trước thay vì trả phiên rỗng.
+            return ParseSingleSheet(sessionId, filePath, fileName, fileSizeBytes, workbook);
+        }
+
+        var headerCatalog = new List<string>();
+        var observed = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (sheetRead, sheetRows) in ordered)
+        {
+            headerCatalog.AddRange(sheetRead.HeaderCatalog);
+
+            foreach (var raw in sheetRows)
+            {
+                var group = SplitTrailingGroup(raw.Text);
+                if (group is null)
+                {
+                    continue;
+                }
+
+                var candidateItems = SplitItems(group.Value.Inside);
+                if (!LooksLikeDocumentList(candidateItems, headerCatalog))
+                {
+                    continue;
+                }
+
+                foreach (var item in candidateItems)
+                {
+                    observed[item] = observed.GetValueOrDefault(item) + 1;
+                }
+            }
+        }
+
+        var dictionaryEntries = _catalogDictionary?.GetActive() ?? Array.Empty<CatalogEntry>();
+        var catalog = MergeCatalog(headerCatalog, observed, DefaultCatalog, dictionaryEntries);
+        var catalogMeta = BuildCatalogMeta(catalog, observed, dictionaryEntries);
+
+        var rows = new List<SummaryRow>();
+        var sheets = new List<SummarySheetInfo>();
+        var rowNumber = 0;
+        foreach (var (sheetRead, sheetRows) in ordered)
+        {
+            sheets.Add(new SummarySheetInfo(
+                sheetRead.Name,
+                sheetRead.Year,
+                sheetRows.Count,
+                sheetRead.HeaderRow,
+                sheetRead.SummaryColumn,
+                sheetRead.SummaryHeader,
+                sheetRead.SheetNumberColumn,
+                sheetRead.SheetNumberHeader,
+                sheetRead.DocumentNumberColumn,
+                sheetRead.NumberColumn));
+
+            foreach (var raw in sheetRows)
+            {
+                rowNumber++;
+                rows.Add(CreateSummaryRow(
+                    sheetRead.Name,
+                    rowNumber,
+                    raw.RowNumber,
+                    sheetRead.Year ?? raw.Year,
+                    raw,
+                    catalog));
+            }
+        }
+
+        var primary = ordered[0].Sheet;
+        _logger.LogInformation(
+            "Đọc trích yếu {FileName}: {SheetCount} sheet ({SheetNames}), {Rows} hồ sơ, {Catalog} loại giấy tờ.",
+            fileName,
+            sheets.Count,
+            string.Join(", ", sheets.Select(item => item.Name)),
+            rows.Count,
+            catalog.Count);
+
+        return new SummaryWorkbook
+        {
+            SessionId = sessionId,
+            FilePath = filePath,
+            FileName = fileName,
+            FileSizeBytes = fileSizeBytes,
+            SheetName = primary.Name,
+            HeaderRow = primary.HeaderRow,
+            SummaryColumn = primary.SummaryColumn,
+            SummaryHeader = primary.SummaryHeader,
+            SheetNumberColumn = primary.SheetNumberColumn,
+            SheetNumberHeader = primary.SheetNumberHeader,
+            DocumentNumberColumn = primary.DocumentNumberColumn,
+            NumberColumn = primary.NumberColumn,
+            Catalog = catalog,
+            CatalogMeta = catalogMeta,
+            Sheets = sheets,
+            Rows = rows,
+            Years = rows
+                .Where(row => row.Year.HasValue)
+                .GroupBy(row => row.Year!.Value)
+                .Select(group => new SummaryYearCount(group.Key, group.Count()))
+                .OrderBy(item => item.Year)
+                .ToList(),
+            Types = rows
+                .Where(row => !string.IsNullOrWhiteSpace(row.Type))
+                .GroupBy(row => row.Type!, StringComparer.CurrentCultureIgnoreCase)
+                .Select(group => new SummaryTypeCount(group.Key, group.Count()))
+                .OrderByDescending(item => item.Count)
+                .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList(),
+            ExistingListCount = rows.Count(row => row.HasDocumentList),
+            BrokenSummaryCount = rows.Count(row => row.IsBrokenSummary),
+            FormulaSummaryCount = rows.Count(row => row.HasFormula),
+            MissingSheetNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.SheetNumber)),
+            MissingDocumentNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.DocumentNumber)),
+            MissingNumberCount = rows.Count(row => string.IsNullOrWhiteSpace(row.NumberLabel)),
+            NormalizableCount = rows.Count(row => row.NeedsNormalization)
+        };
+    }
+
+    /// <summary>Dữ liệu một sheet đã đọc xong (cột nhận diện theo từng sheet riêng).</summary>
+    private sealed record SheetRead(
+        string Name,
+        int? Year,
+        int HeaderRow,
+        string SummaryColumn,
+        string? SummaryHeader,
+        string SheetNumberColumn,
+        string? SheetNumberHeader,
+        string DocumentNumberColumn,
+        string NumberColumn,
+        List<string> HeaderCatalog,
+        List<RawRow> RawRows);
+
+    private static SheetRead ReadSummarySheet(IXLWorksheet sheet, int? year)
+    {
+        var (headerRow, summaryColumn, summaryHeader) = ResolveSheetHeader(sheet);
+
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
+        var lastColumn = sheet.LastColumnUsed()?.ColumnNumber() ?? summaryColumn;
+
+        var numberColumn = DetectNumberColumn(sheet, lastRow);
+        var documentNumberColumn = DetectDocumentNumberColumn(sheet, headerRow, lastColumn);
+        var dateColumn = DetectDateColumn(sheet, headerRow, lastColumn, summaryColumn);
+        var sheetNumberColumn = DetectSheetNumberColumn(
+            sheet,
+            headerRow,
+            lastRow,
+            lastColumn,
+            summaryColumn,
+            dateColumn);
+        var documentCodeColumn = DetectDocumentCodeColumn(
+            sheet,
+            headerRow,
+            lastColumn,
+            summaryColumn,
+            dateColumn,
+            sheetNumberColumn);
+        var sheetNumberHeader = sheet.Cell(headerRow, sheetNumberColumn).GetString().Trim();
+        var headerCatalog = ExtractHeaderCatalog(sheet, headerRow, summaryColumn, lastColumn);
+        var rawRows = ReadRawRows(
+            sheet,
+            headerRow,
+            lastRow,
+            summaryColumn,
+            numberColumn,
+            documentNumberColumn,
+            sheetNumberColumn,
+            dateColumn,
+            documentCodeColumn);
+
+        return new SheetRead(
+            sheet.Name,
+            year,
+            headerRow,
+            sheet.Column(summaryColumn).ColumnLetter(),
+            summaryHeader,
+            sheet.Column(sheetNumberColumn).ColumnLetter(),
+            sheetNumberHeader,
+            sheet.Column(documentNumberColumn).ColumnLetter(),
+            sheet.Column(numberColumn).ColumnLetter(),
+            headerCatalog,
+            rawRows);
+    }
+
+    private static (int HeaderRow, int SummaryColumn, string? Header) ResolveSheetHeader(
+        IXLWorksheet sheet)
+    {
+        var found = FindSummaryHeader(sheet);
+        if (found is not null)
+        {
+            return (found.Value.Row, found.Value.Column, found.Value.Header);
+        }
+
+        return (1, 4, sheet.Cell(1, 4).GetString());
+    }
+
+    /// <summary>
+    /// Tên sheet bắt đầu bằng năm 4 chữ số (vd "1997", "1995ok") → năm dữ liệu
+    /// của sheet; null nếu không phải sheet năm.
+    /// </summary>
+    private static int? TryReadSheetYear(IXLWorksheet sheet)
+    {
+        var match = Regex.Match(
+            sheet.Name.Trim(),
+            @"^(19\d{2}|20\d{2})",
+            RegexOptions.CultureInvariant);
+        if (!match.Success || !int.TryParse(match.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var year))
+        {
+            return null;
+        }
+
+        return year is >= MinArchiveYear and <= MaxArchiveYear ? year : null;
+    }
+
+    /// <summary>Sheet in hàng loạt do macro sinh ra (ô K1 chứa dấu hiệu nhận dạng).</summary>
+    private static bool IsMacroPrintSheet(IXLWorksheet sheet) =>
+        string.Equals(
+            sheet.Cell("K1").GetString().Trim(),
+            "BANG_IN_HANG_LOAT",
+            StringComparison.Ordinal);
+
+    private static SummaryRow CreateSummaryRow(
+        string sheetName,
+        int rowNumber,
+        int sourceRowNumber,
+        int? year,
+        RawRow raw,
+        IReadOnlyList<string> catalog)
+    {
+        var (baseSummary, items, hasDocumentList) = ParseSummary(raw.Text, catalog);
+        var isBroken = LooksLikeBrokenSummary(raw.Text);
+        var needsNormalization = MarriageSummaryNormalizer.NeedsNormalization(raw.Text);
+        var normalizedSummary = needsNormalization
+            ? MarriageSummaryNormalizer.NormalizeIfNeeded(raw.Text)
+            : raw.Text;
+        var normalizedBaseSummary = needsNormalization
+            ? NormalizeBaseSummary(normalizedSummary, hasDocumentList)
+            : baseSummary;
+
+        return new SummaryRow
+        {
+            RowNumber = rowNumber,
+            SheetName = sheetName,
+            SourceRowNumber = sourceRowNumber,
+            Year = year,
+            Number = ParseNumberLabel(raw.NumberLabel),
+            NumberLabel = raw.NumberLabel,
+            DocumentNumber = raw.DocumentNumber,
+            SheetNumber = raw.SheetNumber,
+            DocumentDate = raw.DocumentDate,
+            DocumentCode = raw.DocumentCode,
+            OriginalSummary = raw.Text,
+            BaseSummary = baseSummary,
+            Items = items,
+            HasDocumentList = hasDocumentList,
+            HasFormula = raw.HasFormula,
+            IsBrokenSummary = isBroken,
+            NeedsNormalization = needsNormalization,
+            NormalizedSummary = normalizedSummary,
+            NormalizedBaseSummary = normalizedBaseSummary,
+            Group = raw.Group,
+            Type = raw.Type
         };
     }
 

@@ -677,6 +677,9 @@ public sealed class SummaryToolController : ControllerBase
             workbook.NumberColumn,
             workbook.CatalogMeta
                 .Select(item => new SummaryCatalogMetaResponse(item.Name, item.UsageCount, item.Source))
+                .ToList(),
+            workbook.Sheets
+                .Select(item => new SummarySheetResponse(item.Name, item.Year, item.RowCount))
                 .ToList());
 
     private static SummaryPreviewRowResponse ToResponse(SummaryPreviewRow row) =>
@@ -713,5 +716,7 @@ public sealed class SummaryToolController : ControllerBase
             row.Type,
             row.NeedsNormalization,
             row.NormalizedSummary,
-            row.NormalizedBaseSummary);
+            row.NormalizedBaseSummary,
+            row.SheetName,
+            row.SourceRowNumber);
 }

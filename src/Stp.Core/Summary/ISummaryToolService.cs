@@ -68,13 +68,48 @@ public sealed class SummaryWorkbook
     /// <summary>Số dòng đăng ký kết hôn cần chuẩn hoá tiền tố.</summary>
     public int NormalizableCount { get; init; }
 
+    /// <summary>
+    /// Danh sách sheet dữ liệu tạo nên phiên này (file nhập + các sheet năm).
+    /// Workbook chỉ có một sheet dữ liệu thì danh sách có đúng một phần tử,
+    /// Year bằng null. Dùng để UI hiển thị sheet nguồn và xuất về đúng sheet.
+    /// </summary>
+    public IReadOnlyList<SummarySheetInfo> Sheets { get; init; } = Array.Empty<SummarySheetInfo>();
+
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>
+/// Một sheet dữ liệu đã được nhận diện khi mở workbook: sheet "file nhập"
+/// (Year = null) hoặc sheet mang tên năm (Year = năm của sheet, mọi dòng
+/// thuộc sheet bị ép về năm này).
+/// </summary>
+public sealed record SummarySheetInfo(
+    string Name,
+    int? Year,
+    int RowCount,
+    int HeaderRow,
+    string SummaryColumn,
+    string? SummaryHeader,
+    string SheetNumberColumn,
+    string? SheetNumberHeader,
+    string DocumentNumberColumn,
+    string NumberColumn);
 
 /// <summary>Một dòng hồ sơ trong sheet ML.</summary>
 public sealed class SummaryRow
 {
+    /// <summary>
+    /// Số thứ tự dòng trong phiên: workbook một sheet thì trùng số dòng Excel;
+    /// nhiều sheet thì đánh lại 1..N tuần tự theo thứ tự ghép. Đây là id duy
+    /// nhất cho mọi thao tác UI/API.
+    /// </summary>
     public int RowNumber { get; init; }
+
+    /// <summary>Tên sheet chứa dòng này (trích yếu xuất phải ghi về đúng sheet).</summary>
+    public string SheetName { get; init; } = string.Empty;
+
+    /// <summary>Số dòng Excel thật trong <see cref="SheetName"/>; bản một sheet thì bằng RowNumber.</summary>
+    public int SourceRowNumber { get; init; }
 
     public int? Year { get; init; }
 

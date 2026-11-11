@@ -10,6 +10,22 @@ namespace Stp.Infrastructure.Excel;
 internal sealed record SummaryCellPatch(int RowNumber, string Column, string Text);
 
 /// <summary>
+/// Nhóm các ô cần thay theo sheet nguồn. Workbook nhiều sheet (file nhập +
+/// sheet năm) thì xuất phải ghi về đúng sheet của từng dòng, các RowNumber
+/// ở đây là số dòng Excel thật trong sheet đó.
+/// </summary>
+internal sealed record SummarySheetPatches(
+    string SheetName,
+    IReadOnlyList<SummaryCellPatch> Patches);
+
+/// <summary>Một sheet giữ lại khi xuất bản lọc: chỉ giữ dòng tiêu đề + dòng được phép.</summary>
+internal sealed record SummaryFilteredSheet(
+    string SheetName,
+    int HeaderRow,
+    IReadOnlySet<int> AllowedRows,
+    IReadOnlyList<SummaryCellPatch> Patches);
+
+/// <summary>
 /// Ghi lại workbook gốc bằng cách chỉ thay XML của đúng worksheet chứa trích yếu.
 /// Mọi phần khác (sharedStrings, styles, drawings, comments, macro, web extension)
 /// được sao chép nguyên nội dung sang file mới.
@@ -59,30 +75,66 @@ internal static class SummaryXlsxPatcher
         string outputPath,
         string sheetName,
         IReadOnlyList<SummaryCellPatch> patches)
+        => Apply(
+            sourcePath,
+            outputPath,
+            new[] { new SummarySheetPatches(sheetName, patches) });
+
+    /// <summary>
+    /// Ghi lại workbook gốc bằng cách chỉ thay XML của các worksheet có ô bị
+    /// sửa (một phiên nhiều sheet thì đè từng sheet của dòng tương ứng). Mọi
+    /// phần khác (các sheet khác, sharedStrings, styles, drawings, comments,
+    /// macro, web extension) được sao chép nguyên nội dung sang file mới — ô
+    /// sửa dùng inline string nên không đụng bảng sharedStrings dùng chung.
+    /// </summary>
+    public static void Apply(
+        string sourcePath,
+        string outputPath,
+        IReadOnlyList<SummarySheetPatches> sheets)
     {
-        if (patches.Count == 0)
+        if (sheets.Count == 0)
         {
-            throw new ArgumentException("Không có ô nào cần cập nhật.", nameof(patches));
+            throw new ArgumentException("Không có sheet nào cần cập nhật.", nameof(sheets));
+        }
+
+        var totalPatches = sheets.Sum(sheet => sheet.Patches.Count);
+        if (totalPatches == 0)
+        {
+            throw new ArgumentException("Không có ô nào cần cập nhật.", nameof(sheets));
         }
 
         using var source = ZipFile.OpenRead(sourcePath);
 
-        var worksheetPart = ResolveWorksheetPart(source, sheetName);
         var workbookEntry = source.GetEntry(WorkbookPart)
             ?? throw new InvalidDataException("Workbook thiếu phần xl/workbook.xml.");
-        var worksheetEntry = source.GetEntry(worksheetPart)
-            ?? throw new InvalidDataException($"Workbook thiếu phần {worksheetPart}.");
-
         var workbookXml = ReadEntryText(workbookEntry);
-        var worksheetXml = ReadEntryText(worksheetEntry);
-
         var updatedWorkbook = EnableFullCalculation(workbookXml);
-        var updatedWorksheet = PatchWorksheet(worksheetXml, patches);
 
-        var workbookBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            .GetBytes(updatedWorkbook);
-        var worksheetBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            .GetBytes(updatedWorksheet);
+        // Đọc và vá từng sheet; một sheet tên trùng nhau là lỗi workbook.
+        var updatedParts = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sheet in sheets)
+        {
+            if (sheet.Patches.Count == 0)
+            {
+                continue;
+            }
+
+            var worksheetPart = ResolveWorksheetPart(source, sheet.SheetName);
+            if (updatedParts.ContainsKey(worksheetPart))
+            {
+                throw new InvalidDataException(
+                    $"Hai sheet cùng trỏ một phần worksheet: '{sheet.SheetName}'.");
+            }
+
+            var worksheetEntry = source.GetEntry(worksheetPart)
+                ?? throw new InvalidDataException($"Workbook thiếu phần {worksheetPart}.");
+            var updatedWorksheet = PatchWorksheet(
+                ReadEntryText(worksheetEntry),
+                sheet.Patches);
+            updatedParts[worksheetPart] = Encode(updatedWorksheet);
+        }
+
+        var workbookBytes = Encode(updatedWorkbook);
 
         using var output = new FileStream(
             outputPath,
@@ -106,7 +158,7 @@ internal static class SummaryXlsxPatcher
 
             using var destination = target.Open();
 
-            if (string.Equals(entry.FullName, worksheetPart, StringComparison.OrdinalIgnoreCase))
+            if (updatedParts.TryGetValue(entry.FullName, out var worksheetBytes))
             {
                 destination.Write(worksheetBytes);
                 continue;
@@ -135,10 +187,32 @@ internal static class SummaryXlsxPatcher
         int headerRow,
         IReadOnlySet<int> allowedRows,
         IReadOnlyList<SummaryCellPatch> patches)
+        => ApplyFiltered(
+            sourcePath,
+            outputPath,
+            new[]
+            {
+                new SummaryFilteredSheet(sheetName, headerRow, allowedRows, patches)
+            });
+
+    /// <summary>
+    /// Bản xuất nhẹ cho workbook nhiều sheet: mỗi sheet giữ lại dòng tiêu đề +
+    /// các dòng được phép của sheet đó; sharedStrings được dựng lại từ bảng gộp
+    /// của mọi sheet giữ lại (cùng một bảng dùng chung nên phải đánh lại chỉ số
+    /// xuyên sheet). Mọi sheet/phần tử không còn tham chiếu bị xoá khỏi file.
+    /// </summary>
+    public static void ApplyFiltered(
+        string sourcePath,
+        string outputPath,
+        IReadOnlyList<SummaryFilteredSheet> sheets)
     {
+        if (sheets.Count == 0)
+        {
+            throw new ArgumentException("Không có sheet nào để xuất.", nameof(sheets));
+        }
+
         using var source = ZipFile.OpenRead(sourcePath);
 
-        var worksheetPart = ResolveWorksheetPart(source, sheetName);
         var workbookEntry = source.GetEntry(WorkbookPart)
             ?? throw new InvalidDataException("Workbook thiếu phần xl/workbook.xml.");
         var workbookRelsEntry = source.GetEntry(WorkbookRelsPart)
@@ -147,67 +221,118 @@ internal static class SummaryXlsxPatcher
             ?? throw new InvalidDataException("Workbook thiếu phần [Content_Types].xml.");
         var rootRelsEntry = source.GetEntry(RootRelsPart)
             ?? throw new InvalidDataException("Workbook thiếu phần quan hệ _rels/.rels.");
-        var worksheetEntry = source.GetEntry(worksheetPart)
-            ?? throw new InvalidDataException($"Workbook thiếu phần {worksheetPart}.");
 
         var workbookXml = ReadEntryText(workbookEntry);
         var workbookRelsXml = ReadEntryText(workbookRelsEntry);
         var contentTypesXml = ReadEntryText(contentTypesEntry);
         var rootRelsXml = ReadEntryText(rootRelsEntry);
-        var worksheetXml = ReadEntryText(worksheetEntry);
 
         var sharedStringsPart = ResolveSharedStringsPart(source, workbookRelsXml);
         var sharedStringsXml = sharedStringsPart is null
             ? null
             : ReadEntryText(source.GetEntry(sharedStringsPart)!);
 
-        var worksheetRelsPart = GetRelsPartName(worksheetPart);
-        var worksheetRelsXml = source.GetEntry(worksheetRelsPart) is { } worksheetRelsEntry
-            ? ReadEntryText(worksheetRelsEntry)
-            : null;
-        var annotations = ResolveWorksheetAnnotations(
-            source,
-            worksheetPart,
-            worksheetRelsXml);
+        var kept = new List<FilteredSheetResult>();
+        var sharedOrder = new List<int>();
+        var sharedSeen = new HashSet<int>();
 
-        var (filteredWorksheet, sharedRefs) = FilterWorksheet(
-            worksheetXml,
-            headerRow,
-            allowedRows,
-            patches);
-
-        var removedRelationshipIds = new HashSet<string>(StringComparer.Ordinal);
-        var updatedCommentsXml = annotations.CommentsPart is null
-            ? null
-            : FilterComments(
-                ReadEntryText(source.GetEntry(annotations.CommentsPart)!),
-                headerRow,
-                allowedRows);
-
-        if (annotations.CommentsPart is not null && updatedCommentsXml is null)
+        foreach (var sheet in sheets)
         {
-            removedRelationshipIds.Add(annotations.CommentsRelId!);
+            if (sheet.AllowedRows.Count == 0)
+            {
+                continue;
+            }
+
+            var worksheetPart = ResolveWorksheetPart(source, sheet.SheetName);
+            if (kept.Any(item => string.Equals(
+                    item.WorksheetPart,
+                    worksheetPart,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidDataException(
+                    $"Hai sheet cùng trỏ một phần worksheet: '{sheet.SheetName}'.");
+            }
+
+            var worksheetEntry = source.GetEntry(worksheetPart)
+                ?? throw new InvalidDataException($"Workbook thiếu phần {worksheetPart}.");
+            var worksheetRelsPart = GetRelsPartName(worksheetPart);
+            var worksheetRelsXml = source.GetEntry(worksheetRelsPart) is { } worksheetRelsEntry
+                ? ReadEntryText(worksheetRelsEntry)
+                : null;
+            var annotations = ResolveWorksheetAnnotations(
+                source,
+                worksheetPart,
+                worksheetRelsXml);
+
+            var (filteredWorksheet, sharedRefs) = FilterWorksheet(
+                ReadEntryText(worksheetEntry),
+                sheet.HeaderRow,
+                sheet.AllowedRows,
+                sheet.Patches);
+
+            var removedRelationshipIds = new HashSet<string>(StringComparer.Ordinal);
+            var updatedCommentsXml = annotations.CommentsPart is null
+                ? null
+                : FilterComments(
+                    ReadEntryText(source.GetEntry(annotations.CommentsPart)!),
+                    sheet.HeaderRow,
+                    sheet.AllowedRows);
+
+            if (annotations.CommentsPart is not null && updatedCommentsXml is null)
+            {
+                removedRelationshipIds.Add(annotations.CommentsRelId!);
+            }
+
+            var updatedVmlXml = annotations.VmlPart is null
+                ? null
+                : FilterVml(
+                    ReadEntryText(source.GetEntry(annotations.VmlPart)!),
+                    sheet.HeaderRow,
+                    sheet.AllowedRows);
+
+            if (annotations.VmlPart is not null && updatedVmlXml is null)
+            {
+                removedRelationshipIds.Add(annotations.VmlRelId!);
+                filteredWorksheet = RemoveLegacyDrawing(filteredWorksheet);
+            }
+
+            var updatedWorksheetRelsXml = RewriteWorksheetRelationships(
+                worksheetRelsXml,
+                removedRelationshipIds);
+
+            foreach (var reference in sharedRefs)
+            {
+                if (sharedSeen.Add(reference))
+                {
+                    sharedOrder.Add(reference);
+                }
+            }
+
+            kept.Add(new FilteredSheetResult(
+                sheet.SheetName,
+                worksheetPart,
+                filteredWorksheet,
+                updatedWorksheetRelsXml,
+                annotations.CommentsPart,
+                updatedCommentsXml,
+                annotations.VmlPart,
+                updatedVmlXml));
         }
 
-        var updatedVmlXml = annotations.VmlPart is null
-            ? null
-            : FilterVml(
-                ReadEntryText(source.GetEntry(annotations.VmlPart)!),
-                headerRow,
-                allowedRows);
-
-        if (annotations.VmlPart is not null && updatedVmlXml is null)
+        if (kept.Count == 0)
         {
-            removedRelationshipIds.Add(annotations.VmlRelId!);
-            filteredWorksheet = RemoveLegacyDrawing(filteredWorksheet);
+            throw new ArgumentException(
+                "Phạm vi xuất không giữ lại dòng nào.",
+                nameof(sheets));
         }
 
-        var updatedWorksheetRelsXml = RewriteWorksheetRelationships(
-            worksheetRelsXml,
-            removedRelationshipIds);
-
-        var (reindexedWorksheet, sharedOrder, sharedCount) =
-            ReindexSharedStrings(filteredWorksheet, sharedRefs);
+        // Đánh lại chỉ số sharedStrings trên một bảng dùng chung: tham chiếu
+        // gộp theo thứ tự sheet, mọi sheet giữ lại phải trỏ đúng vị trí mới.
+        var sharedMap = new Dictionary<int, int>(sharedOrder.Count);
+        for (var index = 0; index < sharedOrder.Count; index++)
+        {
+            sharedMap[sharedOrder[index]] = index;
+        }
 
         var keepSharedStrings = sharedOrder.Count > 0;
         if (keepSharedStrings && sharedStringsXml is null)
@@ -216,21 +341,56 @@ internal static class SummaryXlsxPatcher
                 "Worksheet còn ô dùng sharedStrings nhưng workbook thiếu phần sharedStrings.xml.");
         }
 
-        var rebuiltSharedStrings = keepSharedStrings
-            ? RebuildSharedStrings(sharedStringsXml!, sharedOrder, sharedCount)
-            : null;
+        var updatedParts = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        var sharedCount = 0;
+        foreach (var item in kept)
+        {
+            var (reindexedWorksheet, rewritten) = ReindexSharedStrings(
+                item.WorksheetXml,
+                sharedMap);
+            sharedCount += rewritten;
+            updatedParts[item.WorksheetPart] = Encode(reindexedWorksheet);
 
-        var updatedWorkbook = RewriteWorkbook(workbookXml, sheetName);
+            if (item.WorksheetRelsXml is not null)
+            {
+                updatedParts[GetRelsPartName(item.WorksheetPart)] = Encode(item.WorksheetRelsXml);
+            }
+
+            if (item.CommentsPart is not null && item.CommentsXml is not null)
+            {
+                updatedParts[item.CommentsPart] = Encode(item.CommentsXml);
+            }
+
+            if (item.VmlPart is not null && item.VmlXml is not null)
+            {
+                updatedParts[item.VmlPart] = Encode(item.VmlXml);
+            }
+        }
+
+        if (keepSharedStrings)
+        {
+            updatedParts[sharedStringsPart!] = Encode(
+                RebuildSharedStrings(sharedStringsXml!, sharedOrder, sharedCount));
+        }
+
+        var updatedWorkbook = RewriteWorkbook(
+            workbookXml,
+            kept.Select(item => item.SheetName).ToList());
         var updatedWorkbookRels = RewriteWorkbookRelationships(
             workbookRelsXml,
-            worksheetPart,
+            kept.Select(item => item.WorksheetPart).ToList(),
             keepSharedStrings);
         var updatedRootRels = RewriteRootRelationships(rootRelsXml);
 
-        var relsOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        updatedParts[WorkbookPart] = Encode(updatedWorkbook);
+        updatedParts[WorkbookRelsPart] = Encode(updatedWorkbookRels);
+        updatedParts[RootRelsPart] = Encode(updatedRootRels);
+
+        var relsOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in kept)
         {
-            [worksheetPart] = updatedWorksheetRelsXml ?? EmptyRelationshipsXml
-        };
+            relsOverrides[item.WorksheetPart] = item.WorksheetRelsXml ?? EmptyRelationshipsXml;
+        }
 
         var parts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -241,29 +401,23 @@ internal static class SummaryXlsxPatcher
         // Đi từ workbook trước để dùng quan hệ đã lược bỏ sheet; nếu đi từ
         // _rels/.rels trước, walker sẽ đọc lại quan hệ gốc và kéo theo mọi sheet.
         AddPart(source, parts, walkedRels, WorkbookPart, updatedWorkbookRels, relsOverrides);
-        AddPart(source, parts, walkedRels, worksheetPart, null, relsOverrides);
+        foreach (var item in kept)
+        {
+            AddPart(source, parts, walkedRels, item.WorksheetPart, null, relsOverrides);
+        }
+
         AddPart(source, parts, walkedRels, string.Empty, updatedRootRels, relsOverrides);
 
-        if (updatedWorksheetRelsXml is null)
+        foreach (var item in kept)
         {
-            parts.Remove(worksheetRelsPart);
+            if (item.WorksheetRelsXml is null)
+            {
+                parts.Remove(GetRelsPartName(item.WorksheetPart));
+            }
         }
 
         var updatedContentTypes = RewriteContentTypes(contentTypesXml, parts);
-
-        var workbookBytes = Encode(updatedWorkbook);
-        var workbookRelsBytes = Encode(updatedWorkbookRels);
-        var rootRelsBytes = Encode(updatedRootRels);
-        var contentTypesBytes = Encode(updatedContentTypes);
-        var worksheetBytes = Encode(reindexedWorksheet);
-        var worksheetRelsBytes = updatedWorksheetRelsXml is null
-            ? null
-            : Encode(updatedWorksheetRelsXml);
-        var commentsBytes = updatedCommentsXml is null ? null : Encode(updatedCommentsXml);
-        var vmlBytes = updatedVmlXml is null ? null : Encode(updatedVmlXml);
-        var sharedStringsBytes = rebuiltSharedStrings is null
-            ? null
-            : Encode(rebuiltSharedStrings);
+        updatedParts[ContentTypesPart] = Encode(updatedContentTypes);
 
         using var output = new FileStream(
             outputPath,
@@ -291,70 +445,9 @@ internal static class SummaryXlsxPatcher
 
             using var destination = target.Open();
 
-            if (string.Equals(entry.FullName, ContentTypesPart, StringComparison.OrdinalIgnoreCase))
+            if (updatedParts.TryGetValue(entry.FullName, out var updatedBytes))
             {
-                destination.Write(contentTypesBytes);
-                continue;
-            }
-
-            if (string.Equals(entry.FullName, RootRelsPart, StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(rootRelsBytes);
-                continue;
-            }
-
-            if (string.Equals(entry.FullName, WorkbookPart, StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(workbookBytes);
-                continue;
-            }
-
-            if (string.Equals(entry.FullName, WorkbookRelsPart, StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(workbookRelsBytes);
-                continue;
-            }
-
-            if (string.Equals(entry.FullName, worksheetPart, StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(worksheetBytes);
-                continue;
-            }
-
-            if (worksheetRelsBytes is not null
-                && string.Equals(entry.FullName, worksheetRelsPart, StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(worksheetRelsBytes);
-                continue;
-            }
-
-            if (commentsBytes is not null
-                && annotations.CommentsPart is not null
-                && string.Equals(
-                    entry.FullName,
-                    annotations.CommentsPart,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(commentsBytes);
-                continue;
-            }
-
-            if (vmlBytes is not null
-                && annotations.VmlPart is not null
-                && string.Equals(
-                    entry.FullName,
-                    annotations.VmlPart,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(vmlBytes);
-                continue;
-            }
-
-            if (sharedStringsPart is not null
-                && sharedStringsBytes is not null
-                && string.Equals(entry.FullName, sharedStringsPart, StringComparison.OrdinalIgnoreCase))
-            {
-                destination.Write(sharedStringsBytes);
+                destination.Write(updatedBytes);
                 continue;
             }
 
@@ -592,25 +685,13 @@ internal static class SummaryXlsxPatcher
         return result;
     }
 
-    private static (string Xml, List<int> Order, int Count) ReindexSharedStrings(
+    private static (string Xml, int Count) ReindexSharedStrings(
         string worksheetXml,
-        IReadOnlyList<int> references)
+        IReadOnlyDictionary<int, int> map)
     {
-        var map = new Dictionary<int, int>();
-        var order = new List<int>();
-
-        foreach (var index in references)
+        if (map.Count == 0)
         {
-            if (!map.ContainsKey(index))
-            {
-                map[index] = order.Count;
-                order.Add(index);
-            }
-        }
-
-        if (order.Count == 0)
-        {
-            return (worksheetXml, order, 0);
+            return (worksheetXml, 0);
         }
 
         var builder = new StringBuilder(worksheetXml.Length);
@@ -639,7 +720,7 @@ internal static class SummaryXlsxPatcher
         }
 
         builder.Append(worksheetXml, cursor, worksheetXml.Length - cursor);
-        return (builder.ToString(), order, count);
+        return (builder.ToString(), count);
     }
 
     private static string RebuildSharedStrings(
@@ -702,7 +783,11 @@ internal static class SummaryXlsxPatcher
         return builder.ToString();
     }
 
-    private static string RewriteWorkbook(string workbookXml, string sheetName)
+    /// <summary>
+    /// Giữ lại đúng các sheet được chỉ định (bỏ các sheet khác, definedNames
+    /// trỏ tới sheet bị bỏ, external references) và bật tính lại toàn bộ.
+    /// </summary>
+    private static string RewriteWorkbook(string workbookXml, IReadOnlyCollection<string> keepSheetNames)
     {
         var document = XDocument.Parse(workbookXml, LoadOptions.PreserveWhitespace);
         var root = document.Root
@@ -710,29 +795,40 @@ internal static class SummaryXlsxPatcher
         var sheets = root.Element(MainNs + "sheets")
             ?? throw new InvalidDataException("xl/workbook.xml thiếu phần sheets.");
         var sheetElements = sheets.Elements(MainNs + "sheet").ToList();
-        var target = sheetElements.FirstOrDefault(element => string.Equals(
-            (string?)element.Attribute("name"),
-            sheetName,
-            StringComparison.CurrentCultureIgnoreCase));
+        var keepSet = new HashSet<string>(keepSheetNames, StringComparer.CurrentCultureIgnoreCase);
 
-        if (target is null)
+        var targets = new List<XElement>();
+        foreach (var name in keepSheetNames)
         {
-            throw new InvalidDataException($"Không tìm thấy sheet '{sheetName}' trong workbook.");
+            var target = sheetElements.FirstOrDefault(element => string.Equals(
+                (string?)element.Attribute("name"),
+                name,
+                StringComparison.CurrentCultureIgnoreCase));
+
+            if (target is null)
+            {
+                throw new InvalidDataException($"Không tìm thấy sheet '{name}' trong workbook.");
+            }
+
+            targets.Add(target);
         }
 
         var removedNames = sheetElements
-            .Where(element => !ReferenceEquals(element, target))
+            .Where(element => !targets.Contains(element))
             .Select(element => (string?)element.Attribute("name"))
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Select(name => name!)
             .ToList();
 
-        foreach (var sheet in sheetElements.Where(element => !ReferenceEquals(element, target)))
+        foreach (var sheet in sheetElements.Where(element => !targets.Contains(element)))
         {
             sheet.Remove();
         }
 
-        target.SetAttributeValue("state", null);
+        foreach (var target in targets)
+        {
+            target.SetAttributeValue("state", null);
+        }
 
         var definedNames = root.Element(MainNs + "definedNames");
         if (definedNames is not null)
@@ -788,12 +884,13 @@ internal static class SummaryXlsxPatcher
 
     private static string RewriteWorkbookRelationships(
         string relationshipsXml,
-        string worksheetPart,
+        IReadOnlyCollection<string> worksheetParts,
         bool keepSharedStrings)
     {
         var document = XDocument.Parse(relationshipsXml, LoadOptions.PreserveWhitespace);
         var root = document.Root
             ?? throw new InvalidDataException("xl/_rels/workbook.xml.rels không có phần tử gốc.");
+        var keepParts = new HashSet<string>(worksheetParts, StringComparer.OrdinalIgnoreCase);
 
         foreach (var relationship in root.Elements(PackageRelNs + "Relationship").ToList())
         {
@@ -810,7 +907,7 @@ internal static class SummaryXlsxPatcher
             if (type.EndsWith("/worksheet", StringComparison.OrdinalIgnoreCase))
             {
                 var resolved = ResolvePartPath(WorkbookPart, target);
-                if (!string.Equals(resolved, worksheetPart, StringComparison.OrdinalIgnoreCase))
+                if (!keepParts.Contains(resolved))
                 {
                     relationship.Remove();
                 }
@@ -1602,6 +1699,17 @@ internal static class SummaryXlsxPatcher
         string? CommentsRelId,
         string? VmlPart,
         string? VmlRelId);
+
+    /// <summary>Kết quả lọc một sheet khi xuất bản lọc (chưa đánh lại chỉ số chung).</summary>
+    private sealed record FilteredSheetResult(
+        string SheetName,
+        string WorksheetPart,
+        string WorksheetXml,
+        string? WorksheetRelsXml,
+        string? CommentsPart,
+        string? CommentsXml,
+        string? VmlPart,
+        string? VmlXml);
 
     private sealed record RowTag(
         int RowNumber,

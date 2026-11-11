@@ -3472,6 +3472,16 @@ pre,
   text-transform: uppercase;
 }
 
+/* Badge sheet nguồn cạnh badge năm (phiên ghép file nhập + sheet năm). */
+.summary-sheet-badge {
+  margin-left: 6px;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 .summary-edit-summary {
   margin-left: auto;
   font-weight: 600;
