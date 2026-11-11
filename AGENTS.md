@@ -124,4 +124,17 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   0.22/0.9/0.26/1 · overshoot 0.3/0.7/0.35/1.25 · snap 0.34/0.06/0.22/1 ·
   ease). Kết luận: viền row-mark + avatar initials + dark mode ĐÃ CÓ SẴN —
   thiếu realtime (SignalR chưa có, polling thôi) + modal/route transition +
-  reduced-motion. **Cả 2 plan chờ người dùng ra lệnh, không tự làm.**
+  reduced-motion.
+- **Data safety** (phân tích vòng 3, 11/11/2026 — CHƯA sửa code): toàn bộ
+  tình huống lưu/mất dữ liệu tại `docs/phan-tich-luu-du-lieu-nguoi-dung.md`.
+  P0 bắt buộc làm đầu tiên khi được duyệt: (1) **migrations KHÔNG tự apply**
+  — không có `Database.Migrate()` trong repo, thêm cột mới mà quên áp tay →
+  API vỡ lúc runtime; cần `MigrateAsync()` ở startup; (2) edits trích yếu chỉ
+  sống trong localStorage — đề xuất draft backup server theo session 12h.
+  P1: chat >100 tin không đọc lại được (cần cursor pagination khi làm
+  Messenger), unread reset khi reload (seen phải lên server), undo/redo chết
+  khi reload (chấp nhận, draft đã cứu net edits). P2: job upload/output/backup
+  dirs không bao giờ dọn (sweep 30 ngày), history localStorage tích luỹ.
+  Checklist 6 câu bắt buộc cho mọi tính năng mới: reload? restart? hết hạn?
+  đổi máy? 2 người cùng lúc? quota full? **Cả 2 plan chờ người dùng ra lệnh,
+  không tự làm.**
