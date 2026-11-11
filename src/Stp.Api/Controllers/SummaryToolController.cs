@@ -10,7 +10,10 @@ namespace Stp.Api.Controllers;
 public sealed class SummaryToolController : ControllerBase
 {
     private const long UploadRequestLimit = 210L * 1024 * 1024;
-    private const int MaxChanges = 5000;
+    // Quy mô thật của phòng STP: file 22.600 dòng, một lần "Áp dụng cho dòng
+    // lọc còn thiếu" (C3) có thể tạo hơn 22.000 dòng thay đổi cùng lúc → phải
+    // đủ lớn để xuất nguyên một file trong 1 request (payload ~8 MB < 30 MB).
+    private const int MaxChanges = 30000;
     private const int MaxItemsPerRow = 80;
     private const int MaxItemLength = 200;
     private const int MaxSummaryLength = 4000;

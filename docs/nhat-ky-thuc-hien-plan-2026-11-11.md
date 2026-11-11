@@ -42,11 +42,40 @@
     12s vẫn lấy ngầm để đếm tin chưa đọc; panel + pill có transition dock.
 
 ### Nhóm C — GĐ 0 trích yếu siêu tốc
-- [ ] C1. Chip 1-chạm trong editor dòng
-- [ ] C2. Phím "như dòng trên" (C)
-- [ ] C3. Bộ mặc định theo loại + "áp dụng cho dòng lọc còn thiếu"
-- [ ] C4. Chạy hàng tự nhảy dòng thiếu kế tiếp
-- [ ] C5. Xuất nhanh 1 click (nhớ tên file + phạm vi)
+- [x] C1. Chip 1-chạm trong editor dòng
+  (bảng + editor: bộ 7 chuẩn + 4 mục meta hay gặp; bấm thêm/gỡ, chip đậm
+  `is-on` khi dòng đã có; E2E: chip "giấy khai sinh" dòng 1 → trích yếu ghép
+  đúng, chờ xuất +1)
+- [x] C2. Phím "như dòng trên" (C)
+  (window keydown listener riêng, bỏ qua INPUT/TEXTAREA/SELECT/contentEditable
+  + Ctrl/Alt; đang sửa editor → dòng đó, không → dòng thiếu kế tiếp; E2E: bấm C
+  ở body → dòng 2 chép bộ dòng 1; chip "C — như dòng trên" trong editor cùng
+  lệnh)
+- [x] C3. Bộ mặc định theo loại + "áp dụng cho dòng lọc còn thiếu"
+  (máy học bộ phổ biến nhất của cùng loại hồ sơ ≥2 dòng → chip "Bộ loại: …";
+  nút "Áp dụng cho dòng lọc còn thiếu" trên hàng Áp nhanh duyệt hết các trang
+  200/req, chỉ gán cho dòng items rỗng, giữ sheetNumber/documentNumber cũ;
+  E2E: 22.507 dòng còn thiếu nhận bộ trong ~30s; nút đặt ngoài bulk bar vì
+  không cần tích dòng)
+- [x] C4. Chạy hàng tự nhảy dòng thiếu kế tiếp
+  (localStorage `summary.autoNext`, mặc định bật, toggle trong editor head; sau
+  lưu/bấm chip/editor → tự mở editor + scroll tới dòng thiếu kế tiếp, hết dòng
+  → toast "Hết dòng thiếu"; E2E: áp bộ loại dòng 3 → editor nhảy dòng 4; Lưu
+  dòng 4 → editor nhảy dòng 5)
+- [x] C5. Xuất nhanh 1 click (nhớ tên file + phạm vi)
+  (nút "Xuất nhanh" cạnh "Xuất bản lọc"; gọi doExportFiltered thẳng, bỏ qua
+  preview; localStorage `summary.quickName` nhớ tên lần trước, lần đầu dùng
+  tên gợi ý; toast đếm số dòng đổi từ allChanges khi chưa có preview; E2E:
+  1 click → tải `DK KET HON (5)_loc.xlsx` 2.8MB, "22.600 giữ · 22.510 dòng
+  cập nhật"; sau xuất clearDraft tự động)
+- Lưu ý kỹ thuật nổi lên khi verify:
+  - `MaxChanges` controller 5000 → **30000** (C3 tạo hơn 22k dòng đổi cùng
+    lúc; payload ~7.3MB < giới hạn Kestrel 30MB). Build + tests 86/86 xanh,
+    service restart.
+  - wwwroot KHÔNG tự nhận dist mới khi service đang chạy — phải robocopy
+    `dist` → `Stp.Api\wwwroot` (lần đầu verify thấy UI cũ vì thiếu bước này).
+  - Draft sau reload: dialog confirm "Tìm thấy bản nháp … Khôi phục?" → chấp
+    nhận phục hồi đủ 22.510 dòng.
 
 ### Nhóm D — Trụ B avatar mặc định
 - [ ] D1. renderAvatar() hàm chung + palette Google-Sheets chuẩn + dark mode

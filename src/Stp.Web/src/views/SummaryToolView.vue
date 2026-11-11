@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   ArrowRight,
@@ -827,6 +827,255 @@ function saveSummaryEditor(row: SummaryRowResponse): void {
   commit(row, { summaryText: text })
   closeSummaryEditor()
   toast.success('Đã cập nhật trích yếu', `Dòng ${row.rowNumber} sẽ được ghi khi xuất.`)
+  jumpToNextMissing(row.rowNumber)
+}
+
+/* ==================== GĐ 0 — trích yếu siêu tốc (11/11/2026) ==================== */
+
+/** C4: tự nhảy sang dòng thiếu danh mục kế tiếp sau khi lưu (mặc định bật). */
+const autoNextRow = ref((localStorage.getItem('summary.autoNext') ?? '1') === '1')
+
+function toggleAutoNext(): void {
+  autoNextRow.value = !autoNextRow.value
+  localStorage.setItem('summary.autoNext', autoNextRow.value ? '1' : '0')
+  toast.info(
+    autoNextRow.value ? 'Đã bật tự nhảy' : 'Đã tắt tự nhảy',
+    autoNextRow.value
+      ? 'Sau khi lưu, editor tự mở dòng thiếu danh mục kế tiếp.'
+      : 'Sau khi lưu, editor đóng lại.',
+  )
+}
+
+/** Dòng chưa có danh mục kế tiếp trong danh sách đang xem (vòng về đầu). */
+function nextMissingRow(afterRowNumber: number): SummaryRowResponse | null {
+  const ordered = [...rows.value].sort((a, b) => a.rowNumber - b.rowNumber)
+  const index = ordered.findIndex((row) => row.rowNumber === afterRowNumber)
+  if (index < 0) return null
+  for (let step = 1; step <= ordered.length; step++) {
+    const candidate = ordered[(index + step) % ordered.length]
+    if (candidate.rowNumber === afterRowNumber) return null
+    if (itemsFor(candidate).length === 0) return candidate
+  }
+  return null
+}
+
+async function scrollEditorIntoView(): Promise<void> {
+  await nextTick()
+  document
+    .querySelector('.summary-editor-text')
+    ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+function jumpToNextMissing(fromRowNumber: number): void {
+  if (!autoNextRow.value) return
+  const next = nextMissingRow(fromRowNumber)
+  if (!next) {
+    toast.success('Hết dòng thiếu', 'Không còn dòng thiếu danh mục trong phạm vi đang xem.')
+    return
+  }
+  openSummaryEditor(next)
+  void scrollEditorIntoView()
+}
+
+/** C1: chip 1-chạm = bộ 7 chuẩn + mục hay gặp nhất của phiên. */
+const quickChipItems = computed<string[]>(() => {
+  const base = [...STANDARD_SEVEN]
+  const metas = (session.value?.catalogMeta ?? [])
+    .filter(
+      (meta) =>
+        meta.usageCount > 0 && !base.some((b) => normalizeText(b) === normalizeText(meta.name)),
+    )
+    .slice(0, 4)
+    .map((meta) => meta.name)
+  return [...base, ...metas]
+})
+
+function hasQuickItem(row: SummaryRowResponse, item: string): boolean {
+  return itemsFor(row).some((x) => normalizeText(x) === normalizeText(item))
+}
+
+function toggleQuickItem(row: SummaryRowResponse, item: string): void {
+  const current = itemsFor(row)
+  const next = hasQuickItem(row, item)
+    ? current.filter((x) => normalizeText(x) !== normalizeText(item))
+    : [...current, item]
+  commit(row, { items: next, summaryText: null })
+  if (editingSummaryRow.value === row.rowNumber) {
+    jumpToNextMissing(row.rowNumber)
+  }
+}
+
+/** C3: bộ items phổ biến nhất của cùng loại hồ sơ (học từ trang đang xem). */
+function defaultSetForType(row: SummaryRowResponse): string[] | null {
+  if (!row.type) return null
+  const key = normalizeText(row.type)
+  const counts = new Map<string, { items: string[]; count: number }>()
+  for (const other of rows.value) {
+    if (other.rowNumber === row.rowNumber || !other.type) continue
+    if (normalizeText(other.type) !== key) continue
+    const items = itemsFor(other)
+    if (items.length === 0) continue
+    const signature = items.map((item) => normalizeText(item)).sort().join('|')
+    const found = counts.get(signature)
+    if (found) {
+      found.count++
+    } else {
+      counts.set(signature, { items, count: 1 })
+    }
+  }
+
+  let best: { items: string[]; count: number } | null = null
+  for (const value of counts.values()) {
+    if (!best || value.count > best.count) best = value
+  }
+  return best && best.count >= 2 ? best.items : null
+}
+
+/** C3: áp bộ đang chọn cho MỌI dòng còn thiếu danh mục trong phạm vi đang lọc. */
+const applyingMissing = ref(false)
+
+async function applyToMissingInScope(): Promise<void> {
+  const active = session.value
+  if (!active || !scopeReady.value) return
+  if (bulkItems.value.length === 0) {
+    toast.warning('Chưa chọn giấy tờ', 'Chọn danh mục giấy tờ cần áp dụng trước.')
+    return
+  }
+
+  applyingMissing.value = true
+  try {
+    const pageSize = 200
+    const next = new Map(edits.value)
+    let applied = 0
+    let total = 0
+    let pageNo = 1
+    do {
+      const response = await request<SummaryRowsResponse>(
+        `/api/summary/${active.sessionId}/rows${queryString({
+          ...queryParams(),
+          page: pageNo,
+          pageSize,
+        })}`,
+      )
+      total = response.total
+      for (const row of response.items) {
+        if (itemsFor(row).length > 0) continue
+        const summary = composeSummary(row, bulkItems.value)
+        const baseline = row.needsNormalization ? row.normalizedSummary : row.summary
+        if (summary === baseline) continue
+        const current = next.get(row.rowNumber)
+        next.set(row.rowNumber, {
+          row,
+          items: [...bulkItems.value],
+          summaryText: null,
+          sheetNumber: current?.sheetNumber ?? null,
+          documentNumber: current?.documentNumber ?? null,
+          numberLabel: current?.numberLabel ?? null,
+        })
+        applied++
+      }
+      pageNo++
+    } while ((pageNo - 1) * pageSize < total && pageNo <= 400)
+
+    edits.value = next
+    pushHistory()
+    if (applied === 0) {
+      toast.info('Không có dòng nào cần áp', 'Mọi dòng còn thiếu đã trùng bộ đang chọn.')
+    } else {
+      toast.success(
+        'Đã áp cho dòng còn thiếu',
+        `${formatNumber(applied)} dòng trong phạm vi đang lọc nhận bộ ${bulkItems.value.join(', ')}.`,
+      )
+    }
+  } catch (caught) {
+    toast.error('Không áp được', errorMessage(caught))
+  } finally {
+    applyingMissing.value = false
+  }
+}
+
+/** C5: xuất nhanh 1 click theo phạm vi đang lọc, nhớ tên file của lần trước. */
+const QUICK_NAME_KEY = 'summary.quickName'
+const quickName = ref(localStorage.getItem(QUICK_NAME_KEY) ?? '')
+
+async function quickExportFiltered(): Promise<void> {
+  const active = session.value
+  if (!active || !scopeReady.value) return
+  if (allChanges.value.length === 0) {
+    toast.warning('Chưa có thay đổi nào', 'Sửa ít nhất một dòng rồi mới xuất nhanh.')
+    return
+  }
+
+  exportName.value = quickName.value.trim() || suggestedFileName('filtered')
+  await doExportFiltered()
+  quickName.value = exportName.value.trim()
+  localStorage.setItem(QUICK_NAME_KEY, quickName.value)
+}
+
+/** C2: chép bộ giấy tờ của dòng đứng ngay trên (trong danh sách đang xem). */
+function applyFromAbove(row: SummaryRowResponse): void {
+  const ordered = [...rows.value].sort((a, b) => a.rowNumber - b.rowNumber)
+  const index = ordered.findIndex((item) => item.rowNumber === row.rowNumber)
+  const above = index > 0 ? ordered[index - 1] : null
+  const aboveItems = above ? itemsFor(above) : []
+  if (aboveItems.length === 0) {
+    toast.info(
+      'Dòng trên chưa có danh mục',
+      `Dòng ${above?.rowNumber ?? 'trước đó'} trống — sửa dòng trên trước rồi bấm C.`,
+    )
+    return
+  }
+
+  commit(row, { items: aboveItems, summaryText: null })
+  toast.success(
+    'Đã chép như dòng trên',
+    `Dòng ${row.rowNumber} nhận ${aboveItems.length} mục từ dòng ${above!.rowNumber}.`,
+  )
+  jumpToNextMissing(row.rowNumber)
+}
+
+/** C3: áp bộ phổ biến nhất của loại hồ sơ cho dòng này. */
+function applyDefaultForType(row: SummaryRowResponse): void {
+  const items = defaultSetForType(row)
+  if (!items || items.length === 0) {
+    toast.info('Chưa học được bộ cho loại này', 'Sửa vài dòng cùng loại trước, máy sẽ học bộ.')
+    return
+  }
+
+  commit(row, { items: [...items], summaryText: null })
+  toast.success(
+    'Đã dùng bộ của loại này',
+    `Dòng ${row.rowNumber} nhận ${items.length} mục: ${items.join(', ')}.`,
+  )
+  jumpToNextMissing(row.rowNumber)
+}
+
+/** C2: phím C (đứng ngoài ô nhập) — chép bộ giấy tờ của dòng trên xuống dòng đang sửa. */
+function onSpeedKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'c' && event.key !== 'C') return
+  if (event.ctrlKey || event.metaKey || event.altKey) return
+  const target = event.target as HTMLElement | null
+  if (
+    target &&
+    (target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable)
+  ) {
+    return
+  }
+
+  const ordered = [...rows.value].sort((a, b) => a.rowNumber - b.rowNumber)
+  const anchor =
+    editingSummaryRow.value !== null
+      ? ordered.find((row) => row.rowNumber === editingSummaryRow.value)
+      : ordered.find((row) => itemsFor(row).length === 0)
+  if (!anchor) {
+    toast.info('Không có dòng nào cần chép', 'Mọi dòng trong phạm vi này đều đã có danh mục.')
+    return
+  }
+
+  applyFromAbove(anchor)
 }
 
 function resetEdits(): void {
@@ -1437,8 +1686,10 @@ async function doExportFiltered(): Promise<void> {
     saveBlob(result.blob, result.fileName)
     lastExportedBlob.value = result.blob
     lastExportedName.value = result.fileName
+    // Xuất nhanh không chạy preview — đếm trực tiếp số dòng có thay đổi.
     const keptRows = filteredPreview.value?.totalRows ?? total.value
-    const changedRows = filteredPreview.value?.changedRows ?? 0
+    const changedRows =
+      filteredPreview.value?.changedRows ?? new Set(allChanges.value.map((c) => c.rowNumber)).size
     const normalizedRows = filteredPreview.value?.normalizedRows ?? 0
     pushHistoryEntry(
       'Xuất bản lọc',
@@ -1753,6 +2004,7 @@ watch(pageSize, () => {
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('keydown', onSpeedKeydown)
   void resumeLastSession().then(() => {
     if (!session.value) loadResumeCandidates()
   })
@@ -1760,6 +2012,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('keydown', onSpeedKeydown)
   clearTeamEditingState()
   if (searchTimer) window.clearTimeout(searchTimer)
   if (filterTimer) window.clearTimeout(filterTimer)
@@ -2146,6 +2399,16 @@ onBeforeUnmount(() => {
                 Xuất bản lọc
               </button>
               <button
+                class="btn btn-primary btn-sm"
+                type="button"
+                title="Xuất ngay theo phạm vi đang lọc với tên file đã nhớ từ lần trước (không cần xem trước)"
+                :disabled="!scopeReady || total === 0 || loadingRows || filteredExporting"
+                @click="quickExportFiltered"
+              >
+                <Download :size="14" />
+                {{ filteredExporting ? 'Đang xuất...' : 'Xuất nhanh' }}
+              </button>
+              <button
                 class="btn btn-accent btn-sm"
                 type="button"
                 :disabled="loadingRows || exporting || total === 0"
@@ -2155,6 +2418,27 @@ onBeforeUnmount(() => {
                 Xem trước rồi xuất toàn bộ
               </button>
             </div>
+          </div>
+
+          <div v-if="rows.length > 0 && !loadingRows" class="summary-missing-bar">
+            <span class="badge badge-brand">Áp nhanh</span>
+            <SummaryItemPicker
+              v-model="bulkItems"
+              :catalog="session.catalog"
+              :counts="catalogCounts"
+              placeholder="Bộ giấy tờ gán cho mọi dòng còn thiếu..."
+              @custom-added="persistCatalogCustom"
+            />
+            <button
+              class="btn btn-primary btn-sm"
+              type="button"
+              :disabled="bulkApplying || applyingMissing || !scopeReady"
+              title="Gán bộ đang chọn cho MỌI dòng còn thiếu danh mục trong phạm vi đang lọc — duyệt hết các trang, không cần tích từng dòng"
+              @click="applyToMissingInScope"
+            >
+              <Check :size="14" />
+              {{ applyingMissing ? 'Đang áp...' : 'Áp dụng cho dòng lọc còn thiếu' }}
+            </button>
           </div>
 
           <div v-if="rowsError" class="alert alert-danger">
@@ -2370,6 +2654,19 @@ onBeforeUnmount(() => {
                           @custom-added="persistCatalogCustom"
                         />
 
+                        <div class="quick-chips" title="Bấm 1 lần để thêm/gỡ mục — bấm C để chép như dòng trên">
+                          <button
+                            v-for="item in quickChipItems"
+                            :key="item"
+                            type="button"
+                            class="quick-chip"
+                            :class="{ 'is-on': hasQuickItem(row, item) }"
+                            @click="toggleQuickItem(row, item)"
+                          >
+                            {{ item }}
+                          </button>
+                        </div>
+
                         <div v-if="itemsFor(row).length > 0" class="summary-chips" :title="itemsFor(row).join(', ')">
                           <span v-for="item in itemsFor(row).slice(0, 3)" :key="item" class="chip">
                             {{ item }}
@@ -2386,6 +2683,34 @@ onBeforeUnmount(() => {
                           <div class="summary-editor-head">
                             <strong>Sửa toàn bộ trích yếu · dòng {{ row.rowNumber }}</strong>
                             <span class="hint">Hồ sơ {{ row.numberLabel || '—' }}</span>
+                            <button
+                              class="btn btn-ghost btn-sm"
+                              type="button"
+                              :title="autoNextRow ? 'Sau khi lưu sẽ tự mở dòng thiếu kế tiếp' : 'Sau khi lưu sẽ đóng editor'"
+                              @click="toggleAutoNext"
+                            >
+                              {{ autoNextRow ? '⏭ Tự nhảy: bật' : 'Tự nhảy: tắt' }}
+                            </button>
+                          </div>
+                          <div class="row wrap" style="gap: 6px; align-items: center">
+                            <span class="hint" style="font-size: 12px">Siêu tốc:</span>
+                            <button
+                              class="quick-chip"
+                              type="button"
+                              title="Bấm phím C (đứng ngoài ô nhập) cũng chạy lệnh này"
+                              @click="applyFromAbove(row)"
+                            >
+                              C — như dòng trên
+                            </button>
+                            <button
+                              v-if="defaultSetForType(row)"
+                              class="quick-chip"
+                              type="button"
+                              :title="`Bộ phổ biến nhất của loại ${row.type} (học từ dòng đang xem)`"
+                              @click="applyDefaultForType(row)"
+                            >
+                              Bộ loại: {{ defaultSetForType(row)!.join(', ') }}
+                            </button>
                           </div>
                           <div v-if="editingConflict" class="alert alert-warning" style="margin: 0">
                             <TriangleExclamationPoint :size="15" />

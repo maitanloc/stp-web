@@ -3556,6 +3556,67 @@ pre,
   vertical-align: middle;
 }
 
+/* C1: chip 1-chạm dưới picker giấy tờ — bấm thêm/gỡ mục, nền đậm khi dòng đã có. */
+.quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.quick-chip {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.quick-chip:hover {
+  border-color: var(--accent);
+  color: var(--text, inherit);
+}
+
+.quick-chip.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.quick-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* C3: hàng "Áp nhanh" dưới hàng scope — picker bộ giấy tờ + nút áp cho dòng lọc còn thiếu. */
+.summary-missing-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.summary-missing-bar .badge {
+  flex-shrink: 0;
+}
+
 .summary-edit-summary {
   margin-left: auto;
   font-weight: 600;
