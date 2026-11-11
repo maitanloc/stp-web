@@ -110,3 +110,14 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   thuần frontend dùng catalog sẵn có, chỉ prefill để duyệt), GĐ 2/3 (Whisper
   server, OCR camera, bot chat). **Đừng tự tiện bắt đầu** — chờ người dùng
   ra lệnh làm giai đoạn nào thì làm giai đoạn đó.
+- **Workspace 2.0** (brainstorm 11/11/2026, cùng ngày — cũng CHƯA làm): toàn bộ
+  suy nghĩ "Google Sheets cho hồ sơ" tại `docs/brainstorm-workspace-2-0.md` —
+  6 trụ: A presence 2.0 (SignalR + cursors viền + cục tròn avatar + chip hành
+  động), B avatar emoji khi đăng nhập (migration StpUsers thêm Avatar/Color),
+  C notification (bảng Notifications + chuông topbar + mention @tên), D bảng
+  sống kho hồ sơ (virtualized grid + comment theo dòng + history hover),
+  E sidebar/topbar mở rộng (tool registry + badge + Ctrl+K chung với GĐ 1.5
+  plan trên), F hỗ trợ (tour lần đầu, cheat sheet phím `?`). Kết luận chính:
+  viền row-mark + avatar initials + dark mode ĐÃ CÓ SẴN — chỉ thiếu realtime
+  (SignalR chưa có, mọi thứ đang polling) và phủ các trang khác. **Cả 2 plan
+  đều chờ người dùng ra lệnh, không tự làm.**
