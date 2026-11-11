@@ -2596,6 +2596,7 @@ onBeforeUnmount(() => {
     </template>
 
     <Teleport to="body">
+      <Transition name="modal">
       <div v-if="previewOpen" class="modal-backdrop" @click.self="previewOpen = false">
         <div class="modal summary-preview-modal">
           <div class="modal-header">
@@ -2797,8 +2798,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      </Transition>
 
       <!-- E: xuất bản in theo năm -->
+      <Transition name="modal">
       <div v-if="printOpen" class="modal-backdrop" @click.self="printOpen = false">
         <div class="modal" style="width: min(760px, 100%)">
           <div class="modal-header">
@@ -2938,8 +2941,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      </Transition>
 
       <!-- A3: đổi tên file xuất -->
+      <Transition name="modal">
       <div v-if="exportNameOpen" class="modal-backdrop" @click.self="exportNameOpen = false">
         <div class="modal" style="width: min(520px, 100%)">
           <div class="modal-header">
@@ -2985,8 +2990,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      </Transition>
 
       <!-- Lưu file vừa xuất vào Kho hồ sơ để lần sau khỏi import lại -->
+      <Transition name="modal">
       <div v-if="saveToArchiveOpen" class="modal-backdrop" @click.self="saveToArchiveOpen = false">
         <div class="modal" style="width: min(520px, 100%)">
           <div class="modal-header">
@@ -3022,6 +3029,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      </Transition>
     </Teleport>
   </div>
 </template>

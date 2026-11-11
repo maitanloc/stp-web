@@ -32,33 +32,35 @@ onMounted(() => {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('closed')">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Khai tên">
-      <form @submit.prevent="submit()">
-        <h2>Mình gọi bạn là gì?</h2>
-        <p class="hint">
-          Tên này hiện trên chat, nhật ký và dấu dòng đang sửa của bạn cho cả nhóm.<br />
-          Gõ một lần là máy nhớ, không cần mật khẩu.
-        </p>
-        <input
-          ref="inputElement"
-          v-model="draft"
-          type="text"
-          maxlength="100"
-          autocomplete="off"
-          placeholder="VD: Lan, Minh Q., Tú Kho..."
-          @keydown.enter="submit()"
-        />
-        <p v-if="error" class="error">{{ error }}</p>
-        <div class="actions">
-          <button type="button" class="ghost" @click="emit('closed')">Để sau</button>
-          <button type="submit" class="primary" :disabled="trimmed.length < 2">
-            Dùng tên này
-          </button>
-        </div>
-      </form>
+  <Transition name="modal">
+    <div v-if="open" class="modal-backdrop" @click.self="emit('closed')">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Khai tên">
+        <form @submit.prevent="submit()">
+          <h2>Mình gọi bạn là gì?</h2>
+          <p class="hint">
+            Tên này hiện trên chat, nhật ký và dấu dòng đang sửa của bạn cho cả nhóm.<br />
+            Gõ một lần là máy nhớ, không cần mật khẩu.
+          </p>
+          <input
+            ref="inputElement"
+            v-model="draft"
+            type="text"
+            maxlength="100"
+            autocomplete="off"
+            placeholder="VD: Lan, Minh Q., Tú Kho..."
+            @keydown.enter="submit()"
+          />
+          <p v-if="error" class="error">{{ error }}</p>
+          <div class="actions">
+            <button type="button" class="ghost" @click="emit('closed')">Để sau</button>
+            <button type="submit" class="primary" :disabled="trimmed.length < 2">
+              Dùng tên này
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <style scoped>

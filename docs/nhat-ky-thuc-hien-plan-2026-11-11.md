@@ -25,9 +25,16 @@
   file nhập còn 1990–1994 + 2000–2025 + null; tests 86/86 xanh; tunnel 200.
 
 ### Nhóm B — Pha 0 Workspace 2.0 (motion + lazy)
-- [ ] B1. Modal transition (LoginModal, UserNameModal, preview modal)
-- [ ] B2. Route transition + reduced-motion toàn cục
-- [ ] B3. Dock panel lazy (chat/activity fetch lần đầu mở)
+- [x] B1. Modal transition (LoginModal, UserNameModal, preview/print/export-name/save-archive modal)
+  - `<Transition name="modal">` + CSS mờ dần/thẻ nổi 0.16s, class toàn cục
+    `.modal-enter-*` trong style.css (root Transition = backdrop).
+- [x] B2. Route transition + reduced-motion toàn cục
+  - AppShell `RouterView v-slot` + `<Transition name="route" mode="out-in">`
+    (key = route.name); `@media (prefers-reduced-motion: reduce)` tắt mọi
+    animation/transition toàn app.
+- [x] B3. Dock panel lazy (chat/activity fetch lần đầu mở)
+  - onMounted không fetch nữa; mở dock mới tải (toggleOpen); khi đóng nhịp
+    12s vẫn lấy ngầm để đếm tin chưa đọc; panel + pill có transition dock.
 
 ### Nhóm C — GĐ 0 trích yếu siêu tốc
 - [ ] C1. Chip 1-chạm trong editor dòng

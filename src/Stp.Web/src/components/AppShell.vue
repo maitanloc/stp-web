@@ -205,7 +205,11 @@ onUnmounted(() => {
       </header>
 
       <main class="page">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="route" mode="out-in">
+            <component :is="Component" :key="route.name?.toString() ?? route.path" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
   </div>

@@ -1651,6 +1651,80 @@ pre,
   gap: 8px;
 }
 
+/* Motion cho modal: backdrop mờ dần, thẻ phóng nhẹ lên (Workspace 2.0 Pha 0).
+   Root của Transition là .modal-backdrop nên class enter/leave gắn lên đó. */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.modal-enter-active .modal-card,
+.modal-leave-active .modal-card {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+.modal-enter-from .modal-card,
+.modal-leave-to .modal-card {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+}
+
+/* Chuyển route: view cũ mờ đi nhanh, view mới nổi lên (out-in). */
+.route-enter-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.route-leave-active {
+  transition: opacity 0.1s ease;
+}
+
+.route-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.route-leave-to {
+  opacity: 0;
+}
+
+/* Người dùng chọn giảm chuyển động trong hệ điều hành → tắt hết. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Dock nhóm: panel nổi lên góc, pill thu gọn mờ dần (Pha 0). */
+.dock-enter-active {
+  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.dock-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.dock-enter-from {
+  opacity: 0;
+  transform: translateY(14px) scale(0.97);
+}
+
+.dock-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.97);
+}
+
 /* ---------------------------- Misc ---------------------------- */
 
 .kbd {

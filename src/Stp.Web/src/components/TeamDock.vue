@@ -178,8 +178,9 @@ function restartChatTimer(): void {
 onMounted(() => {
   storedName.value = getUserName()
   startTeamPresence()
-  void fetchChat()
-  void fetchActivity()
+  // B3 lazy: không tải chat/hoạt động lúc mounted — lần đầu mở dock mới tải
+  // (toggleOpen); khi dock đóng, nhịp 12 giây của timer chat vẫn lấy dữ liệu
+  // ngầm để đếm tin chưa đọc, activity chỉ tải khi panel mở.
   restartChatTimer()
   activityTimer = setInterval(() => {
     if (open.value) void fetchActivity()
@@ -217,6 +218,7 @@ watch(tab, (value) => {
 <template>
   <div class="team-dock">
     <!-- Panel chính -->
+    <Transition name="dock" mode="out-in">
     <section v-if="open" class="dock-panel" aria-label="Liên lạc nhóm">
       <header class="dock-head">
         <div class="head-title">
@@ -396,6 +398,7 @@ watch(tab, (value) => {
       <span v-if="onlineOthers.length === 0" class="pill-label">Chat nhóm</span>
       <span v-if="unread > 0" class="unread-badge strong">{{ unread > 9 ? '9+' : unread }}</span>
     </button>
+    </Transition>
 
     <UserNameModal :open="nameModalOpen" @saved="saveName" @closed="onModalClosed" />
     <LoginModal :open="loginModalOpen" @logged="onLogged" @closed="loginModalOpen = false" />

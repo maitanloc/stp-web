@@ -40,41 +40,43 @@ onMounted(() => {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('closed')">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Đăng nhập">
-      <form @submit.prevent="submit()">
-        <h2>Đăng nhập</h2>
-        <p class="hint">
-          Mỗi thành viên một tài khoản riêng — chat, nhật ký và dấu dòng đang sửa
-          sẽ gắn đúng tên của bạn.
-        </p>
-        <input
-          ref="usernameElement"
-          v-model="username"
-          type="text"
-          maxlength="50"
-          autocomplete="username"
-          placeholder="Tên đăng nhập (vd: lan, minh.quang)"
-        />
-        <input
-          v-model="password"
-          type="password"
-          maxlength="128"
-          autocomplete="current-password"
-          placeholder="Mật khẩu"
-          class="password"
-          @keydown.enter="submit()"
-        />
-        <p v-if="error" class="error">{{ error }}</p>
-        <div class="actions">
-          <button v-if="!required" type="button" class="ghost" @click="emit('closed')">Để sau</button>
-          <button type="submit" class="primary" :disabled="busy">
-            {{ busy ? 'Đang đăng nhập…' : 'Đăng nhập' }}
-          </button>
-        </div>
-      </form>
+  <Transition name="modal">
+    <div v-if="open" class="modal-backdrop" @click.self="emit('closed')">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Đăng nhập">
+        <form @submit.prevent="submit()">
+          <h2>Đăng nhập</h2>
+          <p class="hint">
+            Mỗi thành viên một tài khoản riêng — chat, nhật ký và dấu dòng đang sửa
+            sẽ gắn đúng tên của bạn.
+          </p>
+          <input
+            ref="usernameElement"
+            v-model="username"
+            type="text"
+            maxlength="50"
+            autocomplete="username"
+            placeholder="Tên đăng nhập (vd: lan, minh.quang)"
+          />
+          <input
+            v-model="password"
+            type="password"
+            maxlength="128"
+            autocomplete="current-password"
+            placeholder="Mật khẩu"
+            class="password"
+            @keydown.enter="submit()"
+          />
+          <p v-if="error" class="error">{{ error }}</p>
+          <div class="actions">
+            <button v-if="!required" type="button" class="ghost" @click="emit('closed')">Để sau</button>
+            <button type="submit" class="primary" :disabled="busy">
+              {{ busy ? 'Đang đăng nhập…' : 'Đăng nhập' }}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <style scoped>
