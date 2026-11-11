@@ -101,3 +101,12 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   **`dotnet test` cũng phải chạy khi service đã dừng** (service khoá exe/DLL
   của Stp.Api → MSB3021/MSB3027).
 - Chi tiết: `docs/phan-tich-ux-trich-yeu.md` mục 8.7, 8.8, 8.9, 8.10.
+
+## Plan chờ duyệt (CHƯA làm — người dùng chốt 11/11/2026 "để đó ghi nhớ")
+- **Nhập trích yếu siêu tốc**: plan đầy đủ tại
+  `docs/ke-hoach-trich-yeu-sieu-toc.md` — GĐ 0 (chip 1-chạm, "như dòng trên",
+  bộ mặc định theo loại, chạy hàng tự nhảy, xuất 1 click), GĐ 1 (voice Web
+  Speech API miễn phí: phiên đọc liên tục "nghe lọc loại hồ sơ bỏ vô", parser
+  thuần frontend dùng catalog sẵn có, chỉ prefill để duyệt), GĐ 2/3 (Whisper
+  server, OCR camera, bot chat). **Đừng tự tiện bắt đầu** — chờ người dùng
+  ra lệnh làm giai đoạn nào thì làm giai đoạn đó.
