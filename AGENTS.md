@@ -110,14 +110,18 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   thuần frontend dùng catalog sẵn có, chỉ prefill để duyệt), GĐ 2/3 (Whisper
   server, OCR camera, bot chat). **Đừng tự tiện bắt đầu** — chờ người dùng
   ra lệnh làm giai đoạn nào thì làm giai đoạn đó.
-- **Workspace 2.0** (brainstorm 11/11/2026, cùng ngày — cũng CHƯA làm): toàn bộ
-  suy nghĩ "Google Sheets cho hồ sơ" tại `docs/brainstorm-workspace-2-0.md` —
-  6 trụ: A presence 2.0 (SignalR + cursors viền + cục tròn avatar + chip hành
-  động), B avatar emoji khi đăng nhập (migration StpUsers thêm Avatar/Color),
-  C notification (bảng Notifications + chuông topbar + mention @tên), D bảng
-  sống kho hồ sơ (virtualized grid + comment theo dòng + history hover),
-  E sidebar/topbar mở rộng (tool registry + badge + Ctrl+K chung với GĐ 1.5
-  plan trên), F hỗ trợ (tour lần đầu, cheat sheet phím `?`). Kết luận chính:
-  viền row-mark + avatar initials + dark mode ĐÃ CÓ SẴN — chỉ thiếu realtime
-  (SignalR chưa có, mọi thứ đang polling) và phủ các trang khác. **Cả 2 plan
-  đều chờ người dùng ra lệnh, không tự làm.**
+- **Workspace 2.0** (brainstorm 11/11/2026, vòng 1+2 cùng ngày — cũng CHƯA
+  làm): toàn bộ suy nghĩ "Google Sheets cho hồ sơ" tại
+  `docs/brainstorm-workspace-2-0.md` — 7 trụ: A presence 2.0 (SignalR +
+  cursors viền + cục tròn avatar + chip hành động), B avatar kiểu Google
+  Sheets mặc định (initials+color, đang có) + **upload ảnh riêng** (không
+  emoji), C notification **2 kênh** (hệ thống + tin nhắn kiểu Messenger:
+  typing/seen/optimistic, emoji chỉ trong chat), D bảng sống kho hồ sơ
+  (virtualized + comment + history hover), E sidebar/topbar mở rộng
+  (registry + badge + Ctrl+K chung với GĐ 1.5 plan trên), F hỗ trợ (tour,
+  cheat sheet), G **lazy loading toàn bộ**. Chốt của chủ: KHÔNG dùng emoji
+  trong UI (chỉ `@lucide/vue`), motion mới phải bám 4 curve nhà (decel
+  0.22/0.9/0.26/1 · overshoot 0.3/0.7/0.35/1.25 · snap 0.34/0.06/0.22/1 ·
+  ease). Kết luận: viền row-mark + avatar initials + dark mode ĐÃ CÓ SẴN —
+  thiếu realtime (SignalR chưa có, polling thôi) + modal/route transition +
+  reduced-motion. **Cả 2 plan chờ người dùng ra lệnh, không tự làm.**

@@ -3,6 +3,23 @@
 > Trạng thái: **SUY NGHĨ TRONG ĐẦU, CHỜ DUYỆT**. Đây là brainstorm sau khi quét
 > sâu toàn bộ dự án (frontend 43 file ~13.300 dòng, backend 13 controller,
 > 15 bảng). Mục tiêu: **kế thừa cái có sẵn, nâng cấp lên** — không đục lại.
+> Vòng 2 (cùng ngày): quét thêm animation inventory, lazy-loading status,
+> icon census, chat chi tiết — đủ bộ dữ liệu để làm khi được duyệt.
+
+## Chốt bổ sung của chủ (vòng 2, 11/11/2026 — vẫn CHƯA làm)
+
+1. **Avatar kiểu Google Sheets**: bộ avatar mặc định = tròn màu + chữ cái đầu
+   (hệ thống đang có sẵn) + **cho phép upload ảnh riêng**; từ đó cục tròn
+   cursor/chấm presence dùng đúng hình đó để nhận ra người.
+2. **Notification 2 kênh**: (1) hệ thống báo — sự kiện nhóm/kỹ thuật;
+   (2) tin nhắn chat — trải nghiệm kiểu **Messenger của Meta**: badge, typing,
+   seen. Chuông topbar gom cả hai kênh.
+3. **Lazy loading áp dụng toàn bộ**: component, dữ liệu, ảnh — chi tiết Trụ G.
+4. **KHÔNG dùng emoji trong UI** (avatar, icon, label): chỉ được dùng trong
+   **nội dung chat**. Mọi icon dùng thư viện `@lucide/vue` như các thứ sẵn có.
+5. **UI/animation cùng đẳng cấp** với con mắt PasswordField, cuốn hồ sơ
+   BootSplash, gate 3D — bám "hệ animation nhà STP" ở mục cuối để mọi phần
+   mới có cùng chất.
 
 ## Kết luận nhanh nhất
 
@@ -69,19 +86,28 @@ A1: M · A2: M · A3: S. Tổng nhánh A ~4–5 ngày, chia 3 lần deploy nhỏ
   nhiên. `StpUsers` không có cột avatar (snapshot L646–687 xác nhận) — sạch,
   thêm migration không đụng gì.
 
-### Nâng cấp đề xuất
-1. **Avatar = emoji/mascot + màu vòng** (không upload file — khỏi lo lưu blob,
-   riêng tư, đẹp ngay): lưới ~24 emoji nhân vật khi **đăng ký** + đổi được sau
-   trong menu tài khoản. Cột `Avatar` nvarchar(32) + `Color` nvarchar(16) vào
-   `StpUsers` (migration `AddUserAvatar`).
-2. Kế thừa colorForName làm vòng màu khi chưa chọn; chọn rồi thì đội emoji lên
-   nền màu —Dock, chat, cursors (Trụ A), recap, notification, UsersView admin
-   list **đồng loạt dùng một hàm duy nhất** `renderAvatar(user)`.
-3. Optional sau: cho upload ảnh (cần endpoint + cache + giới hạn dung lượng) —
-   chỉ làm nếu team muốn; emoji là bản 1.
+### Nâng cấp đề xuất (theo chốt vòng 2: kiểu Google Sheets + upload, KHÔNG emoji)
+1. **Mặc định = bộ kiểu Google Sheets** — tròn màu + chữ cái đầu: hệ thống
+   đang có sẵn (`colorForName` hash → hsl + `initialsFor`). Chỉ cần nâng chuẩn
+   theo **palette cố định bảng màu Google** (các hue đủ tương phản, có biến thể
+   dark mode) và làm đậm chữ — kế thừa 100%, không viết mới.
+2. **Upload ảnh riêng (optional, mỗi user)**: trong menu tài khoản (hoặc sau
+   đăng ký) → chọn ảnh → **cắt vuông client** (canvas resize 96×96 webp) →
+   `POST /api/team/avatar` → lưu `data/avatars/{userId}.webp` qua FileStorage
+   sẵn có → `GET /api/team/avatar/{userId}` trả ảnh kèm Cache-Control; cột mới
+   `StpUsers.AvatarVersion` (int) để phá cache theo ETag — **không cần cột ảnh
+   trong DB**. Đây là pipeline ảnh ĐẦU TIÊN của app (hiện không có một `<img>`
+   nào) — làm nền luôn cho các ảnh sau này.
+3. **Cục tròn nhận diện**: cursor dot / chấm presence / dock / chat / recap /
+   notification / UsersView admin — tất cả đi qua **một hàm duy nhất**
+   `renderAvatar(user)`: có ảnh → `<img loading="lazy">`, không → vòng chữ
+   cái đầu. Cursor của Trụ A cũng ăn theo tự động.
+4. Riêng tư: endpoint ảnh chỉ phục người trong team (check cookie), không
+   upload khi chưa đăng nhập, giới hạn dung lượng ~2MB trước khi nén.
 
 ### Nỗ lực
-S–M (nửa ngày cho bản emoji; 1 ngày nếu đủ hệ render hàm chung).
+Bản mặc định Google-Sheets initials: S. Upload pipeline (cắt client +
+endpoint + cache): M. Hàm renderAvatar chung: nằm luôn trong phần này.
 
 ---
 
@@ -92,26 +118,37 @@ S–M (nửa ngày cho bản emoji; 1 ngày nếu đủ hệ render hàm chung).
 - Feed hoạt động `/api/team/activity` (poll AuditLogs) + recap đã làm ở vòng 2.
 - Chat 3s poll + badge unread trong dock đã có khái niệm "chưa đọc" chỗ dock.
 
-### Nâng cấp đề xuất
-1. **Bảng `Notifications`** mới: (Id, AudienceUser nullable, AudienceRole,
-   Type, Title, Body, DeepLink, CreatedAt, ReadAt) + API list/unread-count/
-   mark-read. Nguồn sự kiện cắm tại `TeamAudit.Write` (choke point duy nhất)
-   + `PostChat`.
-2. **Chuông 🔔 trong topbar** (AppShell actions cluster L179–204 — chổ trống
-   sẵn cho icon mới): badge số chưa đọc + dropdown feed + "đánh dấu tất cả".
-   Deep link bấm vào là nhảy đúng trang/dòng.
-3. **Loại thông báo mở đầu**:
-   - Chat khi dock đang thu gọn (thay vì chỉ badge nhỏ);
-   - **Mention `@tên`** trong chat → riêng cho người đó (S);
+### Nâng cấp đề xuất (theo chốt vòng 2: 2 kênh — hệ thống + tin nhắn kiểu Messenger)
+1. **Bảng `Notifications`** (Id, AudienceUser nullable, AudienceRole, Type,
+   Title, Body, DeepLink, CreatedAt, ReadAt) + API list/unread-count/mark-
+   read. Nguồn sự kiện: `TeamAudit.Write` (choke point duy nhất) cho **kênh
+   hệ thống**; `PostChat` cho **kênh tin nhắn**.
+2. **Chuông trong topbar** (AppShell actions cluster L179–204 — chỗ trống sẵn
+   cho icon mới, icon dùng lucide `Bell`): badge số chưa đọc + dropdown với
+   2 tab "Hệ thống" / "Tin nhắn", deep link bấm vào nhảy đúng trang/dòng,
+   "đánh dấu tất cả đã đọc".
+3. **Chat nâng cấp kiểu Messenger** (TeamDock hiện: poll 3s khi mở/12s đóng,
+   không optimistic, không typing, không seen):
+   - Typing indicator "Lộc đang soạn…" (realtime từ Trụ A1);
+   - Seen/đã đọc server-side (hiện `lastSeenAt` chỉ ở RAM — mất khi reload,
+     phải đưa vào DB hoặc presence record);
+   - Optimistic message (tin hiện ngay, đánh dấu gửi dở);
+   - **Emoji picker trong ô chat** — emoji CHỈ được phép ở đây;
+   - React/đáp lại tin nhắn: optional sau;
+   - 3 SVG tay trong TeamDock (chevron/send/chat-bubble) chuyển về lucide
+     cho chuẩn hoá icon.
+4. **Loại thông báo hệ thống mở đầu**:
    - Ai vừa đồng bộ/đổ hồ sơ mới vào kho ("Lộc vừa đồng bộ 1.240 hồ sơ");
-   - Dòng mình đang định sửa bị người khác chiếm trước (cursors của Trụ A);
-   - Phiên trích yếu dở của mình còn 1 giờ là hết hạn (12h TTL sẵn có);
-   - Admin tạo/sửa tài khoản → thông báo chính người đó.
-4. Toast (thoáng) + Notification (lưu lâu) **cùng nguồn sự kiện** — toast là
-   "preview", bell là "hộp thư".
+   - Dòng mình định sửa bị người khác chiếm trước (cursors Trụ A);
+   - Phiên trích yếu dở của mình còn ~1 giờ là hết hạn (12h TTL sẵn có);
+   - Admin tạo/sửa tài khoản → thông báo chính người đó;
+   - Mention `@tên` trong chat → riêng cho người đó.
+5. Toast (thoáng) + Notification (lưu lâu) **cùng nguồn sự kiện** — toast là
+   "preview", bell là "hộp thư"; tin nhắn vẫn có kênh dock riêng như Messenger.
 
 ### Nỗ lực
-Bảng+API: M · Bell UI: S · mentions: S.
+Bảng+API: M · Bell 2 kênh: M · Chat Messenger (typing/seen/optimistic/
+picker): M · mention: S.
 
 ---
 
@@ -186,16 +223,80 @@ Mỗi món: S.
 
 ---
 
+## Trụ G — Lazy loading toàn bộ (chốt vòng 2)
+
+### Đã lazy sẵn (kế thừa, không phải làm)
+- **100% route code-split**: cả 15 route đều `() => import(...)` (router.ts),
+  Vite cắt chunk riêng cho từng view (đã thấy `SummaryToolView-*.js` trong
+  dist) — mở trang nào nạp trang đó.
+- **Dữ liệu**: mọi view fetch-on-mount kèm skeleton/spinner; phân trang
+  SummaryToolView (20/50/100/200), PrintBatch fetch tuần tự có tiến trình.
+- Dock chat: poll 3s khi mở / 12s khi đóng.
+
+### Cần lazy thêm (khi làm)
+1. **defineAsyncComponent cho panel nặng**: chat panel của dock lần đầu mở mới
+   fetch lịch sử (take=100); notification feed, bảng sống, comment panel —
+   MỌI panel/popup mới phải lazy mount + fetch lần đầu mở ("mở tới đâu nạp
+   tới đó" — nguyên tắc bắt buộc cho Trụ C/D/E).
+2. **Gộp unread vào presence ping**: badge tin nhắn khi dock đóng đang nhờ
+   poll 12s riêng — cho presence response kèm unreadCount là tốn 0 request.
+3. **Ảnh avatar** `loading="lazy"` + Cache-Control (Trụ B) — đồng thời là
+   pipeline ảnh đầu tiên của app.
+4. **Virtualization**: bảng sống 67k dòng (Trụ D) bắt buộc virtual scroll
+   (chỉ render ~40 dòng trong khung nhìn); chat dài thì mới cần, hiện take=100
+   vẫn ổn.
+5. **prefers-reduced-motion**: kill-switch toàn cục (hiện app không có — gap
+   a11y) đặt trong style.css, mọi keyframe mới phải tôn trọng.
+
+## Hệ animation nhà STP (house motion — chuẩn cho mọi phần mới)
+
+Kết quả census vòng 2: đúng 10 @keyframes, 5 `<Transition>`, 4 cubic-bezier
+đặc trưng — UI mới phải bám vào này, không chế curve lạ:
+
+| Curve nhà | Giá trị | Đang dùng ở | Dành cho |
+|---|---|---|---|
+| **Decel mượt** | `cubic-bezier(0.22, 0.9, 0.26, 1)` | gate lật 3D 1.05s, recap 0.45s | mở panel, dropdown, notification card, cursor chạy tới |
+| **Overshoot blink** | `cubic-bezier(0.3, 0.7, 0.35, 1.25)` | con mắt 0.4s scaleY 0.1→1 | pop-in cursor dot, badge nảy, avatar xuất hiện |
+| **Snap-in** | `cubic-bezier(0.34, 0.06, 0.22, 1)` | leaf-flip cuốn hồ sơ | lật/đổi mặt, xoay 3D |
+| **Ease thường** | `ease` 0.12–0.4s | hover, toast 0.22s | micro-interaction |
+
+Thời lượng chuẩn: **micro 150–250ms · component 300–450ms · signature 1.05s**.
+Hover nhà: `translateY(-1px)` + shadow, `:active translateY(1px)`, focus ring
+`0 0 0 3px var(--brand-soft)`.
+
+### Lỗ hổng phải vá để "đẳng cấp đều tay" (Pha 0)
+- **Modal chưa có transition nào** — LoginModal, UserNameModal, preview modal
+  trích yếu đều `v-if` trần (backdrop hiện cứng) → thêm enter/exit scale+fade
+  0.22s chuẩn toast, dùng TransitionGroup pattern sẵn có.
+- **Route chưa có transition** — `<RouterView>` trần → thêm fade/slide 0.25s
+  (đề phòng view nặng chuyển trang giật, chỉ animate opacity là đủ).
+- **Chưa có `appear`** ở Transition nào, chưa có reduced-motion (Trụ G.5).
+- `will-change` chỉ dùng 1 chỗ (leaf-flip) — giữ kỷ luật này, cursor dot mới
+  là nơi thứ hai hợp lệ.
+
+### Áp cho phần Workspace 2.0
+- Cursor pop-in: overshoot; cursor chạy khi người đổi ô: decel (transition
+  transform cho mượt "trôi" kiểu Figma).
+- Bell rung khi có tin: keyframes rotate ±8° 0.4s — decel.
+- Notification card vào: slide+fade decel 0.3s; ra: nhanh 0.18s.
+- Avatar upload modal: kế thừa flip nhẹ nhà (không cần 3D 1.05s — 0.35s).
+- Chat Messenger: typing dots 3 chấm nhảy (keyframes pulse có sẵn), seen ✓✓
+  hiện bằng decel opacity.
+
+---
+
 ## Thứ tự đề xuất (khi được duyệt)
 
 | Pha | Nội dung | Vì sao trước |
 |---|---|---|
-| 1 | B: Avatar emoji + migration | Nhỏ, vui, làm nền cho mọi presence UI |
+| 0 | Motion + lazy nền móng: vá modal/route transition, reduced-motion, dock panel lazy | Phần mới bám chuẩn nhà ngay từ đầu |
+| 1 | B: Avatar kiểu Google Sheets mặc định + hàm renderAvatar chung | Nhỏ, làm nền cho mọi presence UI |
 | 2 | A1: SignalR nền + presence realtime | Khớp nối của A2/A3/C/D |
-| 3 | A2+A3: Cursors viền + cục tròn + chip hành động | Đúng "điểm nhấn Google Sheets" |
-| 4 | C: Bảng Notifications + chuông + mention | Giá trị mỗi ngày cao nhất |
+| 3 | A2+A3: Cursors viền + cục tròn (ăn avatar) + chip hành động | Đúng "điểm nhấn Google Sheets" |
+| 4 | C: Notifications 2 kênh + bell + chat Messenger (typing/seen/emoji) | Giá trị mỗi ngày cao nhất |
 | 5 | E: Registry + badge + Ctrl+K | Tổ chức lại shell cho tool tương lai |
-| 6 | D: Bảng sống + comment + history | Nhãn cao nhất nhưng cần nền realtime |
+| 6 | D: Bảng sống + comment + history (virtualized) | Nhãn cao nhất nhưng cần nền realtime |
+| 7 | B-upload: pipeline ảnh avatar | Khi bản mặc định chạy ổn |
 
 ## Rủi ro & nguyên tắc
 
@@ -204,18 +305,32 @@ Mỗi món: S.
 - **Chống ồn presence**: broadcast focus throttle 300ms, cap 8 cursor, mobile
   thu gọn — không ai muốn màn hình hoa lên 10 chấm.
 - **Riêng tư**: không broadcast từng keystroke; chỉ focus (ô nào) + hành động
-  đáng kể. Chat mention đúng người.
-- **Đừng làm**: clone Google Sheets full (sửa ô trên 67k dòng), upload avatar
-  file ở bản 1, SignalR scale-out, bỏ polling ngay lập tức (giữ fallback).
+  đáng kể. Chat mention đúng người. Ảnh avatar chỉ người trong team thấy.
+- **Icon/emoji**: chỉ `@lucide/vue` (~65 icon đang dùng đều qua prop `:size`,
+  màu currentColor); emoji CHỈ trong nội dung chat; inline SVG tay chỉ hợp lệ
+  khi cần animation riêng (con mắt là chuẩn mực); 3 SVG tay trong TeamDock
+  chuyển dần về lucide.
+- **Đừng làm**: clone Google Sheets full (sửa ô trên 67k dòng), SignalR
+  scale-out, bỏ polling ngay lập tức (giữ fallback).
 - **Z-index ladder** phải tôn trọng: sidebar 50 · dock 60 · recap 85 · modal
   150 · toast 200 · popover 300 — cursor layer đặt ~55, bell dropdown ~70.
 - Mọi UI mới **định nghĩa cả 2 palette** (light/dark tokens) + tôn trọng
-  `html.large-text`.
-- Test: parser/hub logic unit test được; UI presence test tay + log.
+  `html.large-text` (L7–38) + `prefers-reduced-motion` sau khi vá Pha 0.
+- Motion mới: bắt buộc dùng 1 trong 4 curve nhà + bảng thời lượng ở mục
+  "Hệ animation nhà STP".
+- Test: hub logic unit test được; UI presence test tay + log; pipeline ảnh
+  test resize/nén bằng unit (canvas logic tách composable thuần).
 
 ## Trạng thái ghi nhận
 
-- Ngày 11/11/2026: người dùng nêu ý tưởng, CHƯA duyệt làm gì. Plan trước đó
-  ("nhập trích yếu siêu tốc" — `ke-hoach-trich-yeu-sieu-toc.md`) cũng vẫn
-  đang chờ. Hai plan **không xung đột**: Ctrl+K (GĐ 1.5 plan trước) chung với
-  Trụ E ở đây — làm một lần.
+- 11/11/2026 vòng 1: người dùng nêu ý tưởng → brainstorm 6 trụ.
+- 11/11/2026 vòng 2: chủ chốt 5 điều mới (avatar Google-Sheets + upload,
+  notification 2 kênh Messenger-style, lazy loading toàn bộ, cấm emoji ngoài
+  chat — icon lucide, UI/animation cùng đẳng cấp house motion). Đã quét thêm
+  vòng 2: animation inventory (10 keyframes / 5 Transition / 4 curve nhà),
+  lazy status (route 100% split; chưa defineAsyncComponent nào; không một
+  `<img>` nào trong app), icon census (~65 lucide, 4 file có SVG tay), chat
+  chi tiết (poll 3s/12s, không optimistic/typing/seen). **Bộ dữ liệu coi như
+  đầy đủ — làm khi được duyệt.**
+- Plan trước ("nhập trích yếu siêu tốc" — `ke-hoach-trich-yeu-sieu-toc.md`)
+  vẫn đang chờ. Ctrl+K là điểm chung 2 plan — làm một lần.
