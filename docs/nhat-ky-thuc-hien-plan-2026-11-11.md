@@ -78,8 +78,17 @@
     nhận phục hồi đủ 22.510 dòng.
 
 ### Nhóm D — Trụ B avatar mặc định
-- [ ] D1. renderAvatar() hàm chung + palette Google-Sheets chuẩn + dark mode
-- [ ] D2. Thay toàn bộ chỗ render avatar (dock, chat, feed, cursors tương lai)
+- [x] D1. renderAvatar() hàm chung + palette Google-Sheets chuẩn + dark mode
+  (`lib/team.ts`: 14 màu Google Workspace collaborator (#e8710a, #246fdb,
+  #f4518c, #1e8e3e… xen kẽ nóng/lạnh), `colorForName` chọn palette theo hash
+  tên thay vì hue ngẫu nhiên; `renderAvatar(name)` trả initials + style nền +
+  chữ trắng — nền bão hoà đọc được trên sáng lẫn tối, không cần biến thể dark
+  riêng)
+- [x] D2. Thay toàn bộ chỗ render avatar (dock, chat, feed, cursors tương lai)
+  (TeamDock: tool-avatar dock, avatar menu tài khoản, avatar chat, mini avatar
+  pill, event-dot feed — hết `avatarStyle` cũ; `.who`/`.event-actor` vẫn dùng
+  `colorForName` nền palette mới; verify trên pill đang mở: "Bk"=#f5386a,
+  "TL"=#ff8f00 đúng palette)
 
 ### Nhóm E — P0.2 data safety
 - [ ] E1. Draft backup server `PUT /api/summary/{id}/draft` + restore

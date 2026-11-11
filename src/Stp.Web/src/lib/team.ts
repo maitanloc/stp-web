@@ -1,13 +1,34 @@
 // Hàm tiện ích cho "nền tảng nhóm" — màu đại diện, viết tắt tên, thời gian tương đối.
 
-/** Màu ổn định theo tên (cùng tên luôn ra cùng màu, khác tên thường ra khác màu). */
+/**
+ * Palette avatar chuẩn Google Workspace (Docs/Sheets collaborator colors) —
+ * 14 màu bão hoà xen kẽ nóng/lạnh, chữ trắng luôn đọc được trên nền sáng lẫn
+ * tối nên không cần biến thể dark mode riêng.
+ */
+const AVATAR_PALETTE = [
+  '#e8710a', // cam
+  '#246fdb', // xanh dương đậm
+  '#f4518c', // hồng
+  '#1e8e3e', // xanh lá
+  '#a142f4', // tím
+  '#e37400', // cam đậm
+  '#1a73e8', // xanh dương
+  '#d93025', // đỏ
+  '#188038', // xanh lá đậm
+  '#9334e6', // tím sáng
+  '#ff8f00', // vàng cam
+  '#8430cb', // tím đậm
+  '#f5386a', // hồng đậm
+  '#c5221f', // đỏ đậm
+] as const
+
+/** Màu ổn định theo tên: cùng tên luôn cùng màu, phân bố đều trên palette. */
 export function colorForName(name: string): string {
   let hash = 0
   for (let index = 0; index < name.length; index += 1) {
     hash = (hash * 31 + name.charCodeAt(index)) >>> 0
   }
-  const hue = hash % 360
-  return `hsl(${hue}, 62%, 42%)`
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length]
 }
 
 /** Viết tắt 1–2 chữ cái để làm avatar. */
@@ -19,6 +40,20 @@ export function initialsFor(name: string): string {
     return (firstWord[0] ?? '?') + (firstWord[1] ?? '')
   }
   return (firstWord[0] ?? '?') + ([...words[1]][0] ?? '')
+}
+
+/** D1: render avatar 1 chỗ duy nhất — chữ viết tắt + nền palette + chữ trắng. */
+export function renderAvatar(name: string): {
+  initials: string
+  style: Record<string, string>
+} {
+  return {
+    initials: initialsFor(name),
+    style: {
+      background: colorForName(name),
+      color: '#fff',
+    },
+  }
 }
 
 /** "3 giây trước" / "5 phút trước" / "2 giờ trước" / "10:42, 11/11". */

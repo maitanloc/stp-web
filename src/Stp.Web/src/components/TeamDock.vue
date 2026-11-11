@@ -5,7 +5,7 @@ import { getUserName, request } from '../api/client'
 import { initTeamIdentity, logoutTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
 import type { ActivityEventResponse, ChatMessageResponse } from '../api/types'
 import { errorMessage } from '../lib/errors'
-import { actionLabel, clockTime, colorForName, initialsFor, relativeTime } from '../lib/team'
+import { actionLabel, clockTime, colorForName, renderAvatar, relativeTime } from '../lib/team'
 import { pingPresence, startTeamPresence, teamOnline } from '../composables/useTeamPresence'
 import { useToast } from '../composables/useToast'
 import LoginModal from './LoginModal.vue'
@@ -45,10 +45,6 @@ const unread = computed(() => {
 const onlineOthers = computed(() =>
   teamOnline.value.filter((entry) => entry.actor !== userName.value),
 )
-
-function avatarStyle(name: string): Record<string, string> {
-  return { background: colorForName(name) }
-}
 
 function markChatRead(): void {
   lastSeenAt = Date.now()
@@ -237,14 +233,14 @@ watch(tab, (value) => {
                 :title="teamIdentity.displayName + ' · ' + (teamIdentity.role === 'admin' ? 'Quản trị' : 'Thành viên')"
                 @click="accountMenuOpen = !accountMenuOpen"
               >
-                <span class="tool-avatar" :style="avatarStyle(teamIdentity.displayName)">
-                  {{ initialsFor(teamIdentity.displayName) }}
+                <span class="tool-avatar" :style="renderAvatar(teamIdentity.displayName).style">
+                  {{ renderAvatar(teamIdentity.displayName).initials }}
                 </span>
               </button>
               <div v-if="accountMenuOpen" class="account-menu">
                 <div class="account-head">
-                  <span class="avatar" :style="avatarStyle(teamIdentity.displayName)">
-                    {{ initialsFor(teamIdentity.displayName) }}
+                  <span class="avatar" :style="renderAvatar(teamIdentity.displayName).style">
+                    {{ renderAvatar(teamIdentity.displayName).initials }}
                   </span>
                   <div class="account-info">
                     <span class="account-name">{{ teamIdentity.displayName }}</span>
@@ -270,8 +266,11 @@ watch(tab, (value) => {
           </template>
           <template v-else>
             <button type="button" class="tool" title="Đổi tên hiển thị" @click="nameModalOpen = true">
-              <span class="tool-avatar" :style="userName ? avatarStyle(userName) : {}">
-                {{ userName ? initialsFor(userName) : '?' }}
+              <span
+                class="tool-avatar"
+                :style="userName ? renderAvatar(userName).style : { color: '#fff' }"
+              >
+                {{ userName ? renderAvatar(userName).initials : '?' }}
               </span>
             </button>
             <button
@@ -321,9 +320,9 @@ watch(tab, (value) => {
             <span
               v-if="message.actor !== userName"
               class="avatar"
-              :style="avatarStyle(message.actor)"
+              :style="renderAvatar(message.actor).style"
             >
-              {{ initialsFor(message.actor) }}
+              {{ renderAvatar(message.actor).initials }}
             </span>
             <div class="bubble">
               <span v-if="message.actor !== userName" class="who" :style="{ color: colorForName(message.actor) }">
@@ -362,7 +361,7 @@ watch(tab, (value) => {
         </p>
         <ol v-else class="activity-list">
           <li v-for="event in activities" :key="event.id">
-            <span class="event-dot" :style="avatarStyle(event.actor)"></span>
+            <span class="event-dot" :style="{ background: colorForName(event.actor) }"></span>
             <div class="event-main">
               <span class="event-head">
                 <span class="event-actor" :style="{ color: colorForName(event.actor) }">{{ event.actor }}</span>
@@ -383,10 +382,10 @@ watch(tab, (value) => {
           v-for="entry in onlineOthers.slice(0, 3)"
           :key="entry.actor"
           class="avatar mini"
-          :style="avatarStyle(entry.actor)"
+          :style="renderAvatar(entry.actor).style"
           :title="entry.actor + ' · ' + entry.where"
         >
-          {{ initialsFor(entry.actor) }}
+          {{ renderAvatar(entry.actor).initials }}
         </span>
         <span v-if="onlineOthers.length > 3" class="pill-more">+{{ onlineOthers.length - 3 }}</span>
       </span>
