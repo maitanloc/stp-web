@@ -592,3 +592,40 @@ badge tần suất)** của mục 3 — nên làm liền nhau một đợt.
 - trycloudflare đã ngừng dùng — **chỉ còn 1 link duy nhất**. Quy trình update
   code: `Stop-Service StpApiService` → build → `Start-Service StpApiService`;
   không chạy `dotnet run` tay song song với service (đụng cổng 5215).
+
+### 8.9 Màn ra vào "cuốn hồ sơ" + tự đăng ký + tổng kết việc (2026-11-11, vòng 2)
+
+- **Gate khi chưa có phiên**: app mở thẳng màn full-screen AuthGate — mặt trước
+  là Đăng nhập, bấm "Đăng ký ngay" lật 3D sang mặt sau (perspective 1700px,
+  `rotateY(-180deg)`, 1.05s cubic-bezier mượt; màn nhỏ <860px lật 2D cho nhẹ
+  máy). Lật lại bằng "Đăng nhập". Bố cục hai mặt đối xứng nhau (form/brand
+  hoán đổi) cho cảm giác lật trang hồ sơ thật.
+- **Tự đăng ký**: `POST /api/auth/register` — ai mở link cũng tự tạo được tài
+  khoản member và vào dùng luôn (backend cấp cookie ngay). Validate bằng
+  `AccountRules`; username trùng → 409 với thông báo tiếng Việt. Cờ cấu hình
+  `StpTeam:AllowRegistration` (appsettings, mặc định **true**) — đặt false để
+  chỉ quản trị cấp tài khoản. Audit: `auth.register`.
+- **Ghi nhớ 24 giờ sliding**: cookie `ExpireTimeSpan = 24h` + `SignInAsync
+  ExpiresUtc 24h`. Còn vào app mỗi ngày là tự gia hạn — không bao giờ thấy màn
+  đăng nhập; vắng quá 24 giờ mới phải đăng nhập lại. (Đổi từ 30 ngày theo yêu
+  cầu "tự ghi nhớ 24h, khỏi phải vào".)
+- **Màn chờ = cuốn hồ sơ lật từng trang** (BootSplash, thay vòng xoay + progress
+  bar): tờ hồ sơ nhấc lên `translateZ(20px)` rồi xoay `-180°` quanh gáy trái,
+  keyframes quản lý z-index 45→60→5 để trang đang bay luôn đè trang đã nằm;
+  đợi lâu lật 3 tờ, nhanh lật 2 tờ, nhịp tính từ durationMs prop (lần đầu
+  2.6s, quay lại có phiên 1.1s); tắt mượt bằng Transition scale+fade ở App.vue.
+  Bẫy: chuỗi `v-else-if` gắn sau `<Transition>` làm compiler Vue văng
+  "Cannot read properties of undefined (reading 'type')" — mỗi nhánh phải tự
+  mang `v-if`.
+- **Thẻ tổng kết kiểu Google Sheets** (WelcomeRecap, hiện sau màn chờ, tự tấu
+  25s hoặc bấm X): "Chào buổi sáng, {tên}! Bạn đang ở trang {title}" + việc
+  gần đây lấy từ `GET /api/auth/recap` — lọc `AuditLogs` theo
+  `Actor == DisplayName`, loại sự kiện `auth.*`, ghép area+label tiếng Việt
+  (export* → Bổ sung trích yếu, sync → Đồng bộ từ Excel, admin.* → Quản lý
+  tài khoản) + `relativeTime`. Tải lỗi thì im lặng, app vẫn vào bình thường.
+- Token dev (`stp.dev.token`) bỏ qua gate — không gian nâng cao vào thẳng như
+  cũ. API vẫn mở (RequireLogin=false): gate là lớp UI, muốn khoá cứng server
+  thì bật `StpTeam:RequireLogin` như mục 8.7.
+- Lưu ý vận hành: `dotnet test` phải chạy khi **service đã dừng** — service
+  đang chạy khoá `Stp.Api.dll` khiến build test văng MSB3021/MSB3027 (không
+  phải lỗi code).

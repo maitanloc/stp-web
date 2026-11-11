@@ -26,3 +26,16 @@ public sealed record UpdateUserRequest(string? DisplayName, string? Role, bool? 
 
 /// <summary>Quản trị đặt lại mật khẩu cho thành viên.</summary>
 public sealed record ResetPasswordRequest(string Password);
+
+/// <summary>Tự đăng ký tài khoản thành viên (trang "cuốn hồ sơ" khi chưa có phiên).</summary>
+public sealed record RegisterRequest(string Username, string DisplayName, string Password);
+
+/// <summary>Một việc bạn vừa làm (lấy từ nhật ký nhóm) — hiện trong thẻ tổng kết sau khi vào hệ thống.</summary>
+public sealed record ActivityRecapResponse(
+    DateTimeOffset At,
+    string Action,
+    string Area,
+    string Label,
+    string? Details);
+
+public sealed record RecapListResponse(IReadOnlyList<ActivityRecapResponse> Items);

@@ -58,8 +58,34 @@ export async function loginTeamAccount(username: string, password: string): Prom
   return request<TeamIdentity>('/api/auth/login', { method: 'POST', body: { username, password } })
 }
 
+/** Tự đăng ký tài khoản thành viên — backend tự đăng nhập luôn (cookie 24h sliding). */
+export async function registerTeamAccount(
+  username: string,
+  displayName: string,
+  password: string,
+): Promise<TeamIdentity> {
+  return request<TeamIdentity>('/api/auth/register', {
+    method: 'POST',
+    body: { username, displayName, password },
+  })
+}
+
 export async function logoutTeamAccount(): Promise<void> {
   await request('/api/auth/logout', { method: 'POST' })
+}
+
+/** Một việc bạn vừa làm, lấy từ nhật ký nhóm — cho thẻ tổng kết sau khi vào hệ thống. */
+export interface RecapItem {
+  at: string
+  action: string
+  area: string
+  label: string
+  details: string | null
+}
+
+/** Tổng kết việc vừa làm ("trang nào, khu nào, lúc nào") — kiểu hoạt động của Google Sheets. */
+export async function fetchRecap(): Promise<{ items: RecapItem[] }> {
+  return request<{ items: RecapItem[] }>('/api/auth/recap?take=8')
 }
 
 export class ApiError extends Error {

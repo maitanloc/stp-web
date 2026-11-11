@@ -66,7 +66,7 @@ builder.Services
         options.Cookie.Name = ".stp.team";
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-        options.ExpireTimeSpan = TimeSpan.FromDays(30);
+        options.ExpireTimeSpan = TimeSpan.FromHours(24);
         options.SlidingExpiration = true;
         // Endpoint API: trả 401/403 JSON thẳng, không redirect trang đăng nhập.
         options.Events.OnRedirectToLogin = context =>

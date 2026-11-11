@@ -64,14 +64,25 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
 ## Tài khoản nhóm + link cố định (người dùng chốt 2026-11-11)
 - Mỗi người một tài khoản: bảng `StpUsers` (migration `AddStpUsers`), mật khẩu
   hash PBKDF2 qua `PasswordHasher<StpUser>`, cookie `.stp.team` scheme
-  `StpTeam` 30 ngày sliding. JWT developer giữ nguyên song song.
+  `StpTeam` **24 giờ sliding** (đổi từ 30 ngày theo yêu cầu "ghi nhớ 24h,
+  khỏi phải vào"). JWT developer giữ nguyên song song.
 - Default authenticate scheme là JWT → đọc identity nhóm **bắt buộc**
   `await StpTeamIdentity.FromAsync(HttpContext)`, không đọc `HttpContext.User`
   trực tiếp (nhầm JWT trống).
 - Người đã đăng nhập: chat/presence/audit ghi DisplayName từ tài khoản, bỏ qua
-  tên client gửi (không giả danh được). Chưa đăng nhập: vẫn tự khai tên như cũ.
-- Khoá bắt buộc đăng nhập: appsettings `StpTeam:RequireLogin` (mặc định false —
-  không gián đoạn ca nhập; bật sau khi tạo đủ tài khoản).
+  tên client gửi (không giả danh được).
+- Khoá bắt buộc đăng nhập: appsettings `StpTeam:RequireLogin` (mặc định false).
+  Gate UI hiện đã chặn mọi người chưa có phiên; flag này là khoá cứng server.
+- **Màn ra vào "cuốn hồ sơ" (vòng 2, cùng ngày)**: chưa có phiên → AuthGate
+  full-screen, mặt trước Đăng nhập, lật 3D sang mặt sau Tự đăng ký
+  (`POST /api/auth/register`, role member, cấp cookie luôn; tắt bằng
+  `StpTeam:AllowRegistration=false`). Token dev bỏ qua gate.
+- **Màn chờ = cuốn hồ sơ lật từng trang** (BootSplash): tờ hồ sơ xoay 3D
+  quanh gáy trái, z-index 45→60→5 trong keyframes để trang bay trên đống trang
+  đã nằm; 2.6s lần đầu / 1.1s khi quay lại. Sau đó thẻ WelcomeRecap tổng kết
+  việc của chính người đó từ `GET /api/auth/recap` (AuditLogs lọc Actor ==
+  DisplayName, loại auth.*). Lưu ý: chuỗi `v-else-if` sau `<Transition>` làm
+  Vue compiler crash — mỗi nhánh template tự mang `v-if`.
 - Admin quản lý tài khoản tại `/quan-ly`; seed lần đầu `admin / stp2026`
   (đổi ngay). Mọi thao tác admin ghi `AuditLogs`.
 - Link cố định duy nhất: `https://mangle-tastiness-french.ngrok-free.dev`
@@ -81,4 +92,6 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   `StpApiService` + `StpNgrokService` — tự bật khi máy khởi động, gãy tự
   restart. Update code: `Stop-Service StpApiService` → build → `Start-Service
   StpApiService`; không chạy `dotnet run` tay song song với service.
-- Chi tiết: `docs/phan-tich-ux-trich-yeu.md` mục 8.7, 8.8.
+  **`dotnet test` cũng phải chạy khi service đã dừng** (service khoá exe/DLL
+  của Stp.Api → MSB3021/MSB3027).
+- Chi tiết: `docs/phan-tich-ux-trich-yeu.md` mục 8.7, 8.8, 8.9.
