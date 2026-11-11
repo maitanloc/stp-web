@@ -83,6 +83,12 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   việc của chính người đó từ `GET /api/auth/recap` (AuditLogs lọc Actor ==
   DisplayName, loại auth.*). Lưu ý: chuỗi `v-else-if` sau `<Transition>` làm
   Vue compiler crash — mỗi nhánh template tự mang `v-if`.
+- **Ô mật khẩu có nút con mắt** (PasswordField): mặc định mắt nhắm, bấm mở
+  animation như mắt người (scaleY 0.1→1) + hiện chữ thường; gắn cả 2 mặt
+  AuthGate. Mật khẩu chuẩn hoá NFC trước validate/hash (login/register/admin
+  CRUD) và **bị chặn ngay lúc tạo nếu có ký tự có dấu** (>127) — thông báo tắt
+  bộ gõ Telex/VNI; đảm bảo mật khẩu ASCII luôn đăng nhập được ("trừ nhập
+  dấu"). Tests trong `AccountRulesTests`.
 - Admin quản lý tài khoản tại `/quan-ly`; seed lần đầu `admin / stp2026`
   (đổi ngay). Mọi thao tác admin ghi `AuditLogs`.
 - Link cố định duy nhất: `https://mangle-tastiness-french.ngrok-free.dev`
@@ -94,4 +100,4 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   StpApiService`; không chạy `dotnet run` tay song song với service.
   **`dotnet test` cũng phải chạy khi service đã dừng** (service khoá exe/DLL
   của Stp.Api → MSB3021/MSB3027).
-- Chi tiết: `docs/phan-tich-ux-trich-yeu.md` mục 8.7, 8.8, 8.9.
+- Chi tiết: `docs/phan-tich-ux-trich-yeu.md` mục 8.7, 8.8, 8.9, 8.10.

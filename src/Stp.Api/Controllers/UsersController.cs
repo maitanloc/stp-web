@@ -52,9 +52,9 @@ public sealed class UsersController : ControllerBase
     public async Task<ActionResult<UserAccountResponse>> Create(
         [FromBody] CreateUserRequest? request)
     {
-        var username = (request?.Username ?? string.Empty).Trim();
-        var displayName = (request?.DisplayName ?? string.Empty).Trim();
-        var password = request?.Password ?? string.Empty;
+        var username = AccountRules.NormalizeInput((request?.Username ?? string.Empty).Trim());
+        var displayName = AccountRules.NormalizeInput((request?.DisplayName ?? string.Empty).Trim());
+        var password = AccountRules.NormalizeInput(request?.Password ?? string.Empty);
         var role = (request?.Role ?? string.Empty).Trim();
 
         var errors = new List<string>();
@@ -206,7 +206,7 @@ public sealed class UsersController : ControllerBase
         Guid id,
         [FromBody] ResetPasswordRequest? request)
     {
-        var password = request?.Password ?? string.Empty;
+        var password = AccountRules.NormalizeInput(request?.Password ?? string.Empty);
         var errors = AccountRules.ValidatePassword(password);
         if (errors.Count > 0)
         {

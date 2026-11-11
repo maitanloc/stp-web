@@ -3,6 +3,7 @@ import { nextTick, ref } from 'vue'
 import { FileSpreadsheet, FolderOpen, RefreshCw, ShieldCheck, Users } from '@lucide/vue'
 import { errorMessage } from '../lib/errors'
 import { loginTeamIdentity, registerTeamIdentity } from '../composables/useTeamIdentity'
+import PasswordField from './PasswordField.vue'
 
 /**
  * "Cuốn hồ sơ" ra vào hệ thống (yêu cầu 11/11/2026):
@@ -138,12 +139,10 @@ function openLogin(): void {
               </label>
               <label>
                 <span>Mật khẩu</span>
-                <input
+                <PasswordField
                   v-model="loginPassword"
-                  type="password"
-                  maxlength="128"
-                  autocomplete="current-password"
                   placeholder="Mật khẩu của bạn"
+                  autocomplete="current-password"
                 />
               </label>
               <p v-if="loginError" class="form-error">{{ loginError }}</p>
@@ -187,12 +186,10 @@ function openLogin(): void {
               </label>
               <label>
                 <span>Mật khẩu</span>
-                <input
+                <PasswordField
                   v-model="regPassword"
-                  type="password"
-                  maxlength="128"
+                  placeholder="Tối thiểu 6 ký tự — chữ không dấu, số"
                   autocomplete="new-password"
-                  placeholder="Tối thiểu 6 ký tự"
                 />
               </label>
               <p v-if="regError" class="form-error">{{ regError }}</p>

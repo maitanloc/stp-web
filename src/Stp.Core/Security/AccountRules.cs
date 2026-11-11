@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Stp.Core.Security;
@@ -17,6 +18,14 @@ public static partial class AccountRules
     public const int MaxPassword = 128;
     public const int MinDisplayName = 2;
     public const int MaxDisplayName = 100;
+
+    /// <summary>
+    /// Chuẩn hoá Unicode NFC cho tên đăng nhập/mật khẩu trước khi kiểm tra và
+    /// hash: bàn phím iOS/macOS/bộ gõ có thể xuất dấu ở dạng ghép (e + dấu sắc
+    /// thành 2 ký tự) trong khi nhìn không khác dạng dựng sẵn — không chuẩn hoá
+    /// thì hai lúc gõ ra hai chuỗi byte khác nhau và đăng nhập tự dưng sai.
+    /// </summary>
+    public static string NormalizeInput(string value) => value.Normalize(NormalizationForm.FormC);
 
     /// <summary>Username chỉ chữ/số, dấu chấm, gạch nối — dễ gõ, tránh rắc rối dấu tiếng Việt khi đăng nhập.</summary>
     [GeneratedRegex("^[a-zA-Z0-9._-]+$")]
@@ -53,6 +62,15 @@ public static partial class AccountRules
         else if (value.Length > MaxPassword)
         {
             errors.Add($"Mật khẩu tối đa {MaxPassword} ký tự.");
+        }
+        else if (value.Any(static character => character > 127))
+        {
+            // Chặn mật khẩu có dấu tiếng Việt ngay từ lúc tạo: bộ gõ Telex/VNI
+            // biến chữ thường thành có dấu ngay khi gõ (vd "her" → "hẻ"), và
+            // mỗi bàn phím xuất dấu một kiểu — đăng nhập sau này dễ sai không
+            // cách nào hiểu được. Mật khẩu chỉ dùng chữ không dấu, số, ký tự
+            // đặc biệt; nhập bằng bộ gõ tiếng Anh (thanh En trên taskbar).
+            errors.Add("Mật khẩu chỉ dùng chữ không dấu, số và ký tự đặc biệt — tắt bộ gõ tiếng Việt (Telex/VNI) khi nhập mật khẩu.");
         }
 
         return errors;

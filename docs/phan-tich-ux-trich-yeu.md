@@ -629,3 +629,35 @@ badge tần suất)** của mục 3 — nên làm liền nhau một đợt.
 - Lưu ý vận hành: `dotnet test` phải chạy khi **service đã dừng** — service
   đang chạy khoá `Stp.Api.dll` khiến build test văng MSB3021/MSB3027 (không
   phải lỗi code).
+
+### 8.10 Nút con mắt mật khẩu + luật "mật khẩu không dấu" (2026-11-11, vòng 3)
+
+- **Component `PasswordField.vue`**: ô mật khẩu + nút con mắt ở mép phải. Mặc
+  định mắt NHẮM (SVG mí mắt cong + 3 mi, input `type=password`); bấm nút thì
+  mắt MỞ RA như mắt người — hình mắt dựng dần từ phẳng lên tròn
+  (`scaleY 0.1 → 1`, cubic-bezier `(0.3, 0.7, 0.35, 1.25)` có độ nảy nhẹ cuối
+  đường, opacity 0→1), mi + mí mờ dần và dịch xuống như x mí mắt; mật khẩu đổi
+  sang `type=text` hiện chữ thường. Bấm lần nữa mắt nhắm lại. Input đặt
+  `autocapitalize/autocorrect/spellcheck = off` chống bộ gõ điện thoại phá
+  mật khẩu. Gắn cả 2 mặt AuthGate (Đăng nhập autocomplete
+  `current-password`, Đăng ký `new-password` + placeholder nhắc "chữ không
+  dấu, số").
+- **Chuẩn hoá NFC** (`AccountRules.NormalizeInput`, `FormC`): áp ở login,
+  register (AuthController) và tạo tài khoản/đặt lại mật khẩu
+  (UsersController) TRƯỚC khi validate + hash. Bàn phím iOS/macOS/bộ gõ xuất
+  dấu dạng ghép (e + dấu sắc = 2 ký tự) nhìn không khác dạng dựng sẵn nhưng
+  là chuỗi byte khác — không chuẩn hoá thì mật khẩu đăng ký ở máy này vào
+  được, máy khác thì không.
+- **Chặn mật khẩu có dấu ngay từ lúc tạo** (`ValidatePassword`): mật khẩu có
+  ký tự > 127 bị trả 400 kèm thông báo "tắt bộ gõ tiếng Việt (Telex/VNI)".
+  Lý do: Telex/VNI biến chữ thường thành có dấu ngay khi gõ (vd "her" →
+  "hẻ") và mỗi bàn phím xuất dấu một kiểu — không chặn thì mật khẩu lưu hỏng
+  không cách nào hiểu được. "Đảm bảo đăng nhập mật khẩu vào được, trừ nhập
+  dấu" — mật khẩu cũ (ASCII: admin/stp2026, lan/lan2026, loc/loc2026) vào
+  bình thường; NFC normalize còn cứu mật khẩu dấu dạng ghép khi đăng nhập.
+- Tests: +3 case (`Password_WithVietnameseDiacritics_IsRejected`,
+  `Password_WithDecomposedDiacritics_IsRejected`,
+  `NormalizeInput_ComposesDiacritics_ToNfc`) — 82/82. Verify E2E qua tunnel:
+  mắt nhắm mặc định → bấm mở + hiện `stp2026` chữ thường → đăng nhập admin
+  bằng trạng thái mắt mở → vào app; register mật khẩu "mậtkhẩu1" → 400 đúng
+  thông báo.

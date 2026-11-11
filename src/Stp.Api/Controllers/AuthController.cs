@@ -43,8 +43,10 @@ public sealed class AuthController : ControllerBase
     public async Task<ActionResult<AuthIdentityResponse>> Login(
         [FromBody] LoginRequest? request)
     {
-        var username = (request?.Username ?? string.Empty).Trim();
-        var password = request?.Password ?? string.Empty;
+        // Chuẩn hoá NFC trước khi so/hash: khác kiểu gõ dấu (ghép/dựng sẵn)
+        // vẫn ra cùng một chuỗi byte, mật khẩu vào được ổn định mọi máy.
+        var username = AccountRules.NormalizeInput((request?.Username ?? string.Empty).Trim());
+        var password = AccountRules.NormalizeInput(request?.Password ?? string.Empty);
 
         if (username.Length == 0 || password.Length == 0)
         {
@@ -175,9 +177,11 @@ public sealed class AuthController : ControllerBase
             });
         }
 
-        var username = (request?.Username ?? string.Empty).Trim();
-        var displayName = (request?.DisplayName ?? string.Empty).Trim();
-        var password = request?.Password ?? string.Empty;
+        // NFC + trim trước khi validate — cùng luật với đăng nhập để tránh
+        // "đăng ký kiểu này, đăng nhập kiểu khác".
+        var username = AccountRules.NormalizeInput((request?.Username ?? string.Empty).Trim());
+        var displayName = AccountRules.NormalizeInput((request?.DisplayName ?? string.Empty).Trim());
+        var password = AccountRules.NormalizeInput(request?.Password ?? string.Empty);
 
         var errors = new[]
         {

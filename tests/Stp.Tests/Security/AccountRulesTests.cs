@@ -53,6 +53,30 @@ public sealed class AccountRulesTests
     }
 
     [Fact]
+    public void Password_WithVietnameseDiacritics_IsRejected()
+    {
+        // Bộ gõ Telex/VNI biến chữ thường thành có dấu ngay khi gõ — chặn luôn
+        // lúc tạo để mật khẩu sau này luôn đăng nhập được bằng bàn phím tiếng Anh.
+        Assert.NotEmpty(AccountRules.ValidatePassword("mậtkhẩu"));
+    }
+
+    [Fact]
+    public void Password_WithDecomposedDiacritics_IsRejected()
+    {
+        // Dạng ghép (e + dấu sắc = 2 ký tự) nhìn không khác dạng dựng sẵn nhưng
+        // là chuỗi byte khác — cũng phải bị chặn, không trôi qua validate.
+        Assert.NotEmpty(AccountRules.ValidatePassword("ca\u0301"));
+    }
+
+    [Fact]
+    public void NormalizeInput_ComposesDiacritics_ToNfc()
+    {
+        // "ca" + dấu sắc ghép (2 ký tự) phải chuẩn hoá thành "cá" dựng sẵn —
+        // cùng chuỗi byte với lúc người dùng gõ ở máy khác.
+        Assert.Equal("cá", AccountRules.NormalizeInput("ca\u0301"));
+    }
+
+    [Fact]
     public void DisplayName_SingleChar_IsRejected()
     {
         Assert.NotEmpty(AccountRules.ValidateDisplayName("L"));
