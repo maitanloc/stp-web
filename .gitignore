@@ -43,3 +43,6 @@ Thumbs.db
 
 # SPA build output (target CopySpaDistToWwwroot sinh lai tu Stp.Web/dist)
 src/Stp.Api/wwwroot/
+
+# Windows service wrapper (WinSW) + logs — chỉ giữ trên máy, không commit
+service/

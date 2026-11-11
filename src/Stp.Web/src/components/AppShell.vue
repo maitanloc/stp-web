@@ -13,11 +13,13 @@ import {
   RefreshCw,
   ShieldCheck,
   Sun,
+  Users,
   Wrench,
   X,
 } from '@lucide/vue'
 import { request } from '../api/client'
 import type { HealthResponse } from '../api/types'
+import { initTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
 import { useTheme } from '../composables/useTheme'
 
 interface NavItem {
@@ -49,7 +51,7 @@ function toggleLargeText(): void {
   }
 }
 
-const sections: NavSection[] = [
+const sections = computed<NavSection[]>(() => [
   {
     label: 'Quy trình',
     items: [
@@ -66,9 +68,15 @@ const sections: NavSection[] = [
   },
   {
     label: 'Hệ thống',
-    items: [{ label: 'Không gian nâng cao', to: '/nang-cao', icon: Wrench }],
+    items: [
+      // Mục Quản lý tài khoản chỉ hiện cho quản trị viên đã đăng nhập.
+      ...(teamIdentity.value?.role === 'admin'
+        ? [{ label: 'Quản lý tài khoản', to: '/quan-ly', icon: Users }]
+        : []),
+      { label: 'Không gian nâng cao', to: '/nang-cao', icon: Wrench },
+    ],
   },
-]
+])
 
 const pageTitle = computed(() => String(route.meta.title ?? 'STP Archive'))
 const pageSubtitle = computed(() => String(route.meta.subtitle ?? ''))
@@ -89,6 +97,7 @@ async function checkHealth(): Promise<void> {
 
 onMounted(() => {
   void checkHealth()
+  void initTeamIdentity()
   healthTimer = window.setInterval(() => void checkHealth(), 60_000)
   try {
     largeText.value = localStorage.getItem('stp.largeText') === '1'

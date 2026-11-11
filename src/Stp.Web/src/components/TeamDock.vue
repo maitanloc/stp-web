@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { getUserName, request } from '../api/client'
+import { initTeamIdentity, logoutTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
 import type { ActivityEventResponse, ChatMessageResponse } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { actionLabel, clockTime, colorForName, initialsFor, relativeTime } from '../lib/team'
 import { pingPresence, startTeamPresence, teamOnline } from '../composables/useTeamPresence'
 import { useToast } from '../composables/useToast'
+import LoginModal from './LoginModal.vue'
 import UserNameModal from './UserNameModal.vue'
 
 // Nhịp dò: chat 3 giây khi mở, 12 giây khi thu gọn (vẫn đếm tin chưa đọc);
@@ -15,12 +18,16 @@ const CHAT_HIDDEN_MS = 12000
 const ACTIVITY_MS = 12000
 
 const toast = useToast()
+const router = useRouter()
 
 const open = ref(false)
 const tab = ref<'chat' | 'activity'>('chat')
 
-const userName = ref<string | null>(null)
+const storedName = ref<string | null>(null)
+const userName = computed(() => teamIdentity.value?.displayName ?? storedName.value)
 const nameModalOpen = ref(false)
+const loginModalOpen = ref(false)
+const accountMenuOpen = ref(false)
 
 const messages = ref<ChatMessageResponse[]>([])
 const activities = ref<ActivityEventResponse[]>([])
@@ -116,16 +123,47 @@ function onModalClosed(): void {
 }
 
 function saveName(name: string): void {
-  userName.value = name
+  storedName.value = name
   nameModalOpen.value = false
   void pingPresence()
   void fetchChat()
   toast.success(`Đã dùng tên "${name}"`)
 }
 
+function onLogged(displayName: string): void {
+  loginModalOpen.value = false
+  accountMenuOpen.value = false
+  void pingPresence()
+  void fetchChat()
+  toast.success(`Xin chào ${displayName}!`)
+}
+
+async function doLogout(): Promise<void> {
+  accountMenuOpen.value = false
+  await logoutTeamIdentity()
+  void pingPresence()
+  void fetchChat()
+  toast.success('Đã đăng xuất')
+  if (!userName.value) {
+    nameModalOpen.value = true
+  }
+}
+
+function goAdmin(): void {
+  accountMenuOpen.value = false
+  void router.push('/quan-ly')
+}
+
 function onDocumentKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && open.value && !nameModalOpen.value) {
-    open.value = false
+  if (event.key === 'Escape') {
+    accountMenuOpen.value = false
+    if (loginModalOpen.value) {
+      loginModalOpen.value = false
+      return
+    }
+    if (open.value && !nameModalOpen.value) {
+      open.value = false
+    }
   }
 }
 
@@ -138,10 +176,7 @@ function restartChatTimer(): void {
 }
 
 onMounted(() => {
-  userName.value = getUserName()
-  if (!userName.value) {
-    nameModalOpen.value = true
-  }
+  storedName.value = getUserName()
   startTeamPresence()
   void fetchChat()
   void fetchActivity()
@@ -150,6 +185,17 @@ onMounted(() => {
     if (open.value) void fetchActivity()
   }, ACTIVITY_MS)
   window.addEventListener('keydown', onDocumentKeydown)
+  // Hỏi cookie phiên: có tài khoản nhóm thì presence/chat gắn ngay; không thì
+  // khuyến khích khai tên như giai đoạn đầu.
+  void initTeamIdentity().then((identity) => {
+    if (identity) {
+      void pingPresence()
+      return
+    }
+    if (!storedName.value) {
+      nameModalOpen.value = true
+    }
+  })
 })
 
 onUnmounted(() => {
@@ -181,11 +227,60 @@ watch(tab, (value) => {
           </span>
         </div>
         <div class="head-tools">
-          <button type="button" class="tool" title="Đổi tên hiển thị" @click="nameModalOpen = true">
-            <span class="tool-avatar" :style="userName ? avatarStyle(userName) : {}">
-              {{ userName ? initialsFor(userName) : '?' }}
-            </span>
-          </button>
+          <template v-if="teamIdentity">
+            <div class="account-wrap">
+              <button
+                type="button"
+                class="tool"
+                :title="teamIdentity.displayName + ' · ' + (teamIdentity.role === 'admin' ? 'Quản trị' : 'Thành viên')"
+                @click="accountMenuOpen = !accountMenuOpen"
+              >
+                <span class="tool-avatar" :style="avatarStyle(teamIdentity.displayName)">
+                  {{ initialsFor(teamIdentity.displayName) }}
+                </span>
+              </button>
+              <div v-if="accountMenuOpen" class="account-menu">
+                <div class="account-head">
+                  <span class="avatar" :style="avatarStyle(teamIdentity.displayName)">
+                    {{ initialsFor(teamIdentity.displayName) }}
+                  </span>
+                  <div class="account-info">
+                    <span class="account-name">{{ teamIdentity.displayName }}</span>
+                    <span class="account-user">
+                      @{{ teamIdentity.username }} ·
+                      {{ teamIdentity.role === 'admin' ? 'Quản trị' : 'Thành viên' }}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  v-if="teamIdentity.role === 'admin'"
+                  type="button"
+                  class="account-item"
+                  @click="goAdmin()"
+                >
+                  Quản lý tài khoản
+                </button>
+                <button type="button" class="account-item danger" @click="doLogout()">
+                  Đăng xuất
+                </button>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <button type="button" class="tool" title="Đổi tên hiển thị" @click="nameModalOpen = true">
+              <span class="tool-avatar" :style="userName ? avatarStyle(userName) : {}">
+                {{ userName ? initialsFor(userName) : '?' }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="tool slim login-hint"
+              title="Đăng nhập bằng tài khoản nhóm"
+              @click="loginModalOpen = true"
+            >
+              Đăng nhập
+            </button>
+          </template>
           <button type="button" class="tool slim" title="Thu gọn" @click="open = false">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
               <path d="M6 9l6 6 6-6" />
@@ -303,6 +398,7 @@ watch(tab, (value) => {
     </button>
 
     <UserNameModal :open="nameModalOpen" @saved="saveName" @closed="onModalClosed" />
+    <LoginModal :open="loginModalOpen" @logged="onLogged" @closed="loginModalOpen = false" />
   </div>
 </template>
 
@@ -441,6 +537,77 @@ watch(tab, (value) => {
   color: #fff;
   font-size: 10px;
   font-weight: 700;
+}
+
+.login-hint {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ===== Menu tài khoản ===== */
+.account-wrap {
+  position: relative;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 244px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 70;
+}
+
+.account-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.account-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.account-user {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.account-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.account-item:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.account-item.danger:hover {
+  color: var(--danger);
 }
 
 .dock-tabs {

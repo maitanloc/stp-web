@@ -1,0 +1,154 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Stp.Contracts;
+using Stp.Core.Domain;
+using Stp.Infrastructure.Persistence;
+using Stp.Api.Services;
+
+namespace Stp.Api.Controllers;
+
+/// <summary>
+/// Đăng nhập/đăng xuất/danh tính cho tài khoản nhóm (yêu cầu 11/11/2026: mỗi người
+/// một tài khoản, quản lý an toàn hơn so với tự khai tên).
+/// Phiên dựa cookie HttpOnly scheme "StpTeam" — client không chạm được token,
+/// tắt trình duyệt mở lại vẫn còn (sliding 30 ngày).
+/// Người chưa đăng nhập vẫn dùng app như cũ (tự khai tên) cho tới khi bật
+/// cấu hình StpTeam:RequireLogin — không gián đoạn phiên đang nhập liệu.
+/// </summary>
+[ApiController]
+[Route("api/auth")]
+public sealed class AuthController : ControllerBase
+{
+    private readonly IDbContextFactory<StpDbContext> _factory;
+    private readonly TeamAudit _audit;
+
+    private readonly PasswordHasher<StpUser> _hasher = new();
+
+    public AuthController(
+        IDbContextFactory<StpDbContext> factory,
+        TeamAudit audit)
+    {
+        _factory = factory;
+        _audit = audit;
+    }
+
+    /// <summary>Đăng nhập: kiểm tra username + password, cấp cookie phiên 30 ngày (sliding).</summary>
+    [HttpPost("login")]
+    public async Task<ActionResult<AuthIdentityResponse>> Login(
+        [FromBody] LoginRequest? request)
+    {
+        var username = (request?.Username ?? string.Empty).Trim();
+        var password = request?.Password ?? string.Empty;
+
+        if (username.Length == 0 || password.Length == 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Thiếu thông tin",
+                Detail = "Cần cả tên đăng nhập và mật khẩu.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        using var db = _factory.CreateDbContext();
+        var user = await db.StpUsers
+            .SingleOrDefaultAsync(candidate => candidate.Username == username);
+
+        // Thông báo chung cho cả hai trường hợp để không dò được tên nào tồn tại.
+        var invalidProblem = new ProblemDetails
+        {
+            Title = "Không đăng nhập được",
+            Detail = "Tên đăng nhập hoặc mật khẩu chưa đúng.",
+            Status = StatusCodes.Status401Unauthorized
+        };
+
+        if (user is null)
+        {
+            return Unauthorized(invalidProblem);
+        }
+
+        if (!user.IsActive)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Title = "Tài khoản đã ngừng sử dụng",
+                Detail = "Tài khoản này bị quản trị ngừng kích hoạt. Liên hệ quản trị để mở lại.",
+                Status = StatusCodes.Status403Forbidden
+            });
+        }
+
+        var verification = _hasher.VerifyHashedPassword(user, user.PasswordHash, password);
+        if (verification == PasswordVerificationResult.Failed)
+        {
+            return Unauthorized(invalidProblem);
+        }
+
+        // Thuật toán hash mặc định đổi (ví dụ sau nâng cấp .NET) thì làm mới hash ngay.
+        if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+        {
+            user.PasswordHash = _hasher.HashPassword(user, password);
+        }
+
+        user.LastLoginAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.DisplayName),
+            new(StpTeamIdentity.ClaimUsername, user.Username),
+            new(ClaimTypes.Role, user.Role)
+        };
+
+        var principal = new ClaimsPrincipal(
+            new ClaimsIdentity(claims, StpTeamIdentity.SchemeName));
+
+        await HttpContext.SignInAsync(
+            StpTeamIdentity.SchemeName,
+            principal,
+            new AuthenticationProperties
+            {
+                IsPersistent = true,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30)
+            });
+
+        _audit.Write(user.DisplayName, "auth.login", "StpUser", user.Id.ToString(), $"Đăng nhập thành công ({user.Username})");
+
+        return Ok(new AuthIdentityResponse(user.Id, user.Username, user.DisplayName, user.Role));
+    }
+
+    /// <summary>Danh tính hiện tại; chưa đăng nhập thì 401 — client dựa đó hiện màn hình đăng nhập.</summary>
+    [HttpGet("me")]
+    public async Task<ActionResult<AuthIdentityResponse>> Me()
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Title = "Chưa đăng nhập",
+                Detail = "Đăng nhập để chat, nhật ký và presence gắn đúng tài khoản của bạn.",
+                Status = StatusCodes.Status401Unauthorized
+            });
+        }
+
+        return Ok(new AuthIdentityResponse(identity.Id, identity.Username, identity.DisplayName, identity.Role));
+    }
+
+    /// <summary>Đăng xuất: xoá cookie; luôn trả 204 kể cả khi chưa đăng nhập (vô hại).</summary>
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is not null)
+        {
+            _audit.Write(identity.DisplayName, "auth.logout", "StpUser", identity.Id.ToString(), $"Đăng xuất ({identity.Username})");
+            await HttpContext.SignOutAsync(StpTeamIdentity.SchemeName);
+        }
+
+        return NoContent();
+    }
+}

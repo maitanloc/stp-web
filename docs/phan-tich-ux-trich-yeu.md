@@ -534,5 +534,61 @@ badge tần suất)** của mục 3 — nên làm liền nhau một đợt.
 - Khoá cứng dòng khi 2 người cùng sửa (hiện chỉ banner cảnh báo).
 - Presence in-memory: restart API mất dấu online vài chục giây (các truy vấn
   session/dữ liệu không mất — FileStorage giữ toàn bộ).
-- Tên tự khai chưa phân quyền: ai gõ tên gì thì log ghi tên đó — đủ dùng cho
-  nhóm nội bộ nhỏ, làm quyền thật khi cần.
+- ~~Tên tự khai chưa phân quyền~~ → đã làm tài khoản nhóm thật ngày 11/11,
+  xem mục 8.7.
+
+### 8.7 Tài khoản nhóm (2026-11-11)
+
+- Bảng mới `StpUsers` (migration `AddStpUsers`): `Username` duy nhất (chữ
+  không dấu/số/`._-`, 3–50), `DisplayName` (tiếng Việt tự do), `PasswordHash`
+  (PBKDF2 chuẩn `PasswordHasher<StpUser>` — không bao giờ lưu/trả mật khẩu
+  gốc), `Role` (`admin`/`member`), `IsActive`, `LastLoginAt`.
+- Đăng nhập `/api/auth/login` → cookie `.stp.team` (scheme `StpTeam`,
+  HttpOnly, SameSite Lax, **30 ngày sliding**); `/api/auth/me` trả danh tính,
+  `/api/auth/logout` xoá. JWT developer giữ nguyên — hai hệ song song.
+- **Lưu ý kỹ thuật sống còn**: default authenticate scheme là JWT nên
+  `HttpContext.User` không chứa phiên nhóm. Mọi endpoint đọc identity phải
+  `await StpTeamIdentity.FromAsync(HttpContext)` (tự `AuthenticateAsync` đúng
+  scheme). Endpoint `[Authorize(AuthenticationSchemes = StpTeamIdentity.SchemeName)]`
+  thì middleware tự resolve.
+- **Chống giả danh**: người đã đăng nhập thì chat/presence/audit lấy
+  `DisplayName` từ tài khoản, tên client gửi bị bỏ qua. Verify thật qua
+  tunnel: đăng nhập `lan`, gửi chat kèm actor giả → tin lưu "Lan";
+  member gọi `/api/admin/users` → 403.
+- Admin panel `/quan-ly` (UsersView): tạo tài khoản, sửa tên hiển thị, đổi
+  quyền, ngừng/kích hoạt, đặt lại mật khẩu; mọi thao tác ghi `AuditLogs`
+  (`admin.user-create`, `admin.user-update`, `admin.password-reset`). Guard:
+  router `meta.admin` + `[Authorize(Roles = "admin")]`; chặn tự ngừng kích
+  hoạt và tự hạ quyền của chính mình.
+- Khoá bắt buộc đăng nhập: appsettings `StpTeam:RequireLogin` — mặc định
+  **false** để không gián đoạn ca nhập đang chạy; bật sau khi tạo đủ tài
+  khoản cho anh em. Còn tắt: chưa đăng nhập vẫn dùng tên tự khai như cũ.
+- Seed lần đầu bảng trống: `admin / stp2026` (log khởi động nhắc đổi ngay).
+- Frontend: `LoginModal`, `useTeamIdentity` (`initTeamIdentity` hỏi cookie,
+  đồng bộ DisplayName vào `stp.user.name` để code cũ dùng tiếp), TeamDock có
+  nút Đăng nhập + menu tài khoản (quản lý/đăng xuất); presence ưu tiên
+  displayName tài khoản. Tests: 79/79 (`AccountRulesTests` thêm 11 case).
+
+### 8.8 Link cố định + Windows Service (2026-11-11)
+
+- Pain gốc: link trycloudflare **đổi mỗi lần restart cloudflared** (server-side
+  Cloudflare huỷ quick tunnel), và hệ thống tắt nhầm phải ai đó bật tay.
+- Giải pháp chốt sau khi tra docs chính thức ngrok: free plan tặng 1 **dev
+  domain cố định** — `https://mangle-tastiness-french.ngrok-free.dev` — không
+  đổi khi restart agent/máy. Tra docs cũng xác nhận Cloudflare Zero Trust free
+  cho 1.000 tunnels (phương án domain riêng ~200k/năm vẫn mở nếu sau này cần
+  link đẹp hơn).
+- Hệ thống chạy **Windows Service** (WinSW trong `service/`, chỉ để trên máy):
+  `StpApiService` (API cổng 5215) + `StpNgrokService` (tunnel) — Automatic khi
+  máy khởi động, gãy tự restart sau 10–15 giây. Kết nối SQL: `NT AUTHORITY\SYSTEM`
+  được grant `db_owner` StpArchive (service chạy LocalSystem, Windows Auth).
+- Bẫy đã gặp: Defender gắn nhãn ngrok "potentially unwanted software" → phải
+  exclusion path + process trước khi tải (Expand-Archive văng lỗi). `dl.ngrok.com`
+  không kết nối được từ mạng này — tải từ equinox CDN. `dotnet run` dưới SYSTEM
+  lần đầu chậm (first-run banner) — đợi ~40 giây mới nghe cổng.
+- Client fetch thêm header `ngrok-skip-browser-warning` (API không dính trang
+  cảnh báo); lần vào đầu bằng trình duyệt hiện 1 trang warning ngrok — nhấn
+  "Visit Site" là qua (hạn chế free plan, chấp nhận theo chốt).
+- trycloudflare đã ngừng dùng — **chỉ còn 1 link duy nhất**. Quy trình update
+  code: `Stop-Service StpApiService` → build → `Start-Service StpApiService`;
+  không chạy `dotnet run` tay song song với service (đụng cổng 5215).

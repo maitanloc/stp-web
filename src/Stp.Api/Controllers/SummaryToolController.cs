@@ -213,7 +213,7 @@ public sealed class SummaryToolController : ControllerBase
                 request.OnlyRowNumbers);
 
             _audit.Write(
-                TeamAudit.ActorFromHeader(Request),
+                await TeamAudit.ActorFromAsync(HttpContext),
                 "export",
                 "SummarySession",
                 sessionId.ToString(),
@@ -315,7 +315,7 @@ public sealed class SummaryToolController : ControllerBase
                 result.NormalizedRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
             _audit.Write(
-                TeamAudit.ActorFromHeader(Request),
+                await TeamAudit.ActorFromAsync(HttpContext),
                 "export-filtered",
                 "SummarySession",
                 sessionId.ToString(),
@@ -427,7 +427,7 @@ public sealed class SummaryToolController : ControllerBase
                 Uri.EscapeDataString(string.Join(" | ", result.Warnings));
 
             _audit.Write(
-                TeamAudit.ActorFromHeader(Request),
+                await TeamAudit.ActorFromAsync(HttpContext),
                 "export-print",
                 "SummarySession",
                 sessionId.ToString(),

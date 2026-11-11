@@ -32,7 +32,34 @@ function userNameHeader(): Headers {
     // không văng lỗi, backend Uri.UnescapeDataString() giải lại.
     headers.set('X-Stp-User', encodeURIComponent(name))
   }
+  // ngrok free hiện trang cảnh báo cho request của trình duyệt; header này
+  // bỏ qua cảnh báo cho mọi fetch của app (link duy nhất của nhóm qua ngrok).
+  headers.set('ngrok-skip-browser-warning', '1')
   return headers
+}
+
+export interface TeamIdentity {
+  id: string
+  username: string
+  displayName: string
+  role: 'admin' | 'member'
+}
+
+/** Danh tính hiện tại theo cookie phiên; null khi chưa đăng nhập / cookie hết hạn. */
+export async function fetchTeamIdentity(): Promise<TeamIdentity | null> {
+  try {
+    return await request<TeamIdentity>('/api/auth/me')
+  } catch {
+    return null
+  }
+}
+
+export async function loginTeamAccount(username: string, password: string): Promise<TeamIdentity> {
+  return request<TeamIdentity>('/api/auth/login', { method: 'POST', body: { username, password } })
+}
+
+export async function logoutTeamAccount(): Promise<void> {
+  await request('/api/auth/logout', { method: 'POST' })
 }
 
 export class ApiError extends Error {

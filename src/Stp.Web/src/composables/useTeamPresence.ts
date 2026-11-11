@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { getUserName, request } from '../api/client'
+import { teamIdentity } from './useTeamIdentity'
 import type {
   PresenceEntryResponse,
   PresencePingResponse,
@@ -47,7 +48,8 @@ function whereLabel(): string {
 }
 
 export async function pingPresence(): Promise<void> {
-  const actor = getUserName()
+  // Đã đăng nhập thì presence gắn đúng tài khoản; chưa thì dùng tên tự khai như cũ.
+  const actor = teamIdentity.value?.displayName ?? getUserName()
   if (!actor) {
     // Chưa khai tên: chỉ xoá dấu cũ, không ping (server cũng không biết ghi cho ai).
     teamOnline.value = []

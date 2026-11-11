@@ -100,7 +100,7 @@ public sealed class SyncController : ControllerBase
         }
 
         _audit.Write(
-            TeamAudit.ActorFromHeader(Request),
+            await TeamAudit.ActorFromAsync(HttpContext),
             "sync",
             "SyncSession",
             outcome.SyncSessionId.ToString(),

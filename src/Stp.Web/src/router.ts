@@ -1,5 +1,13 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppShell from './components/AppShell.vue'
+import { initTeamIdentity, teamIdentity } from './composables/useTeamIdentity'
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    /** Route chỉ dành cho quản trị viên (tài khoản nhóm role admin). */
+    admin?: boolean
+  }
+}
 
 const routes: RouteRecordRaw[] = [
   {
@@ -82,6 +90,16 @@ const routes: RouteRecordRaw[] = [
           subtitle: 'Macro, job, đồng bộ và kiểm tra file dành cho kỹ thuật viên',
         },
       },
+      {
+        path: 'quan-ly',
+        name: 'users',
+        component: () => import('./views/UsersView.vue'),
+        meta: {
+          title: 'Quản lý tài khoản',
+          subtitle: 'Tạo và quản lý tài khoản thành viên nhóm',
+          admin: true,
+        },
+      },
     ],
   },
   {
@@ -115,6 +133,16 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
   scrollBehavior: () => ({ top: 0 }),
+})
+
+// Route admin: kiểm tra quyền từ cookie phiên (không chặn route thường).
+router.beforeEach(async (to) => {
+  if (!to.meta.admin) return true
+  await initTeamIdentity()
+  if (teamIdentity.value?.role !== 'admin') {
+    return { name: 'dashboard' }
+  }
+  return true
 })
 
 export default router

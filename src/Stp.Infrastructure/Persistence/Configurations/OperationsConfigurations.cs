@@ -177,3 +177,20 @@ public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMess
         builder.HasIndex(x => x.CreatedAt);
     }
 }
+
+public sealed class StpUserConfiguration : IEntityTypeConfiguration<StpUser>
+{
+    public void Configure(EntityTypeBuilder<StpUser> builder)
+    {
+        builder.ToTable("StpUsers");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Username).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.DisplayName).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Role).HasMaxLength(20).IsRequired();
+
+        builder.HasIndex(x => x.Username).IsUnique();
+        builder.HasIndex(x => x.IsActive);
+    }
+}

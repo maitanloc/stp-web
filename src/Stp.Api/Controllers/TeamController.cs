@@ -12,9 +12,9 @@ namespace Stp.Api.Controllers;
 ///   • Chat tổng — gửi/đọc tin nhắn nhóm, lưu ChatMessages để vào lại vẫn đọc.
 ///   • Hoạt động — nhật ký ai vừa làm gì (AuditLogs, ghi tại chỗ xuất/đồng bộ).
 ///   • Presence — ai online + ai đang sửa dòng nào (heartbeat, tự tàn ngắn hạn).
-/// Người dùng tự khai tên phía client (header X-Stp-User / thân request),
-/// chưa có hệ thống tài khoản ở giai đoạn này. Endpoint mở như các endpoint
-/// công cụ trích yếu khác.
+/// Từ 11/11/2026: người đã đăng nhập (cookie StpTeam) thì mọi hành vi gắn
+/// DisplayName từ tài khoản — không nhận tên gửi trong request nữa; người
+/// chưa đăng nhập vẫn tự khai tên như giai đoạn đầu (xem AuthController).
 /// </summary>
 [ApiController]
 [Route("api/team")]
@@ -60,7 +60,8 @@ public sealed class TeamController : ControllerBase
     public async Task<ActionResult<ChatMessagesResponse>> PostChat(
         [FromBody] ChatPostRequest? request)
     {
-        var actor = (request?.Actor ?? string.Empty).Trim();
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        var actor = identity?.DisplayName ?? (request?.Actor ?? string.Empty).Trim();
         var body = (request?.Body ?? string.Empty).Trim();
 
         if (actor.Length == 0)
@@ -124,10 +125,11 @@ public sealed class TeamController : ControllerBase
     /// Nhịp client: 8 giây khi đang sửa dòng, 20 giây khi chỉ đứng xem.
     /// </summary>
     [HttpPost("presence")]
-    public ActionResult<PresencePingResponse> Presence(
+    public async Task<ActionResult<PresencePingResponse>> Presence(
         [FromBody] PresencePingRequest? request)
     {
-        var actor = (request?.Actor ?? string.Empty).Trim();
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        var actor = identity?.DisplayName ?? (request?.Actor ?? string.Empty).Trim();
         var where = (request?.Where ?? string.Empty).Trim();
         if (actor.Length > MaxActor)
         {

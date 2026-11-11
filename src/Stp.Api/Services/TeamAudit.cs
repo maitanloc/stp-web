@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Stp.Core.Domain;
 using Stp.Infrastructure.Persistence;
@@ -22,29 +23,44 @@ public sealed class TeamAudit
         _logger = logger;
     }
 
+    /// <summary>
+    /// Ai ghi log: ưu tiên tài khoản đã đăng nhập (cookie StpTeam — không thể giả danh),
+    /// thiếu thì lùi về tên tự khai theo header <c>X-Stp-User</c>, cuối cùng "Không rõ".
+    /// </summary>
+    public static async Task<string> ActorFromAsync(HttpContext context)
+    {
+        var identity = await StpTeamIdentity.FromAsync(context);
+        if (identity is not null)
+        {
+            return Truncate(identity.DisplayName, 100);
+        }
+
+        return ActorFromHeader(context.Request);
+    }
+
     /// <summary>Tên người gửi theo header <c>X-Stp-User</c>; thiếu thì "Không rõ".</summary>
     public static string ActorFromHeader(HttpRequest request)
     {
-        var candidates = request.Headers.TryGetValue("X-Stp-User", out var headerValue)
-            ? (string[]?)headerValue.ToArray() ?? Array.Empty<string>()
-            : Array.Empty<string>();
-        var actor = candidates
-            .Select(DecodeHeader)
-            .Select(value => value.Trim())
-            .FirstOrDefault(value => value.Length > 0) ?? string.Empty;
+        var actor = request.Headers.TryGetValue("X-Stp-User", out var headerValue)
+            ? headerValue
+                .Select(DecodeHeader)
+                .Select(value => value.Trim())
+                .FirstOrDefault(value => value.Length > 0) ?? string.Empty
+            : string.Empty;
         return actor.Length == 0 ? "Không rõ" : Truncate(actor, 100);
     }
 
     /// <summary>Client gửi header dạng encodeURIComponent; giải ngược, lỗi thì giữ nguyên.</summary>
-    private static string DecodeHeader(string value)
+    private static string DecodeHeader(string? value)
     {
+        var text = value ?? string.Empty;
         try
         {
-            return Uri.UnescapeDataString(value);
+            return Uri.UnescapeDataString(text);
         }
         catch (UriFormatException)
         {
-            return value;
+            return text;
         }
     }
 

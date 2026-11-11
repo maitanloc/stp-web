@@ -1,7 +1,12 @@
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Stp.Api.Services;
+using Stp.Core.Domain;
 using Stp.Core.Security;
 using Stp.Infrastructure.Excel;
 using Stp.Infrastructure.Jobs;
@@ -53,8 +58,34 @@ builder.Services
             NameClaimType = "name",
             RoleClaimType = "role"
         };
+    })
+    // Cookie phiên cho tài khoản nhóm nội bộ (scheme "StpTeam") — song song
+    // với JWT developer, hai hệ không đụng nhau.
+    .AddCookie(StpTeamIdentity.SchemeName, options =>
+    {
+        options.Cookie.Name = ".stp.team";
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.ExpireTimeSpan = TimeSpan.FromDays(30);
+        options.SlidingExpiration = true;
+        // Endpoint API: trả 401/403 JSON thẳng, không redirect trang đăng nhập.
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
     });
 builder.Services.AddAuthorization();
+
+// Khoá bắt buộc đăng nhập nhóm — chỉ bật sau khi đã tạo tài khoản cho từng
+// người (appsettings "StpTeam:RequireLogin"). Còn tắt thì ai không có tài
+// khoản vẫn dùng app như cũ (tự khai tên), không gián đoạn người đang nhập liệu.
+var requireTeamLogin = builder.Configuration.GetValue<bool>("StpTeam:RequireLogin");
 
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
 {
@@ -102,6 +133,39 @@ if (File.Exists(spaIndex))
 
 app.UseCors("Spa");
 app.UseAuthentication();
+if (requireTeamLogin)
+{
+    // Mọi API trừ auth/health/dev phải có phiên (cookie StpTeam hoặc JWT dev).
+    app.Use(async (context, next) =>
+    {
+        var path = context.Request.Path;
+        var bypass =
+            path.StartsWithSegments("/api/auth")
+            || path.StartsWithSegments("/api/health")
+            || path.StartsWithSegments("/api/dev");
+        var authenticated = context.User.Identity?.IsAuthenticated == true;
+        if (!authenticated)
+        {
+            // Scheme mặc định là JWT dev; người dùng nhóm có phiên cookie phải
+            // authenticate riêng đúng scheme StpTeam.
+            var teamResult = await context.AuthenticateAsync(StpTeamIdentity.SchemeName);
+            authenticated = teamResult.Succeeded;
+        }
+        if (path.StartsWithSegments("/api") && !bypass && !authenticated)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                title = "Cần đăng nhập",
+                detail = "Phiên đăng nhập đã hết hoặc chưa đăng nhập — đăng nhập lại để tiếp tục.",
+                status = 401
+            });
+            return;
+        }
+
+        await next();
+    });
+}
 app.UseAuthorization();
 app.MapControllers();
 
@@ -149,6 +213,37 @@ app.MapFallback(context =>
     context.Response.ContentType = "text/html; charset=utf-8";
     return context.Response.SendFileAsync(spaIndex);
 });
+
+// Seed tài khoản quản trị đầu tiên khi bảng Users còn trống. Mật khẩu mặc định
+// chỉ ghi trong log khởi động — quản trị đổi ngay trong trang Quản lý tài khoản.
+try
+{
+    using var seedDb = app.Services.GetRequiredService<IDbContextFactory<StpDbContext>>().CreateDbContext();
+    if (!await seedDb.StpUsers.AsNoTracking().AnyAsync())
+    {
+        var admin = new StpUser
+        {
+            Id = Guid.NewGuid(),
+            CreatedAt = DateTimeOffset.UtcNow,
+            Username = "admin",
+            DisplayName = "Quản trị",
+            Role = "admin",
+            IsActive = true,
+            PasswordHash = string.Empty
+        };
+        admin.PasswordHash = new PasswordHasher<StpUser>().HashPassword(admin, "stp2026");
+        seedDb.StpUsers.Add(admin);
+        await seedDb.SaveChangesAsync();
+        app.Logger.LogWarning(
+            "Đã tạo tài khoản quản trị mặc định admin / stp2026 — ĐỔI MẬT KHẨU NGAY trong trang Quản lý tài khoản.");
+    }
+}
+catch (Exception seedError)
+{
+    app.Logger.LogWarning(
+        seedError,
+        "Chưa seed được tài khoản quản trị mặc định (bỏ qua, sẽ thử lại lần khởi động sau).");
+}
 
 app.Run();
 

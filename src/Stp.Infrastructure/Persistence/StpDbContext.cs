@@ -42,6 +42,8 @@ public sealed class StpDbContext : DbContext
 
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
 
+    public DbSet<StpUser> StpUsers => Set<StpUser>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

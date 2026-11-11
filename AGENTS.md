@@ -60,3 +60,25 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   nạp lần đầu (23 mục kèm lọc từ khóa giấy tờ `LabelKeywords`); 5 mục rác
   thuật toán bị nhận ra seed đã soft-disable (IsDisabled, còn trong DB);
   count ≤1 là nhiễu (tên người) không nạp. Chạy lại seed idempotent.
+
+## Tài khoản nhóm + link cố định (người dùng chốt 2026-11-11)
+- Mỗi người một tài khoản: bảng `StpUsers` (migration `AddStpUsers`), mật khẩu
+  hash PBKDF2 qua `PasswordHasher<StpUser>`, cookie `.stp.team` scheme
+  `StpTeam` 30 ngày sliding. JWT developer giữ nguyên song song.
+- Default authenticate scheme là JWT → đọc identity nhóm **bắt buộc**
+  `await StpTeamIdentity.FromAsync(HttpContext)`, không đọc `HttpContext.User`
+  trực tiếp (nhầm JWT trống).
+- Người đã đăng nhập: chat/presence/audit ghi DisplayName từ tài khoản, bỏ qua
+  tên client gửi (không giả danh được). Chưa đăng nhập: vẫn tự khai tên như cũ.
+- Khoá bắt buộc đăng nhập: appsettings `StpTeam:RequireLogin` (mặc định false —
+  không gián đoạn ca nhập; bật sau khi tạo đủ tài khoản).
+- Admin quản lý tài khoản tại `/quan-ly`; seed lần đầu `admin / stp2026`
+  (đổi ngay). Mọi thao tác admin ghi `AuditLogs`.
+- Link cố định duy nhất: `https://mangle-tastiness-french.ngrok-free.dev`
+  (ngrok free dev domain — không đổi khi restart; fetch client kèm
+  `ngrok-skip-browser-warning`). trycloudflare đã bỏ.
+- Hệ thống chạy Windows Service (WinSW, `service/` không commit):
+  `StpApiService` + `StpNgrokService` — tự bật khi máy khởi động, gãy tự
+  restart. Update code: `Stop-Service StpApiService` → build → `Start-Service
+  StpApiService`; không chạy `dotnet run` tay song song với service.
+- Chi tiết: `docs/phan-tich-ux-trich-yeu.md` mục 8.7, 8.8.
