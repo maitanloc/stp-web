@@ -1,7 +1,11 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Stp.Contracts;
+using Stp.Core.Domain;
 using Stp.Core.Summary;
 using Stp.Api.Services;
+using Stp.Infrastructure.Persistence;
 
 namespace Stp.Api.Controllers;
 
@@ -20,11 +24,16 @@ public sealed class SummaryToolController : ControllerBase
     private const int MaxSheetNumberLength = 40;
 
     private readonly ISummaryToolService _summary;
+    private readonly IDbContextFactory<StpDbContext> _factory;
     private readonly TeamAudit _audit;
 
-    public SummaryToolController(ISummaryToolService summary, TeamAudit audit)
+    public SummaryToolController(
+        ISummaryToolService summary,
+        IDbContextFactory<StpDbContext> factory,
+        TeamAudit audit)
     {
         _summary = summary;
+        _factory = factory;
         _audit = audit;
     }
 
@@ -336,6 +345,93 @@ public sealed class SummaryToolController : ControllerBase
         {
             return InvalidProblem(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Lưu bản nháp lên server (P0.2 data safety): upsert theo (phiên + người
+    /// dùng), sống qua F5/restart/máy khác — localStorage chỉ là bản nháp tạm.
+    /// </summary>
+    [HttpPut("{sessionId:guid}/draft")]
+    public async Task<IActionResult> SaveDraft(
+        Guid sessionId,
+        [FromBody] SummaryDraftSaveRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || request.Payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return InvalidProblem("Chưa có nội dung bản nháp.");
+        }
+
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        if (actor == "Không rõ")
+        {
+            return InvalidProblem("Chưa khai tên người dùng — không biết lưu bản nháp cho ai.");
+        }
+
+        await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+        var draft = await db.SummaryDrafts.SingleOrDefaultAsync(
+            candidate => candidate.SessionId == sessionId && candidate.UserName == actor,
+            cancellationToken);
+
+        if (draft is null)
+        {
+            draft = new SummaryDraft { SessionId = sessionId, UserName = actor };
+            db.SummaryDrafts.Add(draft);
+        }
+
+        draft.FileName = request.FileName.Trim();
+        draft.SavedAt = DateTimeOffset.UtcNow;
+        draft.PayloadJson = JsonSerializer.Serialize(request.Payload);
+        await db.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
+    /// <summary>Bản nháp đã lưu trên server cho (phiên + người dùng); 204 khi chưa có.</summary>
+    [HttpGet("{sessionId:guid}/draft")]
+    public async Task<IActionResult> GetDraft(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+        var draft = await db.SummaryDrafts
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                candidate => candidate.SessionId == sessionId && candidate.UserName == actor,
+                cancellationToken);
+
+        if (draft is null)
+        {
+            return NoContent();
+        }
+
+        return Ok(new SummaryDraftResponse(
+            draft.FileName,
+            draft.SavedAt,
+            JsonSerializer.Deserialize<JsonElement>(draft.PayloadJson)));
+    }
+
+    /// <summary>Xoá bản nháp trên server (sau khi xuất thành công).</summary>
+    [HttpDelete("{sessionId:guid}/draft")]
+    public async Task<IActionResult> DeleteDraft(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        await using var db = await _factory.CreateDbContextAsync(cancellationToken);
+        var draft = await db.SummaryDrafts.SingleOrDefaultAsync(
+            candidate => candidate.SessionId == sessionId && candidate.UserName == actor,
+            cancellationToken);
+
+        if (draft is not null)
+        {
+            db.SummaryDrafts.Remove(draft);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return NoContent();
     }
 
     /// <summary>Xem trước mức sẵn sàng in theo năm sau khi áp dụng chỉnh sửa hiện tại.</summary>

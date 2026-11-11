@@ -688,6 +688,42 @@ namespace Stp.Infrastructure.Persistence.Migrations
                     b.ToTable("StpUsers", (string)null);
                 });
 
+            modelBuilder.Entity("Stp.Core.Domain.SummaryDraft", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SavedAt");
+
+                    b.HasIndex("SessionId", "UserName")
+                        .IsUnique();
+
+                    b.ToTable("SummaryDrafts", (string)null);
+                });
+
             modelBuilder.Entity("Stp.Core.Domain.SyncChange", b =>
                 {
                     b.Property<Guid>("Id")

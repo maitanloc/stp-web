@@ -250,6 +250,8 @@ interface HistoryEntry {
 const historyEntries = ref<HistoryEntry[]>([])
 
 function rememberSession(sessionId: string, fileName: string): void {
+  // Phiên mới/đổi phiên — trạng thái đồng bộ server của phiên cũ vô nghĩa.
+  lastSyncedEditCount = -1
   try {
     localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify({ sessionId, fileName }))
   } catch {
@@ -1803,30 +1805,37 @@ function draftKey(fileName: string): string {
   return `${DRAFT_PREFIX}${fileName}`
 }
 
+function buildDraftPayload(): DraftPayload | null {
+  const active = session.value
+  if (!active || edits.value.size === 0) return null
+
+  return {
+    fileName: active.fileName,
+    savedAt: new Date().toISOString(),
+    edits: [...edits.value.values()].map((edit) => ({
+      row: edit.row,
+      items: edit.items,
+      summaryText: edit.summaryText,
+      sheetNumber: edit.sheetNumber,
+      documentNumber: edit.documentNumber,
+      numberLabel: edit.numberLabel,
+    })),
+  }
+}
+
 function saveDraft(): void {
   const active = session.value
   if (!active) return
 
   try {
-    if (edits.value.size === 0) {
+    const payload = buildDraftPayload()
+    if (!payload) {
       localStorage.removeItem(draftKey(active.fileName))
       draftSavedAt.value = null
       draftStatus.value = 'idle'
       return
     }
 
-    const payload: DraftPayload = {
-      fileName: active.fileName,
-      savedAt: new Date().toISOString(),
-      edits: [...edits.value.values()].map((edit) => ({
-        row: edit.row,
-        items: edit.items,
-        summaryText: edit.summaryText,
-        sheetNumber: edit.sheetNumber,
-        documentNumber: edit.documentNumber,
-        numberLabel: edit.numberLabel,
-      })),
-    }
     localStorage.setItem(draftKey(active.fileName), JSON.stringify(payload))
     draftSavedAt.value = new Date(payload.savedAt)
     draftStatus.value = 'saved'
@@ -1835,20 +1844,96 @@ function saveDraft(): void {
   }
 }
 
-function restoreDraft(fileName: string): void {
-  try {
-    const raw = localStorage.getItem(draftKey(fileName))
-    if (!raw) return
+/* ===== E1: bản nháp sao lưu server — sống qua F5/restart/máy khác ===== */
 
-    const payload = JSON.parse(raw) as DraftPayload
-    if (!payload.edits || payload.edits.length === 0) {
-      localStorage.removeItem(draftKey(fileName))
+/** Khoảng lặng giữa các lần sửa trước khi đẩy bản nháp lên server (payload lớn). */
+const SERVER_SYNC_DELAY = 8000
+
+let serverDraftTimer: number | undefined
+let serverDraftInFlight = false
+/** Số dòng edit đã đồng bộ lần cuối (-1 = chưa từng) — tránh PUT/DELETE lặp cùng trạng thái. */
+let lastSyncedEditCount = -1
+
+function scheduleServerDraftSync(delay = SERVER_SYNC_DELAY): void {
+  if (serverDraftTimer) window.clearTimeout(serverDraftTimer)
+  serverDraftTimer = window.setTimeout(() => {
+    serverDraftTimer = undefined
+    void syncServerDraft()
+  }, delay)
+}
+
+async function syncServerDraft(): Promise<void> {
+  const active = session.value
+  if (!active || serverDraftInFlight) return
+
+  const count = edits.value.size
+  if (count === lastSyncedEditCount) return
+  if (count === 0 && lastSyncedEditCount <= 0) return
+
+  const payload = buildDraftPayload()
+  serverDraftInFlight = true
+  try {
+    if (payload) {
+      await request(`/api/summary/${active.sessionId}/draft`, {
+        method: 'PUT',
+        body: { fileName: payload.fileName, payload },
+      })
+    } else {
+      // Bản nháp đã rỗng — xoá luôn bản cũ trên server nếu có.
+      await request(`/api/summary/${active.sessionId}/draft`, { method: 'DELETE' })
+    }
+    lastSyncedEditCount = count
+  } catch {
+    // Sao lưu server là lưới an toàn: thất bại thì im lặng, localStorage vẫn giữ.
+  } finally {
+    serverDraftInFlight = false
+  }
+}
+
+async function fetchServerDraft(sessionId: string): Promise<DraftPayload | null> {
+  try {
+    const data = await request<{ fileName: string; savedAt: string; payload: DraftPayload } | undefined>(
+      `/api/summary/${sessionId}/draft`,
+    )
+    return data?.payload ?? null
+  } catch {
+    return null
+  }
+}
+
+function restoreDraft(fileName: string): void {
+  void restoreDraftAsync(fileName)
+}
+
+async function restoreDraftAsync(fileName: string): Promise<void> {
+  try {
+    let payload = readLocalDraft(fileName)
+    let source = 'máy này'
+
+    const active = session.value
+    if (active) {
+      const serverDraft = await fetchServerDraft(active.sessionId)
+      if (serverDraft && serverDraft.edits.length > 0) {
+        // Chọn bản mới hơn giữa localStorage và server (đổi máy / xoá localStorage).
+        if (!payload || new Date(serverDraft.savedAt) > new Date(payload.savedAt)) {
+          payload = serverDraft
+          source = 'server'
+        }
+      }
+    }
+
+    if (!payload || payload.edits.length === 0) {
+      if (source === 'máy này') localStorage.removeItem(draftKey(fileName))
       return
     }
 
     const savedAt = new Date(payload.savedAt)
     const label = savedAt.toLocaleString('vi-VN')
-    if (!window.confirm(`Tìm thấy bản nháp ${payload.edits.length} dòng cho file này (${label}). Khôi phục?`)) {
+    if (
+      !window.confirm(
+        `Tìm thấy bản nháp ${payload.edits.length} dòng cho file này (${source}, ${label}). Khôi phục?`,
+      )
+    ) {
       localStorage.removeItem(draftKey(fileName))
       return
     }
@@ -1869,9 +1954,27 @@ function restoreDraft(fileName: string): void {
     edits.value = next
     draftSavedAt.value = savedAt
     draftStatus.value = 'saved'
-    toast.success('Đã khôi phục bản nháp', `${formatNumber(next.size)} dòng thay đổi đã được nạp.`)
+    toast.success(
+      'Đã khôi phục bản nháp',
+      `${formatNumber(next.size)} dòng thay đổi đã được nạp (từ ${source}).`,
+    )
   } catch {
     // Bản nháp hỏng: bỏ qua để không chặn mở file.
+  }
+}
+
+function readLocalDraft(fileName: string): DraftPayload | null {
+  try {
+    const raw = localStorage.getItem(draftKey(fileName))
+    if (!raw) return null
+    const payload = JSON.parse(raw) as DraftPayload
+    if (!payload.edits || payload.edits.length === 0) {
+      localStorage.removeItem(draftKey(fileName))
+      return null
+    }
+    return payload
+  } catch {
+    return null
   }
 }
 
@@ -1883,6 +1986,8 @@ function clearDraft(): void {
   } catch {
     // Bỏ qua.
   }
+  // Bản nháp đã xuất xong — xoá luôn bản sao trên server (fire-and-forget).
+  void request(`/api/summary/${active.sessionId}/draft`, { method: 'DELETE' }).catch(() => {})
 }
 
 function onGlobalKeydown(event: KeyboardEvent): void {
@@ -1952,6 +2057,8 @@ watch(edits, () => {
   if (!session.value) return
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
   autosaveTimer = window.setTimeout(saveDraft, 700)
+  // E1: sau khi localStorage đã lưu, đẩy thêm bản nháp lên server (8s lặng).
+  scheduleServerDraftSync()
 })
 
 watch(onlySelectedRows, () => {
@@ -2005,18 +2112,30 @@ watch(pageSize, () => {
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('keydown', onSpeedKeydown)
+  // E1: chuyển tab / thu nhỏ cửa sổ — đẩy bản nháp lên server ngay.
+  document.addEventListener('visibilitychange', onVisibilityChange)
   void resumeLastSession().then(() => {
     if (!session.value) loadResumeCandidates()
   })
 })
 
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'hidden') {
+    void syncServerDraft()
+  }
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('keydown', onSpeedKeydown)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   clearTeamEditingState()
   if (searchTimer) window.clearTimeout(searchTimer)
   if (filterTimer) window.clearTimeout(filterTimer)
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
+  if (serverDraftTimer) window.clearTimeout(serverDraftTimer)
+  // Rời trang — cố đẩy nốt bản nháp lên server (fire-and-forget).
+  void syncServerDraft()
   if (session.value) {
     saveDraft()
     // KHÔNG xoá phiên trên server khi rời trang: F5/mất kết nối vẫn khôi phục được.

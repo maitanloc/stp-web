@@ -44,6 +44,8 @@ public sealed class StpDbContext : DbContext
 
     public DbSet<StpUser> StpUsers => Set<StpUser>();
 
+    public DbSet<SummaryDraft> SummaryDrafts => Set<SummaryDraft>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

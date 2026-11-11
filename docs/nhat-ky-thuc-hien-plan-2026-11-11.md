@@ -91,7 +91,17 @@
   "TL"=#ff8f00 đúng palette)
 
 ### Nhóm E — P0.2 data safety
-- [ ] E1. Draft backup server `PUT /api/summary/{id}/draft` + restore
+- [x] E1. Draft backup server `PUT /api/summary/{id}/draft` + restore
+  (bảng `SummaryDrafts` (migration `AddSummaryDrafts`): khoá (SessionId +
+  UserName) unique, PayloadJson nvarchar(max) nguyên trạng phía client;
+  PUT = upsert theo người đăng nhập/tự khai (`TeamAudit.ActorFromAsync`),
+  GET trả bản nháp hoặc 204, DELETE xoá; frontend: sau khi localStorage lưu
+  → đẩy server sau 8s lặng, chuyển tab (visibilitychange) flush ngay, rời
+  trang flush nốt; khôi phục: so `savedAt` local vs server, lấy bản mới hơn,
+  dialog ghi rõ nguồn "(từ server)"; xuất xong hoặc "Bỏ thay đổi" → DELETE
+  server; guard chống lặp PUT/DELETE cùng trạng thái; E2E thật: curl PUT →
+  restore toast "1 dòng… (từ server)" → client PUT cập nhật savedAt → reset
+  → GET 204; tests 86/86)
 
 ### Nhóm F — Trụ A presence 2.0
 - [ ] F1. A1: SignalR hub `/hubs/team` + presence realtime (fallback polling)

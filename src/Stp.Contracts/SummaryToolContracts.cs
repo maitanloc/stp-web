@@ -210,3 +210,17 @@ public sealed record SummaryCatalogSuggestionsResponse(
     IReadOnlyList<SummaryCatalogSuggestionResponse> Items,
     int MinCount,
     int MaxCount);
+
+/// <summary>
+/// Lưu bản nháp lên server (P0.2 data safety): payload là JSON nguyên trạng
+/// phía client gửi — server không cần biết cấu trúc, chỉ trữ và trả lại.
+/// </summary>
+public sealed record SummaryDraftSaveRequest(
+    string FileName,
+    System.Text.Json.JsonElement Payload);
+
+/// <summary>Bản nháp đã lưu trên server cho (phiên + người dùng).</summary>
+public sealed record SummaryDraftResponse(
+    string FileName,
+    DateTimeOffset SavedAt,
+    System.Text.Json.JsonElement Payload);

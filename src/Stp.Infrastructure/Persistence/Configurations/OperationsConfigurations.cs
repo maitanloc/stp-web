@@ -194,3 +194,20 @@ public sealed class StpUserConfiguration : IEntityTypeConfiguration<StpUser>
         builder.HasIndex(x => x.IsActive);
     }
 }
+
+public sealed class SummaryDraftConfiguration : IEntityTypeConfiguration<SummaryDraft>
+{
+    public void Configure(EntityTypeBuilder<SummaryDraft> builder)
+    {
+        builder.ToTable("SummaryDrafts");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.UserName).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.FileName).HasMaxLength(400).IsRequired();
+        builder.Property(x => x.PayloadJson).HasColumnType("nvarchar(max)").IsRequired();
+
+        // Mỗi người giữ đúng 1 bản nháp cho 1 phiên — PUT là upsert.
+        builder.HasIndex(x => new { x.SessionId, x.UserName }).IsUnique();
+        builder.HasIndex(x => x.SavedAt);
+    }
+}
