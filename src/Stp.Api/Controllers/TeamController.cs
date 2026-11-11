@@ -27,13 +27,16 @@ public sealed class TeamController : ControllerBase
 
     private readonly IDbContextFactory<StpDbContext> _factory;
     private readonly TeamPresence _presence;
+    private readonly TeamAudit _audit;
 
     public TeamController(
         IDbContextFactory<StpDbContext> factory,
-        TeamPresence presence)
+        TeamPresence presence,
+        TeamAudit audit)
     {
         _factory = factory;
         _presence = presence;
+        _audit = audit;
     }
 
     /// <summary>Đọc tin nhắn mới nhất của kênh chat tổng (tối đa 100, cũ → mới).</summary>
@@ -144,5 +147,30 @@ public sealed class TeamController : ControllerBase
             DateTimeOffset.UtcNow);
 
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Hành động đáng chú ý làm phía client (F3): gán giấy tờ hàng loạt, áp cho
+    /// dòng còn thiếu… Ghi vào AuditLogs (feed) + TeamAudit tự broadcast chip
+    /// realtime qua hub cho đồng đội đang mở app.
+    /// </summary>
+    [HttpPost("action")]
+    public async Task<IActionResult> AnnounceAction([FromBody] TeamActionRequest? request)
+    {
+        var verb = (request?.Verb ?? string.Empty).Trim();
+        if (verb.Length == 0)
+        {
+            return Problem(title: "Thiếu tên hành động.", statusCode: 400);
+        }
+
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        var detail = string.IsNullOrWhiteSpace(request?.Detail) ? null : request!.Detail!.Trim();
+        if (detail is { Length: > 500 })
+        {
+            detail = detail[..500];
+        }
+
+        _audit.Write(actor, verb, "SummarySession", null, detail);
+        return NoContent();
     }
 }

@@ -40,3 +40,11 @@ public sealed record ActivityEventResponse(
     DateTimeOffset Timestamp);
 
 public sealed record ActivityEventsResponse(IReadOnlyList<ActivityEventResponse> Items);
+
+/// <summary>
+/// Hành động phía client đáng chú ý (F3): bulk áp giấy tờ, gán hàng loạt…
+/// server ghi AuditLogs (thành feed) + broadcast chip realtime qua hub.
+/// </summary>
+public sealed record TeamActionRequest(
+    string Verb,
+    string? Detail = null);

@@ -47,6 +47,8 @@ import {
   teamRowMarks,
 } from '../composables/useTeamPresence'
 import { getUserName } from '../api/client'
+import { teamIdentity } from '../composables/useTeamIdentity'
+import { colorForName, renderAvatar } from '../lib/team'
 
 interface RowEdit {
   row: SummaryRowResponse
@@ -132,16 +134,19 @@ const editingSummaryRow = ref<number | null>(null)
 const summaryDraft = ref('')
 
 // ===== Presence nhóm: dòng nào đang có ai sửa =====
-// Map dòng → tên người đang giữ (bỏ qua dấu của chính mình).
+// Map dòng → tên người đang giữ (bỏ qua dấu của chính mình). F2: tối đa 8 dấu
+// cùng lúc — lấy 8 người gần đây nhất, phần còn lại tự rơi khi hết TTL.
 const teamMarkRows = computed(() => {
   const sessionId = session.value?.sessionId
   const map = new Map<number, string>()
   if (!sessionId) return map
-  const self = getUserName()
-  for (const mark of teamRowMarks.value) {
-    if (mark.sessionId === sessionId && mark.actor && mark.actor !== self) {
-      map.set(mark.rowNumber, mark.actor)
-    }
+  const self = teamIdentity.value?.displayName ?? getUserName()
+  const marks = teamRowMarks.value
+    .filter((mark) => mark.sessionId === sessionId && mark.actor && mark.actor !== self)
+    .sort((a, b) => a.lastSeenSecondsAgo - b.lastSeenSecondsAgo)
+    .slice(0, 8)
+  for (const mark of marks) {
+    map.set(mark.rowNumber, mark.actor)
   }
   return map
 })
@@ -988,6 +993,10 @@ async function applyToMissingInScope(): Promise<void> {
         'Đã áp cho dòng còn thiếu',
         `${formatNumber(applied)} dòng trong phạm vi đang lọc nhận bộ ${bulkItems.value.join(', ')}.`,
       )
+      void announceAction(
+        'bulk',
+        `Gán bộ cho ${formatNumber(applied)} dòng còn thiếu trong phạm vi lọc`,
+      )
     }
   } catch (caught) {
     toast.error('Không áp được', errorMessage(caught))
@@ -1162,6 +1171,19 @@ function applyBulk(): void {
     'Đã áp dụng danh mục',
     `${formatNumber(applied)} dòng trong trang hiện tại đã nhận ${bulkItems.value.length} loại giấy tờ.`,
   )
+  void announceAction(
+    'bulk',
+    `Gán ${bulkItems.value.length} loại giấy tờ cho ${formatNumber(applied)} dòng đã chọn`,
+  )
+}
+
+/** F3: báo cho cả nhóm biết một hành động đáng chú ý làm phía client (bulk…). */
+async function announceAction(verb: string, detail: string): Promise<void> {
+  try {
+    await request('/api/team/action', { method: 'POST', body: { verb, detail } })
+  } catch {
+    // Chip là phụ — lỗi bỏ qua, hành động chính không phụ thuộc nó.
+  }
 }
 
 /** Đưa các dòng đang chọn về đúng tiền tố chuẩn, giữ nguyên danh mục giấy tờ. */
@@ -2651,6 +2673,11 @@ onBeforeUnmount(() => {
                         'is-edited': edits.has(row.rowNumber),
                         'is-team-marked': teamMarkRows.has(row.rowNumber),
                       }"
+                      :style="
+                        teamMarkRows.has(row.rowNumber)
+                          ? ({ '--mark-color': colorForName(teamMarkRows.get(row.rowNumber)!) } as Record<string, string>)
+                          : undefined
+                      "
                     >
                       <td>
                         <input
@@ -2671,6 +2698,10 @@ onBeforeUnmount(() => {
                           class="team-lock-tag"
                           :title="`${teamMarkRows.get(row.rowNumber)} đang sửa dòng này`"
                         >
+                          <span
+                            class="tag-avatar"
+                            :style="renderAvatar(teamMarkRows.get(row.rowNumber)!).style"
+                          >{{ renderAvatar(teamMarkRows.get(row.rowNumber)!).initials }}</span>
                           {{ teamMarkRows.get(row.rowNumber) }} đang nắn
                         </div>
                       </td>

@@ -25,6 +25,8 @@ builder.Services.AddStpStorage(builder.Configuration, builder.Environment.Conten
 builder.Services.AddStpJobs();
 builder.Services.AddSingleton<TeamPresence>();
 builder.Services.AddSingleton<TeamAudit>();
+// F1: realtime presence/hành động nhóm — poll REST vẫn chạy song song dự phòng.
+builder.Services.AddSignalR();
 
 var developerAuthOptions = builder.Configuration
     .GetSection(DeveloperAuthOptions.SectionName)
@@ -168,6 +170,8 @@ if (requireTeamLogin)
 }
 app.UseAuthorization();
 app.MapControllers();
+// F1: hub nhóm — /hubs/team (ngrok free hỗ trợ websocket, link tunnel bình thường).
+app.MapHub<Stp.Api.Hubs.TeamHub>("/hubs/team");
 
 // Trạng thái migration dùng cho health: migrate hỏng thì báo degraded nhưng
 // service vẫn chạy (log lỗi chi tiết, không crash).

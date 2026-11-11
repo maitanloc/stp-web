@@ -6,7 +6,7 @@ import { initTeamIdentity, logoutTeamIdentity, teamIdentity } from '../composabl
 import type { ActivityEventResponse, ChatMessageResponse } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { actionLabel, clockTime, colorForName, renderAvatar, relativeTime } from '../lib/team'
-import { pingPresence, startTeamPresence, teamOnline } from '../composables/useTeamPresence'
+import { pingPresence, startTeamPresence, teamOnline, liveActivities, actionChips, hubStatus } from '../composables/useTeamPresence'
 import { useToast } from '../composables/useToast'
 import LoginModal from './LoginModal.vue'
 import UserNameModal from './UserNameModal.vue'
@@ -79,6 +79,32 @@ async function fetchActivity(): Promise<void> {
     // Bỏ qua blip, nhịp sau thử lại.
   }
 }
+
+// F3: sự kiện hub đổ về realtime — ghim ngay lên đầu feed (kể cả lúc đóng dock),
+// mở panel là thấy không cần đợi poll 12s.
+watch(liveActivities, (list) => {
+  const latest = list[0]
+  if (!latest) return
+  const exists = activities.value.some(
+    (event) =>
+      event.actor === latest.actor &&
+      event.action === latest.action &&
+      Math.abs(new Date(event.timestamp).getTime() - new Date(latest.timestamp).getTime()) < 3000,
+  )
+  if (exists) return
+  activities.value = [
+    {
+      id: crypto.randomUUID(),
+      actor: latest.actor,
+      action: latest.action,
+      entityType: latest.entityType ?? null,
+      entityId: latest.entityId ?? null,
+      details: latest.details ?? null,
+      timestamp: latest.timestamp,
+    },
+    ...activities.value.slice(0, 60),
+  ]
+})
 
 async function sendDraft(): Promise<void> {
   const actor = userName.value
@@ -213,6 +239,24 @@ watch(tab, (value) => {
 
 <template>
   <div class="team-dock">
+    <!-- F3: chip hành động đáng kể của đồng đội, nổi góc phải dưới, tự tan 8s. -->
+    <TransitionGroup name="chip" tag="div" class="action-chips" aria-live="polite">
+      <div
+        v-for="chip in actionChips"
+        :key="chip.key"
+        class="action-chip"
+      >
+        <span class="avatar mini" :style="renderAvatar(chip.actor).style">
+          {{ renderAvatar(chip.actor).initials }}
+        </span>
+        <span class="chip-text">
+          <strong :style="{ color: colorForName(chip.actor) }">{{ chip.actor }}</strong>
+          {{ actionLabel(chip.action) }}
+          <span v-if="chip.details" class="chip-detail">{{ chip.details }}</span>
+        </span>
+      </div>
+    </TransitionGroup>
+
     <!-- Panel chính -->
     <Transition name="dock" mode="out-in">
     <section v-if="open" class="dock-panel" aria-label="Liên lạc nhóm">
@@ -222,6 +266,12 @@ watch(tab, (value) => {
           <span class="online-count">
             <span class="online-dot"></span>
             {{ onlineOthers.length + (userName ? 1 : 0) }} online
+            <span v-if="hubStatus === 'live'" class="hub-dot live" title="Realtime qua hub SignalR">⚡</span>
+            <span
+              v-else
+              class="hub-dot poll"
+              title="Không nối được hub realtime — đang dùng nhịp dự phòng"
+            ></span>
           </span>
         </div>
         <div class="head-tools">
@@ -501,6 +551,72 @@ watch(tab, (value) => {
   border-radius: 999px;
   background: var(--success);
   box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+/* F1: dấu trạng thái hub realtime bên cạnh số online. */
+.hub-dot.live {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.hub-dot.poll {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted-2);
+  box-shadow: 0 0 0 3px var(--surface-2);
+}
+
+/* F3: chip hành động nổi góc phải dưới, trên cả pill thu gọn. */
+.action-chips {
+  position: fixed;
+  right: 16px;
+  bottom: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.action-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  padding: 6px 12px 6px 6px;
+  font-size: 12.5px;
+  max-width: 320px;
+}
+
+.chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-text strong {
+  font-weight: 700;
+}
+
+.chip-detail {
+  color: var(--muted);
+}
+
+.chip-enter-active,
+.chip-leave-active {
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+
+.chip-enter-from,
+.chip-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 
 .head-tools {

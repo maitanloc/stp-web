@@ -104,9 +104,30 @@
   → GET 204; tests 86/86)
 
 ### Nhóm F — Trụ A presence 2.0
-- [ ] F1. A1: SignalR hub `/hubs/team` + presence realtime (fallback polling)
-- [ ] F2. A2: cursors viền + cục tròn avatar theo focus (throttle 300ms, cap 8)
-- [ ] F3. A3: chip hành động đáng kể (export/sync/bulk…) realtime + feed
+- [x] F1. A1: SignalR hub `/hubs/team` + presence realtime (fallback polling)
+  (`Hubs/TeamHub.cs`: invoke `ping` → `TeamPresence.Ping` (TTL 75s/65s dùng
+  lại) + broadcast "presence" cho mọi client; Program.cs AddSignalR +
+  MapHub("/hubs/team"); client `useTeamPresence`: HubConnectionBuilder +
+  withAutomaticReconnect, hub-first (invoke 'ping'), REST poll vẫn chạy
+  song song — hub live thì poll giãn 20s→40s; dock có dot ⚡ live / xám
+  poll; verify: negotiate 200 + WebSocket 101 trên cả 2 tab qua app thật;
+  frame ws tool không capture được nên broadcast wire-level ghi nhận qua
+  negotiate/ws + code path, test thật khi nhóm có máy thứ 2)
+- [x] F2. A2: cursors viền + cục tròn avatar theo focus (throttle 300ms, cap 8)
+  (tab C quan sát thấy tab B giữ dòng 1 → sau mở/đóng editor + ping REST
+  cross-user "Lan" giữ dòng 2: tag "La · Lan đang nắn", nền #d93025 palette,
+  viền trái 3px `--mark-color` theo màu actor; teamMarkRows sắp xếp theo
+  lastSeenSecondsAgo rồi cap 8; setTeamEditingState throttle 300ms khi nhảy
+  nhanh qua dòng; self-filter giữ nguyên — 2 tab cùng user không thấy dấu
+  nhau là đúng thiết kế)
+- [x] F3. A3: chip hành động đáng kể (export/sync/bulk…) realtime + feed
+  (TeamAudit.Write ghi AuditLogs xong broadcast "activity" qua IHubContext
+  fire-and-forget — lỗi hub không rớt hành động chính; `POST /api/team/action`
+  (TeamActionRequest Verb+Detail) cho hành động client: bulk áp dòng đã
+  chọn + C3 áp dòng còn thiếu đều announce; client: liveActivities merge
+  vào feed activities (không trùng ±3s), SIGNIFICANT_ACTIONS (export*,
+  sync, bulk) nổi chip `action-chip` góc phải dưới, tự tan 8s, TransitionGroup
+  chip; actionLabel 'bulk' = "Áp giấy tờ hàng loạt")
 
 ### Nhóm G — Trụ C notification + Messenger
 - [ ] G1. Bảng Notifications (migration) + API list/unread/mark-read

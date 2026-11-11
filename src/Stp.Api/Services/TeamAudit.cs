@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Stp.Api.Hubs;
 using Stp.Core.Domain;
 using Stp.Infrastructure.Persistence;
 
@@ -8,18 +10,22 @@ namespace Stp.Api.Services;
 /// <summary>
 /// Ghi nhật ký hoạt động nhóm vào bảng AuditLogs (bảng có sẵn, trước đó trống).
 /// Trả về fire-and-forget an toàn: nhật ký gãy tuyệt đối không được phép làm
-/// rớt xuất file / đồng bộ của người dùng.
+/// rớt xuất file / đồng bộ của người dùng. Ghi xong còn broadcast qua hub
+/// realtime (F3) để đồng đội thấy chip hành động ngay, không chờ poll.
 /// </summary>
 public sealed class TeamAudit
 {
     private readonly IDbContextFactory<StpDbContext> _factory;
+    private readonly IHubContext<TeamHub> _hubContext;
     private readonly ILogger<TeamAudit> _logger;
 
     public TeamAudit(
         IDbContextFactory<StpDbContext> factory,
+        IHubContext<TeamHub> hubContext,
         ILogger<TeamAudit> logger)
     {
         _factory = factory;
+        _hubContext = hubContext;
         _logger = logger;
     }
 
@@ -66,15 +72,19 @@ public sealed class TeamAudit
 
     public void Write(string actor, string action, string? entityType, string? entityId, string? details)
     {
+        var loggedActor = Truncate(string.IsNullOrWhiteSpace(actor) ? "Không rõ" : actor, 100);
+        var at = DateTimeOffset.UtcNow;
+        var loggedAction = Truncate(action, 200);
+
         try
         {
             using var db = _factory.CreateDbContext();
             db.AuditLogs.Add(new AuditLog
             {
                 Id = Guid.NewGuid(),
-                Timestamp = DateTimeOffset.UtcNow,
-                Actor = Truncate(string.IsNullOrWhiteSpace(actor) ? "Không rõ" : actor, 100),
-                Action = Truncate(action, 200),
+                Timestamp = at,
+                Actor = loggedActor,
+                Action = loggedAction,
                 EntityType = string.IsNullOrWhiteSpace(entityType) ? null : Truncate(entityType, 100),
                 EntityId = string.IsNullOrWhiteSpace(entityId) ? null : Truncate(entityId, 200),
                 Details = details
@@ -84,6 +94,25 @@ public sealed class TeamAudit
         catch (Exception caught)
         {
             _logger.LogWarning(caught, "Không ghi được nhật ký hoạt động ({Action})", action);
+        }
+
+        // F3: broadcast realtime cho đồng đội (chip hành động + feed). Lỗi hub
+        // tuyệt đối không rớt hành động chính — nuốt im.
+        try
+        {
+            _ = _hubContext.Clients.All.SendAsync("activity", new
+            {
+                actor = loggedActor,
+                action = loggedAction,
+                entityType,
+                entityId,
+                details,
+                timestamp = at,
+            });
+        }
+        catch (Exception caught)
+        {
+            _logger.LogWarning(caught, "Không broadcast được hành động qua hub ({Action})", action);
         }
     }
 

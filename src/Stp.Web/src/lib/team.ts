@@ -91,6 +91,8 @@ export function actionLabel(action: string): string {
       return 'Xuất in hàng loạt'
     case 'sync':
       return 'Đồng bộ kho'
+    case 'bulk':
+      return 'Áp giấy tờ hàng loạt'
     default:
       return action
   }
