@@ -394,6 +394,354 @@ pre,
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* ---------------------------- Bảng sống kho hồ sơ (Nhóm J) ---------------------------- */
+
+.live-grid {
+  margin-top: 6px;
+}
+
+.live-grid-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 2px;
+}
+
+.live-grid-room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-grid-avatars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.live-grid-avatars .tag-avatar {
+  margin-right: -6px;
+  border: 2px solid var(--surface);
+}
+
+.live-grid-avatars .tag-avatar.more {
+  background: var(--surface-3);
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.shared-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--brand);
+  border-radius: 99px;
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: 12px;
+}
+
+.shared-filter-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.shared-filter-detail {
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-grid-scroll {
+  max-height: min(62vh, 660px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.live-grid-scroll.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.live-grid-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.live-grid-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 9px 10px;
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--border);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.live-grid-table thead th.num {
+  text-align: right;
+}
+
+.th-label {
+  display: inline-block;
+  max-width: calc(100% - 10px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  right: 3px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.col-resizer:hover::after,
+.live-grid-scroll.is-resizing .col-resizer::after {
+  background: var(--brand);
+}
+
+.live-grid-table tbody td {
+  height: 44px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.live-grid-table tbody td.num {
+  text-align: right;
+}
+
+.live-grid-table .grid-row {
+  cursor: pointer;
+}
+
+.live-grid-table .grid-row:hover {
+  background: var(--surface-3);
+}
+
+.grid-row.has-cursor {
+  background: var(--brand-soft);
+}
+
+.cell-sub {
+  display: block;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.cell-badge {
+  max-width: 100%;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-cell {
+  position: relative;
+}
+
+.cursor-chip {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.print-ok {
+  color: var(--accent);
+}
+
+.skeleton-row td {
+  color: var(--muted);
+}
+
+.skeleton-cell {
+  opacity: 0.4;
+}
+
+.spacer-row td {
+  border-bottom: 0;
+}
+
+.comment-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.comment-bubble:hover {
+  border-color: var(--brand);
+  color: var(--brand-text);
+}
+
+.comment-bubble.has-comments {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.comment-row td {
+  height: auto;
+  white-space: normal;
+  background: var(--surface-2);
+}
+
+.comment-panel {
+  padding: 10px 12px 12px;
+}
+
+.comment-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.comment-panel-head .text-xs {
+  flex: 1;
+  min-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.comment-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.comment-meta {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 92px;
+}
+
+.comment-body {
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.comment-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.comment-composer .input {
+  flex: 1;
+  resize: vertical;
+  min-height: 52px;
+}
+
+.live-grid-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 18px;
+  color: var(--muted-2);
+  font-size: 13.5px;
+}
+
+.live-grid-foot {
+  padding: 8px 2px 0;
+}
+
+.seg-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  padding: 2px;
+  gap: 2px;
+}
+
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.seg-btn.active {
+  background: var(--surface);
+  color: var(--brand-text);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
 /* ---------------------------- Palette Ctrl+K (H2) ---------------------------- */
 .palette-trigger {
   gap: 8px;

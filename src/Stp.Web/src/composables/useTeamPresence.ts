@@ -57,6 +57,61 @@ export const lastLiveNotification = ref<LiveNotification | null>(null)
 /** G3: người vừa bấm phím chat (hub đẩy về) — dock hiển thị "đang gõ…" 5s. */
 export const lastTypingActor = ref<{ actor: string; at: number } | null>(null)
 
+/** J1: bộ lọc mới nhất của đồng đội trên bảng sống kho hồ sơ (theo workbook). */
+export interface GridFilterShare {
+  actor: string
+  workbookId: string
+  year: number | null
+  type: string | null
+  search: string | null
+  at: number
+}
+
+export const lastGridFilter = ref<GridFilterShare | null>(null)
+
+/** J1: con trỏ cộng tác viên — ai đang trỏ vào hồ sơ nào (TTL ngắn phía nhận). */
+export interface GridCursorMark {
+  actor: string
+  workbookId: string
+  dossierId: string
+  at: number
+}
+
+export const lastGridCursor = ref<GridCursorMark | null>(null)
+
+/** J2: comment vừa được ai đó thêm (bong bóng hiện realtime trên bảng sống). */
+export interface DossierCommentLive {
+  id: string
+  dossierId: string
+  actor: string
+  body: string
+  createdAt: string
+}
+
+export const lastDossierComment = ref<DossierCommentLive | null>(null)
+
+/** J1: gửi bộ lọc bảng sống của mình cho cả nhóm (debounce ở nơi gọi). */
+export function sendGridFilter(
+  actor: string,
+  workbookId: string,
+  year: number | null,
+  type: string | null,
+  search: string | null,
+): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection
+      .invoke('gridFilter', actor, workbookId, year, type, search)
+      .catch(() => {})
+  }
+}
+
+/** J1: báo "mình đang trỏ dòng này" — throttle 700ms ở nơi gọi. */
+export function sendGridCursor(actor: string, workbookId: string, dossierId: string): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection.invoke('gridCursor', actor, workbookId, dossierId).catch(() => {})
+  }
+}
+
 /** G3: báo "mình đang gõ" cho cả nhóm qua hub — gọi throttle 2s ở nơi gõ chat. */
 export function sendTeamTyping(actor: string): void {
   if (hubConnection && hubConnection.state === 'Connected') {
@@ -214,6 +269,58 @@ async function startTeamHub(): Promise<void> {
     connection.on('typing', (payload: { actor?: string }) => {
       if (payload?.actor) {
         lastTypingActor.value = { actor: payload.actor, at: Date.now() }
+      }
+    })
+
+    // J1: bộ lọc mới nhất của đồng đội trên bảng sống.
+    connection.on('gridFilter', (payload: {
+      actor?: string
+      workbookId?: string
+      year?: number | null
+      type?: string | null
+      search?: string | null
+    }) => {
+      if (!payload?.actor || !payload?.workbookId) return
+      lastGridFilter.value = {
+        actor: payload.actor,
+        workbookId: payload.workbookId,
+        year: payload.year ?? null,
+        type: payload.type ?? null,
+        search: payload.search ?? null,
+        at: Date.now(),
+      }
+    })
+
+    // J1: con trỏ cộng tác viên trên bảng sống.
+    connection.on('gridCursor', (payload: {
+      actor?: string
+      workbookId?: string
+      dossierId?: string
+    }) => {
+      if (!payload?.actor || !payload?.workbookId || !payload?.dossierId) return
+      lastGridCursor.value = {
+        actor: payload.actor,
+        workbookId: payload.workbookId,
+        dossierId: payload.dossierId,
+        at: Date.now(),
+      }
+    })
+
+    // J2: comment mới của đồng đội — bảng sống tự thêm bong bóng.
+    connection.on('dossierComment', (payload: {
+      id?: string
+      dossierId?: string
+      actor?: string
+      body?: string
+      createdAt?: string
+    }) => {
+      if (!payload?.id || !payload?.dossierId) return
+      lastDossierComment.value = {
+        id: payload.id,
+        dossierId: payload.dossierId,
+        actor: payload.actor ?? 'Ai đó',
+        body: payload.body ?? '',
+        createdAt: payload.createdAt ?? new Date().toISOString(),
       }
     })
 

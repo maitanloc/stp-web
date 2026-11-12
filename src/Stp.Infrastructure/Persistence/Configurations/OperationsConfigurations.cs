@@ -125,6 +125,8 @@ public sealed class SyncChangeConfiguration : IEntityTypeConfiguration<SyncChang
 
         builder.HasIndex(x => x.SyncSessionId);
         builder.HasIndex(x => x.IsConflict);
+        // Tra "dòng này bị đồng bộ gần nhất lúc nào" theo khoá hồ sơ (hover lịch sử — J2).
+        builder.HasIndex(x => x.EntityKey);
     }
 }
 
@@ -161,6 +163,28 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.Property(x => x.Details).HasColumnType("nvarchar(max)");
 
         builder.HasIndex(x => x.Timestamp);
+    }
+}
+
+public sealed class DossierCommentConfiguration : IEntityTypeConfiguration<DossierComment>
+{
+    public void Configure(EntityTypeBuilder<DossierComment> builder)
+    {
+        builder.ToTable("DossierComments");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Actor).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Body).HasMaxLength(1000).IsRequired();
+
+        // Đếm số comment trên từng dòng lưới + tải lịch sử comment theo hồ sơ.
+        builder.HasIndex(x => x.DossierId);
+        builder.HasIndex(x => x.CreatedAt);
+
+        builder
+            .HasOne(x => x.Dossier)
+            .WithMany(dossier => dossier.Comments)
+            .HasForeignKey(x => x.DossierId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

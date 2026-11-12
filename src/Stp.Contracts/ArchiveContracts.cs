@@ -71,7 +71,8 @@ public sealed record DossierSummaryResponse(
     bool HasPrintLayout,
     bool IsAggregate,
     int TotalPages,
-    int DocumentCount);
+    int DocumentCount,
+    int CommentCount = 0);
 
 public sealed record DossierResponse(
     Guid Id,
@@ -116,6 +117,28 @@ public sealed record DossierSearchHitResponse(
     string NumberLabel,
     string Type,
     string OriginalSummary);
+
+/// <summary>Một ghi chú trên dòng hồ sơ (Trụ D — J2).</summary>
+public sealed record DossierCommentResponse(
+    Guid Id,
+    Guid DossierId,
+    string Actor,
+    string Body,
+    DateTimeOffset CreatedAt);
+
+public sealed record DossierCommentRequest(string Actor, string Body);
+
+/// <summary>
+/// Lịch sử giá rẻ của một hồ sơ cho hover/comment panel (Trụ D — J3):
+/// lần đồng bộ gần nhất chạm dòng này + comment gần nhất của nhóm.
+/// </summary>
+public sealed record DossierHistoryResponse(
+    DateTimeOffset? LastSyncedAt,
+    string? LastSyncChange,
+    string? LastSyncFile,
+    string? LastSyncActor,
+    DateTimeOffset? LastCommentAt,
+    string? LastCommentActor);
 
 public sealed record PagedResponse<T>(
     IReadOnlyList<T> Items,

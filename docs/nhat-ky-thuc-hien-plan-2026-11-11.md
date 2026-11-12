@@ -208,8 +208,38 @@
   không kẹt bar; parser 17/17; build + robocopy ok
 
 ### Nhóm J — Trụ D bảng sống
-- [ ] J1. Grid virtualized kho hồ sơ + presence
-- [ ] J2. Comment theo dòng (bảng DossierComments) + history hover
+- [x] J1. Grid virtualized kho hồ sơ + presence
+  (component `DossierLiveGrid.vue` tự viết virtualized — KHÔNG thư viện:
+  ROW_H 44px, OVERSCAN 6, PAGE_SIZE 200 = clamp backend; spacer `<tr>` top/
+  bottom + sticky thead, table-layout fixed + colgroup px, KHÔNG horizontal
+  scroll; windowed fetch khi cuộn — nhảy 800.000px → số 18298 hiện đúng tức
+  thì; resize từng cột kéo được + persist `stp.liveGridCols` + nút "Vừa
+  khung" reset — verify kéo +350px, reload phục hồi, reset về 150px; mode
+  "Bảng sống/Phân trang" seg-toggle lưu `stp.gridMode` mặc định live, bảng
+  classic giữ nguyên làm mode 2, live mode bỏ fetch phân trang, subtitle
+  "Đang nạp bảng sống…" khi liveTotal=0; presence "cả phòng nhìn một bảng":
+  đổi lọc → debounce 800ms broadcast hub `GridFilter` → đồng đội cùng
+  workbook thấy chip "X đang lọc: năm Y · 'từ khoá'" + nút "Áp dụng theo"
+  áp lọc; trỏ dòng → throttle 700ms `GridCursor` → đồng đội thấy chip màu
+  "Lan đang xem" (palette D1) trên dòng + nền highlight, TTL 6s sweep 2s;
+  chip chỉ hiện với actor KHÁC mình — event của chính mình bị bỏ đúng luật)
+- [x] J2. Comment theo dòng (bảng DossierComments) + history hover
+  (entity `DossierComment` (DossierId, Actor 100, Body 1000, CreatedAt,
+  index DossierId/CreatedAt, cascade) + nav `Dossier.Comments` + index
+  `SyncChanges.EntityKey` cho tra history — migration `AddDossierComments`
+  `20261112021706`; API: GET/POST `/api/dossiers/{id}/comments` (POST
+  broadcast hub `dossierComment` cho ALL + audit `dossier.comment`), GET
+  `/api/dossiers/{id}/history` trả sync gần nhất theo EntityKey
+  `{year}|{NumberLabel-trim-UPPER hoặc Number}` + actor từ audit phiên sync
+  + comment gần nhất; lưới đếm bong bóng 💬n qua `Comments.Count()` trong
+  select WorkbooksController; UI: bong bóng cạnh dòng → panel inline mở
+  rộng có composer (Enter gửi) + history line "X vừa ghi chú giờ"; realtime
+  qua hub: comment của đồng đội hiện ngay, dedupe theo id (broadcast tới
+  trước POST response — fix nhân đôi, verify sau reload 2 comment đúng);
+  bump đếm ưu tiên bump đã có, thiếu thì tra cache trang; verify curl:
+  POST/GET tiếng Việt nguyên vẹn, history trả lastComment, commentCount=1,
+  page 1/22.5k = 667ms; verify UI: panel dòng 36 hiện history + gửi từ UI
+  ✓ bubble 2 + draft xoá; tests 86/86)
 
 ### Nhóm K — Trụ B-upload (Pha 7)
 - [ ] K1. Pipeline avatar upload (cắt client → POST → cache theo version)
@@ -227,3 +257,4 @@
 ## Ghi chú tiến trình (ghi thêm khi làm)
 - 11/11/2026: bắt đầu theo lệnh chủ AFK. Trình tự: A → B → C → D → E → F → G → H → I → J → K → L → X.
 - Các mục plan gốc ghi "chỉ làm khi cần" (Whisper server, OCR camera, bot chat, react message) — bỏ qua theo đúng plan, ghi rõ ở X3.
+- Commit theo mốc: A `fb1226c` · B `e4ca10c` · A4 `5aa7dad` · C `5439c55` · D `31f3bd2` · E (draft server) · F `3c6a5c6` · G (notification+messenger) · fix-dock `f72cc54` · H `2d642dd` · I `65c378d` · J (commit riêng sau khi tick).

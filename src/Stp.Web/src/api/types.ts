@@ -93,6 +93,8 @@ export interface DossierSummaryResponse {
   isAggregate: boolean
   totalPages: number
   documentCount: number
+  /** J2: số ghi chú nhóm trên dòng này (0 nếu chưa ai comment). */
+  commentCount: number
 }
 
 /** H2: kết quả tìm nhanh hồ sơ cho thanh lệnh Ctrl+K. */
@@ -102,6 +104,25 @@ export interface DossierSearchHitResponse {
   numberLabel: string
   type: string
   originalSummary: string
+}
+
+/** J2: một ghi chú nhóm trên dòng hồ sơ (bảng sống). */
+export interface DossierCommentResponse {
+  id: string
+  dossierId: string
+  actor: string
+  body: string
+  createdAt: string
+}
+
+/** J2: lịch sử giá rẻ của một hồ sơ — sync gần nhất + comment gần nhất. */
+export interface DossierHistoryResponse {
+  lastSyncedAt: string | null
+  lastSyncChange: string | null
+  lastSyncFile: string | null
+  lastSyncActor: string | null
+  lastCommentAt: string | null
+  lastCommentActor: string | null
 }
 
 export interface DocumentLineResponse {

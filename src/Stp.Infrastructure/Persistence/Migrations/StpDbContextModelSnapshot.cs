@@ -473,6 +473,37 @@ namespace Stp.Infrastructure.Persistence.Migrations
                     b.ToTable("Dossiers", (string)null);
                 });
 
+            modelBuilder.Entity("Stp.Core.Domain.DossierComment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("DossierId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("DossierId");
+
+                    b.ToTable("DossierComments", (string)null);
+                });
+
             modelBuilder.Entity("Stp.Core.Domain.JobLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -814,6 +845,8 @@ namespace Stp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("EntityKey");
+
                     b.HasIndex("IsConflict");
 
                     b.HasIndex("SyncSessionId");
@@ -920,6 +953,17 @@ namespace Stp.Infrastructure.Persistence.Migrations
                     b.Navigation("Year");
                 });
 
+            modelBuilder.Entity("Stp.Core.Domain.DossierComment", b =>
+                {
+                    b.HasOne("Stp.Core.Domain.Dossier", "Dossier")
+                        .WithMany("Comments")
+                        .HasForeignKey("DossierId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Dossier");
+                });
+
             modelBuilder.Entity("Stp.Core.Domain.JobLog", b =>
                 {
                     b.HasOne("Stp.Core.Domain.BatchJob", "Job")
@@ -980,6 +1024,8 @@ namespace Stp.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Stp.Core.Domain.Dossier", b =>
                 {
+                    b.Navigation("Comments");
+
                     b.Navigation("Documents");
                 });
 

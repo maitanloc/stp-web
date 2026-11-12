@@ -150,7 +150,8 @@ public sealed class WorkbooksController : ControllerBase
                 dossier.HasPrintLayout,
                 dossier.IsAggregate,
                 dossier.TotalPages,
-                dossier.Documents.Count))
+                dossier.Documents.Count,
+                dossier.Comments.Count))
             .ToListAsync(cancellationToken);
 
         return Ok(new PagedResponse<DossierSummaryResponse>(items, total, page, pageSize));

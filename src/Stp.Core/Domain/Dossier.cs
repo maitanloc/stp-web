@@ -60,4 +60,7 @@ public sealed class Dossier
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public List<DocumentLine> Documents { get; set; } = new();
+
+    /// <summary>Ghi chú của nhóm theo dòng (Trụ D — J2), đếm gọn trên lưới.</summary>
+    public List<DossierComment> Comments { get; set; } = new();
 }

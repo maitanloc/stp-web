@@ -69,4 +69,47 @@ public sealed class TeamHub : Hub
 
         _ = Clients.Others.SendAsync("typing", new { actor = name });
     }
+
+    /// <summary>
+    /// Bảng sống kho hồ sơ (Trụ D — J1): ai vừa đổi bộ lọc trên lưới — cả
+    /// phòng thấy chip "X đang lọc: năm Y · loại Z" và bấm "Áp dụng theo" để
+    /// nhìn cùng một bảng. Không lưu gì, chỉ rebroadcast.
+    /// </summary>
+    public void GridFilter(
+        string? actor,
+        Guid? workbookId,
+        int? year,
+        string? type,
+        string? search)
+    {
+        var name = string.IsNullOrWhiteSpace(actor) ? "Ai đó" : actor.Trim();
+        if (name.Length > 100)
+        {
+            name = name[..100];
+        }
+
+        _ = Clients.Others.SendAsync("gridFilter", new
+        {
+            actor = name,
+            workbookId,
+            year,
+            type,
+            search,
+        });
+    }
+
+    /// <summary>
+    /// Bảng sống kho hồ sơ (Trụ D — J1): con trỏ cộng tác viên — ai đang trỏ
+    /// vào dòng nào (throttle 700ms phía client), TTL ngắn phía người nhận.
+    /// </summary>
+    public void GridCursor(string? actor, Guid? workbookId, Guid? dossierId)
+    {
+        var name = string.IsNullOrWhiteSpace(actor) ? "Ai đó" : actor.Trim();
+        if (name.Length > 100)
+        {
+            name = name[..100];
+        }
+
+        _ = Clients.Others.SendAsync("gridCursor", new { actor = name, workbookId, dossierId });
+    }
 }

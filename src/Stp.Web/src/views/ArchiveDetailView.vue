@@ -9,6 +9,7 @@ import {
   Printer,
   Search,
   SlidersHorizontal,
+  Table2,
   TriangleExclamationPoint,
 } from '@lucide/vue'
 import { queryString, request } from '../api/client'
@@ -21,6 +22,7 @@ import type {
 import { errorMessage } from '../lib/errors'
 import { formatDateTime, formatNumber, numberDisplay } from '../lib/format'
 import AppSelect from '../components/AppSelect.vue'
+import DossierLiveGrid from '../components/DossierLiveGrid.vue'
 import EmptyState from '../components/EmptyState.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 
@@ -44,6 +46,38 @@ const listError = ref<string | null>(null)
 const yearFilter = ref('')
 const typeFilter = ref('')
 const search = ref('')
+
+/** J1: chế độ xem — bảng sống (virtualized + presence + comment) hoặc danh sách phân trang cổ điển. */
+const GRID_MODE_KEY = 'stp.gridMode'
+const gridMode = ref<'live' | 'classic'>(readGridMode())
+const liveTotal = ref(0)
+
+function readGridMode(): 'live' | 'classic' {
+  try {
+    return localStorage.getItem(GRID_MODE_KEY) === 'classic' ? 'classic' : 'live'
+  } catch {
+    return 'live'
+  }
+}
+
+function setGridMode(mode: 'live' | 'classic'): void {
+  gridMode.value = mode
+  try {
+    localStorage.setItem(GRID_MODE_KEY, mode)
+  } catch {
+    // Bỏ qua.
+  }
+  // Landed on classic lần đầu → cần dữ liệu phân trang.
+  if (mode === 'classic' && dossiers.value.length === 0) void loadDossiers()
+  // Quay lại bảng sống: đếm cũ của phiên trước là stale — grid sẽ báo lại.
+  if (mode === 'live') liveTotal.value = 0
+}
+
+function applySharedFilter(filter: { year: string; type: string; search: string }): void {
+  yearFilter.value = filter.year
+  typeFilter.value = filter.type
+  search.value = filter.search
+}
 
 const yearOptions = computed(() => [
   { value: '', label: 'Tất cả các năm' },
@@ -92,6 +126,11 @@ async function loadMeta(): Promise<void> {
 }
 
 async function loadDossiers(): Promise<void> {
+  // Live grid tự fetch theo cuộn — bỏ qua fetch phân trang để khỏi tải trùng.
+  if (gridMode.value === 'live') {
+    listLoading.value = false
+    return
+  }
   listLoading.value = true
   listError.value = null
   try {
@@ -221,10 +260,36 @@ onMounted(reload)
           <div>
             <div class="card-title">Danh sách hồ sơ</div>
             <div class="card-subtitle">
-              {{ formatNumber(total) }} hồ sơ khớp bộ lọc · trang {{ page }}/{{ totalPages }}
+              <template v-if="gridMode === 'live'">
+                {{ liveTotal > 0 ? formatNumber(liveTotal) + ' hồ sơ khớp bộ lọc' : 'Đang nạp bảng sống…' }}
+              </template>
+              <template v-else>{{ formatNumber(total) }} hồ sơ khớp bộ lọc · trang {{ page }}/{{ totalPages }}</template>
             </div>
           </div>
-          <SlidersHorizontal :size="18" class="muted" />
+          <div class="row" style="gap: 6px; align-items: center">
+            <div class="seg-toggle" role="group" aria-label="Chế độ xem danh sách">
+              <button
+                type="button"
+                class="seg-btn"
+                :class="{ active: gridMode === 'live' }"
+                title="Bảng sống: cuộn liên tục, presence cả phòng, ghi chú theo dòng"
+                @click="setGridMode('live')"
+              >
+                <Table2 :size="14" />
+                Bảng sống
+              </button>
+              <button
+                type="button"
+                class="seg-btn"
+                :class="{ active: gridMode === 'classic' }"
+                title="Danh sách phân trang như trước"
+                @click="setGridMode('classic')"
+              >
+                <SlidersHorizontal :size="14" />
+                Phân trang
+              </button>
+            </div>
+          </div>
         </div>
         <div class="card-body">
           <form class="filter-bar" @submit.prevent="applyFilters">
@@ -275,21 +340,32 @@ onMounted(reload)
             </RouterLink>
           </form>
 
-          <div v-if="listError" class="alert alert-danger" style="margin-top: 12px">
-            <TriangleExclamationPoint :size="17" />
-            <div class="grow">{{ listError }}</div>
-            <button class="btn btn-secondary btn-sm" type="button" @click="loadDossiers">Thử lại</button>
-          </div>
-
-          <div v-if="listLoading" class="loading-block"><span class="spinner lg" /> Đang tải hồ sơ...</div>
-
-          <EmptyState
-            v-else-if="dossiers.length === 0"
-            title="Không có hồ sơ phù hợp"
-            description="Thử đổi năm, loại hồ sơ hoặc từ khoá tìm kiếm."
+          <DossierLiveGrid
+            v-if="gridMode === 'live' && !listLoading"
+            :book-id="bookId"
+            :year="yearFilter"
+            :type="typeFilter"
+            :search="search"
+            @apply-filter="applySharedFilter"
+            @total-change="(value) => (liveTotal = value)"
           />
 
-          <div v-else class="table-wrap" style="margin-top: 14px">
+          <template v-if="gridMode === 'classic'">
+            <div v-if="listError" class="alert alert-danger" style="margin-top: 12px">
+              <TriangleExclamationPoint :size="17" />
+              <div class="grow">{{ listError }}</div>
+              <button class="btn btn-secondary btn-sm" type="button" @click="loadDossiers">Thử lại</button>
+            </div>
+
+            <div v-if="listLoading" class="loading-block"><span class="spinner lg" /> Đang tải hồ sơ...</div>
+
+            <EmptyState
+              v-else-if="dossiers.length === 0"
+              title="Không có hồ sơ phù hợp"
+              description="Thử đổi năm, loại hồ sơ hoặc từ khoá tìm kiếm."
+            />
+
+            <div v-else class="table-wrap" style="margin-top: 14px">
             <table class="table table-hover">
               <thead>
                 <tr>
@@ -363,6 +439,7 @@ onMounted(reload)
               </button>
             </div>
           </div>
+          </template>
         </div>
       </div>
     </template>

@@ -87,4 +87,83 @@ public sealed class DossiersController : ControllerBase
 
         return Ok(hits);
     }
+
+    /// <summary>
+    /// Lịch sử giá rẻ của một hồ sơ (Trụ D — J3): lần đồng bộ gần nhất chạm
+    /// dòng này (theo khoá năm|số hồ sơ của SyncChanges) + audit liên quan.
+    /// Dùng cho hover dòng trên bảng sống — không cần bảng mới.
+    /// </summary>
+    [HttpGet("{id:guid}/history")]
+    public async Task<ActionResult<DossierHistoryResponse>> History(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var dossier = await _db.Dossiers
+            .AsNoTracking()
+            .Where(entity => entity.Id == id)
+            .Select(entity => new
+            {
+                entity.WorkbookId,
+                entity.NumberLabel,
+                entity.Number,
+                Year = entity.Year.Year,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (dossier is null)
+        {
+            return NotFound();
+        }
+
+        var entityKey = $"{dossier.Year}|{(string.IsNullOrWhiteSpace(dossier.NumberLabel)
+            ? dossier.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : dossier.NumberLabel.Trim().ToUpperInvariant())}";
+
+        var lastChange = await _db.SyncChanges
+            .AsNoTracking()
+            .Where(change =>
+                change.EntityType == "Dossier"
+                && change.EntityKey == entityKey
+                && change.SyncSession!.WorkbookId == dossier.WorkbookId)
+            .OrderByDescending(change => change.SyncSession!.UploadedAt)
+            .Select(change => new
+            {
+                change.ChangeType,
+                UploadedAt = change.SyncSession!.UploadedAt,
+                change.SyncSession!.SourceFileName,
+                SessionId = change.SyncSession!.Id,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        string? lastSyncActor = null;
+        if (lastChange is not null)
+        {
+            // Audit ghi theo phiên sync (EntityType=SyncSession, EntityId=session id)
+            // — cho biết AI chạy lần đồng bộ chạm dòng này.
+            lastSyncActor = await _db.AuditLogs
+                .AsNoTracking()
+                .Where(log =>
+                    log.EntityType == "SyncSession"
+                    && log.EntityId == lastChange.SessionId.ToString())
+                .OrderByDescending(log => log.Timestamp)
+                .Select(log => log.Actor)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        // Comment mới nhất cũng là "ai vừa đụng dòng này".
+        var lastComment = await _db.DossierComments
+            .AsNoTracking()
+            .Where(comment => comment.DossierId == id)
+            .OrderByDescending(comment => comment.CreatedAt)
+            .Select(comment => new { comment.CreatedAt, comment.Actor })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Ok(new DossierHistoryResponse(
+            lastChange?.UploadedAt,
+            lastChange?.ChangeType,
+            lastChange?.SourceFileName,
+            lastSyncActor,
+            lastComment?.CreatedAt,
+            lastComment?.Actor));
+    }
 }
