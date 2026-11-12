@@ -519,7 +519,16 @@ defineExpose({ resetData })
             class="tag-avatar"
             :title="`${entry.actor} · ${entry.where}`"
             :style="renderAvatar(entry.actor).style"
-          >{{ renderAvatar(entry.actor).initials }}</span>
+          >
+            <img
+              v-if="renderAvatar(entry.actor).imageUrl"
+              :src="renderAvatar(entry.actor).imageUrl"
+              alt=""
+              class="avatar-img"
+              loading="lazy"
+            />
+            <template v-else>{{ renderAvatar(entry.actor).initials }}</template>
+          </span>
           <span v-if="roommates.length > 4" class="tag-avatar more">
             +{{ roommates.length - 4 }}
           </span>
@@ -676,7 +685,16 @@ defineExpose({ resetData })
                         <span
                           class="tag-avatar"
                           :style="renderAvatar(comment.actor).style"
-                        >{{ renderAvatar(comment.actor).initials }}</span>
+                        >
+                          <img
+                            v-if="renderAvatar(comment.actor).imageUrl"
+                            :src="renderAvatar(comment.actor).imageUrl"
+                            alt=""
+                            class="avatar-img"
+                            loading="lazy"
+                          />
+                          <template v-else>{{ renderAvatar(comment.actor).initials }}</template>
+                        </span>
                         <span class="comment-meta">
                           <strong>{{ comment.actor }}</strong>
                           <span class="text-xs muted">{{ formatDateTime(comment.createdAt) }}</span>

@@ -34,4 +34,10 @@ public sealed class StpUser
     /// chưa đọc đúng trên mọi máy, thay cho mốc localStorage từng máy.
     /// </summary>
     public DateTimeOffset? LastReadChatAt { get; set; }
+
+    /// <summary>
+    /// Tăng 1 mỗi lần upload ảnh đại diện (K1) — client gắn ?v= vào URL ảnh
+    /// để phá cache trình duyệt; 0 = chưa có ảnh (dùng avatar chữ cái đầu).
+    /// </summary>
+    public int AvatarVersion { get; set; }
 }

@@ -242,7 +242,8 @@
   ✓ bubble 2 + draft xoá; tests 86/86)
 
 ### Nhóm K — Trụ B-upload (Pha 7)
-- [ ] K1. Pipeline avatar upload (cắt client → POST → cache theo version)
+- [x] K1. Pipeline avatar upload (cắt client → POST → cache theo version)
+  (StpUser.AvatarVersion + migration AddAvatarVersion; API: GET /api/team/avatars, POST /api/team/avatar (cắt vuông canvas 96×96 webp, lưu data/avatars/{userId}.webp qua FileStorage), GET /api/team/avatar/{userId} trả ETag + Cache-Control 7 ngày; broadcast hub 'teamAvatar' realtime; FE: useAvatarUpload composable, renderAvatar chung hỗ trợ imageUrl, menu tài khoản có nút 'Đổi ảnh đại diện' + input file, phủ ảnh trong TeamDock, DossierLiveGrid, SummaryToolView; tests 87/87)
 
 ### Nhóm L — Data safety P2
 - [ ] L1. Sweep job/sync artifacts 30 ngày

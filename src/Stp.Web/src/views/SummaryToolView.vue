@@ -2972,7 +2972,16 @@ onBeforeUnmount(() => {
                           <span
                             class="tag-avatar"
                             :style="renderAvatar(teamMarkRows.get(row.rowNumber)!).style"
-                          >{{ renderAvatar(teamMarkRows.get(row.rowNumber)!).initials }}</span>
+                          >
+                            <img
+                              v-if="renderAvatar(teamMarkRows.get(row.rowNumber)!).imageUrl"
+                              :src="renderAvatar(teamMarkRows.get(row.rowNumber)!).imageUrl"
+                              alt=""
+                              class="avatar-img"
+                              loading="lazy"
+                            />
+                            <template v-else>{{ renderAvatar(teamMarkRows.get(row.rowNumber)!).initials }}</template>
+                          </span>
                           {{ teamMarkRows.get(row.rowNumber) }} đang nắn
                         </div>
                       </td>

@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { HubConnection, HubConnectionBuilder } from '@microsoft/signalr'
 import { getUserName, request } from '../api/client'
 import { teamIdentity } from './useTeamIdentity'
+import { avatarMap, fetchAvatarMap } from './useAvatarUpload'
 import type {
   PresenceEntryResponse,
   PresencePingResponse,
@@ -324,6 +325,20 @@ async function startTeamHub(): Promise<void> {
       }
     })
 
+    // K1: ảnh đại diện của thành viên vừa được cập nhật — nạp lại URL ảnh tức thời.
+    connection.on('teamAvatar', (payload: {
+      userId?: string
+      displayName?: string
+      avatarVersion?: number
+    }) => {
+      if (payload?.displayName && payload?.userId && payload?.avatarVersion) {
+        avatarMap.value = {
+          ...avatarMap.value,
+          [payload.displayName]: `/api/team/avatar/${payload.userId}?v=${payload.avatarVersion}`,
+        }
+      }
+    })
+
     connection.onreconnecting(() => {
       hubStatus.value = 'connecting'
     })
@@ -352,6 +367,7 @@ async function startTeamHub(): Promise<void> {
 
 /** Bắt đầu vòng ping + hub realtime (gọi 1 lần ở TeamDock mount; gọi lại vô hại). */
 export function startTeamPresence(): void {
+  void fetchAvatarMap()
   if (intervalId !== null) return
   lastPingAt = 0
   intervalId = setInterval(() => void tick(), TICK_MS)

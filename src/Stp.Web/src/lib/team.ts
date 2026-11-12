@@ -1,5 +1,7 @@
 // Hàm tiện ích cho "nền tảng nhóm" — màu đại diện, viết tắt tên, thời gian tương đối.
 
+import { avatarMap } from '../composables/useAvatarUpload'
+
 /**
  * Palette avatar chuẩn Google Workspace (Docs/Sheets collaborator colors) —
  * 14 màu bão hoà xen kẽ nóng/lạnh, chữ trắng luôn đọc được trên nền sáng lẫn
@@ -42,17 +44,20 @@ export function initialsFor(name: string): string {
   return (firstWord[0] ?? '?') + ([...words[1]][0] ?? '')
 }
 
-/** D1: render avatar 1 chỗ duy nhất — chữ viết tắt + nền palette + chữ trắng. */
+/** D1+K1: render avatar 1 chỗ duy nhất — ảnh upload (nếu có) hoặc chữ viết tắt + nền palette + chữ trắng. */
 export function renderAvatar(name: string): {
   initials: string
   style: Record<string, string>
+  imageUrl?: string
 } {
+  const url = name ? avatarMap.value[name] : undefined
   return {
     initials: initialsFor(name),
     style: {
       background: colorForName(name),
       color: '#fff',
     },
+    imageUrl: url,
   }
 }
 

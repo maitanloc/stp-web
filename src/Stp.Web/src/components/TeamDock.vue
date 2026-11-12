@@ -17,6 +17,7 @@ import {
   hubStatus,
 } from '../composables/useTeamPresence'
 import { useToast } from '../composables/useToast'
+import { uploadAvatar, avatarMap } from '../composables/useAvatarUpload'
 import LoginModal from './LoginModal.vue'
 import UserNameModal from './UserNameModal.vue'
 
@@ -47,6 +48,40 @@ const sending = ref(false)
 const olderCursor = ref<string | null>(null)
 const hasOlder = ref(false)
 const loadingOlder = ref(false)
+
+// K1: upload ảnh đại diện (cắt 96x96 webp phía client -> server)
+const avatarFileInput = ref<HTMLInputElement | null>(null)
+const avatarUploading = ref(false)
+
+function triggerAvatarUpload() {
+  avatarFileInput.value?.click()
+}
+
+async function onAvatarSelected(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    toast.error('Vui lòng chọn tệp hình ảnh')
+    return
+  }
+  avatarUploading.value = true
+  try {
+    const newVersion = await uploadAvatar(file)
+    if (teamIdentity.value) {
+      avatarMap.value = {
+        ...avatarMap.value,
+        [teamIdentity.value.displayName]: `/api/team/avatar/${teamIdentity.value.id}?v=${newVersion}`,
+      }
+    }
+    toast.success('Đã cập nhật ảnh đại diện')
+  } catch (err) {
+    toast.error(errorMessage(err) || 'Không tải ảnh đại diện lên được')
+  } finally {
+    avatarUploading.value = false
+    target.value = ''
+  }
+}
 
 // G4: emoji picker trong khung soạn chat.
 const EMOJIS = ['😀', '😂', '🙂', '😉', '😍', '🤔', '😴', '😅', '👍', '👏', '🙏', '💪', '🔥', '🎉', '✅', '❌', '⏳', '📌', '❤️', '😭', '😮', '😎', '🫡', '🤝']
@@ -372,7 +407,14 @@ watch(tab, (value) => {
         class="action-chip"
       >
         <span class="avatar mini" :style="renderAvatar(chip.actor).style">
-          {{ renderAvatar(chip.actor).initials }}
+          <img
+            v-if="renderAvatar(chip.actor).imageUrl"
+            :src="renderAvatar(chip.actor).imageUrl"
+            alt=""
+            class="avatar-img"
+            loading="lazy"
+          />
+          <template v-else>{{ renderAvatar(chip.actor).initials }}</template>
         </span>
         <span class="chip-text">
           <strong :style="{ color: colorForName(chip.actor) }">{{ chip.actor }}</strong>
@@ -411,13 +453,27 @@ watch(tab, (value) => {
                 @click="accountMenuOpen = !accountMenuOpen"
               >
                 <span class="tool-avatar" :style="renderAvatar(teamIdentity.displayName).style">
-                  {{ renderAvatar(teamIdentity.displayName).initials }}
+                  <img
+                    v-if="renderAvatar(teamIdentity.displayName).imageUrl"
+                    :src="renderAvatar(teamIdentity.displayName).imageUrl"
+                    alt=""
+                    class="avatar-img"
+                    loading="lazy"
+                  />
+                  <template v-else>{{ renderAvatar(teamIdentity.displayName).initials }}</template>
                 </span>
               </button>
               <div v-if="accountMenuOpen" class="account-menu">
                 <div class="account-head">
                   <span class="avatar" :style="renderAvatar(teamIdentity.displayName).style">
-                    {{ renderAvatar(teamIdentity.displayName).initials }}
+                    <img
+                      v-if="renderAvatar(teamIdentity.displayName).imageUrl"
+                      :src="renderAvatar(teamIdentity.displayName).imageUrl"
+                      alt=""
+                      class="avatar-img"
+                      loading="lazy"
+                    />
+                    <template v-else>{{ renderAvatar(teamIdentity.displayName).initials }}</template>
                   </span>
                   <div class="account-info">
                     <span class="account-name">{{ teamIdentity.displayName }}</span>
@@ -427,6 +483,21 @@ watch(tab, (value) => {
                     </span>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  class="account-item"
+                  :disabled="avatarUploading"
+                  @click="triggerAvatarUpload"
+                >
+                  {{ avatarUploading ? 'Đang cập nhật ảnh...' : 'Đổi ảnh đại diện' }}
+                </button>
+                <input
+                  ref="avatarFileInput"
+                  type="file"
+                  accept="image/*"
+                  style="display: none"
+                  @change="onAvatarSelected"
+                />
                 <button
                   v-if="teamIdentity.role === 'admin'"
                   type="button"
@@ -447,7 +518,14 @@ watch(tab, (value) => {
                 class="tool-avatar"
                 :style="userName ? renderAvatar(userName).style : { color: '#fff' }"
               >
-                {{ userName ? renderAvatar(userName).initials : '?' }}
+                <img
+                  v-if="userName && renderAvatar(userName).imageUrl"
+                  :src="renderAvatar(userName).imageUrl"
+                  alt=""
+                  class="avatar-img"
+                  loading="lazy"
+                />
+                <template v-else>{{ userName ? renderAvatar(userName).initials : '?' }}</template>
               </span>
             </button>
             <button
@@ -508,7 +586,14 @@ watch(tab, (value) => {
               class="avatar"
               :style="renderAvatar(message.actor).style"
             >
-              {{ renderAvatar(message.actor).initials }}
+              <img
+                v-if="renderAvatar(message.actor).imageUrl"
+                :src="renderAvatar(message.actor).imageUrl"
+                alt=""
+                class="avatar-img"
+                loading="lazy"
+              />
+              <template v-else>{{ renderAvatar(message.actor).initials }}</template>
             </span>
             <div class="bubble">
               <span v-if="message.actor !== userName" class="who" :style="{ color: colorForName(message.actor) }">
@@ -600,7 +685,14 @@ watch(tab, (value) => {
           :style="renderAvatar(entry.actor).style"
           :title="entry.actor + ' · ' + entry.where"
         >
-          {{ renderAvatar(entry.actor).initials }}
+          <img
+            v-if="renderAvatar(entry.actor).imageUrl"
+            :src="renderAvatar(entry.actor).imageUrl"
+            alt=""
+            class="avatar-img"
+            loading="lazy"
+          />
+          <template v-else>{{ renderAvatar(entry.actor).initials }}</template>
         </span>
         <span v-if="onlineOthers.length > 3" class="pill-more">+{{ onlineOthers.length - 3 }}</span>
       </span>

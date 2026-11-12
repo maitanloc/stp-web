@@ -213,6 +213,7 @@ public sealed class StpUserConfiguration : IEntityTypeConfiguration<StpUser>
         builder.Property(x => x.DisplayName).HasMaxLength(100).IsRequired();
         builder.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Role).HasMaxLength(20).IsRequired();
+        builder.Property(x => x.AvatarVersion).HasDefaultValue(0);
 
         builder.HasIndex(x => x.Username).IsUnique();
         builder.HasIndex(x => x.IsActive);
