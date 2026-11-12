@@ -140,6 +140,37 @@ public sealed class FileStorageTests
         Assert.Equal("Hồ sơ 2024.xlsx", safe);
     }
 
+    [Fact]
+    public void SweepOldArtifacts_DeletesOldFilesAndDirectories()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var storage = CreateStorage(directory);
+            var uploadDir = Path.Combine(directory, "uploads", "old_job");
+            Directory.CreateDirectory(uploadDir);
+            var oldFile = Path.Combine(uploadDir, "data.xlsx");
+            File.WriteAllText(oldFile, "old content");
+            Directory.SetLastWriteTimeUtc(uploadDir, DateTime.UtcNow.AddDays(-35));
+            File.SetLastWriteTimeUtc(oldFile, DateTime.UtcNow.AddDays(-35));
+
+            var newUploadDir = Path.Combine(directory, "uploads", "new_job");
+            Directory.CreateDirectory(newUploadDir);
+            var newFile = Path.Combine(newUploadDir, "data2.xlsx");
+            File.WriteAllText(newFile, "new content");
+
+            var swept = storage.SweepOldArtifacts(TimeSpan.FromDays(30));
+
+            Assert.True(swept >= 1);
+            Assert.False(Directory.Exists(uploadDir));
+            Assert.True(Directory.Exists(newUploadDir));
+        }
+        finally
+        {
+            TryDelete(directory);
+        }
+    }
+
     private static FileStorage CreateStorage(string root, long maxUploadBytes = 1024 * 1024)
     {
         return new FileStorage(Options.Create(new StorageOptions

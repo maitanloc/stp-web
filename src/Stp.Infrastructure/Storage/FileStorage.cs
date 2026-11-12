@@ -240,6 +240,59 @@ public sealed class FileStorage : IFileStorage
         return name;
     }
 
+    public int SweepOldArtifacts(TimeSpan maxAge)
+    {
+        var cutoff = DateTime.UtcNow - maxAge;
+        var count = 0;
+        var targets = new[]
+        {
+            Path.Combine(_rootPath, "uploads"),
+            Path.Combine(_rootPath, "outputs"),
+            Path.Combine(_rootPath, "backups")
+        };
+
+        foreach (var dir in targets)
+        {
+            if (!Directory.Exists(dir)) continue;
+
+            foreach (var subDir in Directory.GetDirectories(dir))
+            {
+                try
+                {
+                    var info = new DirectoryInfo(subDir);
+                    if (info.LastWriteTimeUtc < cutoff)
+                    {
+                        Directory.Delete(subDir, recursive: true);
+                        count++;
+                    }
+                }
+                catch
+                {
+                    // Bỏ qua nếu thư mục đang bị khoá hoặc lỗi xoá
+                }
+            }
+
+            foreach (var file in Directory.GetFiles(dir))
+            {
+                try
+                {
+                    var fileInfo = new FileInfo(file);
+                    if (fileInfo.LastWriteTimeUtc < cutoff)
+                    {
+                        File.Delete(file);
+                        count++;
+                    }
+                }
+                catch
+                {
+                    // Bỏ qua file đang dùng
+                }
+            }
+        }
+
+        return count;
+    }
+
     private static void TryDelete(string path)
     {
         try

@@ -9,6 +9,7 @@ import BootSplash from './components/BootSplash.vue'
 import WelcomeRecap from './components/WelcomeRecap.vue'
 import TeamDock from './components/TeamDock.vue'
 import ToastHost from './components/ToastHost.vue'
+import { cleanupExpiredLocalStorage } from './lib/storageCleanup'
 
 /**
  * Nghi thức ra vào hệ thống (yêu cầu 11/11/2026):
@@ -25,6 +26,9 @@ const splashMs = ref(2600)
 const showRecap = ref(false)
 
 onMounted(async () => {
+  // L2: dọn draft và history quá 30 ngày trong localStorage khi khởi động
+  cleanupExpiredLocalStorage()
+
   const identity = await initTeamIdentity()
   if (identity || getDevToken()) {
     // Quay lại mà phiên còn (ghi nhớ 24 giờ sliding) — vào nhanh, không vướng đăng nhập.

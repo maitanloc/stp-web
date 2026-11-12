@@ -54,4 +54,10 @@ public interface IFileStorage
     bool IsUnderRoot(string path);
 
     void DeleteDirectory(string path);
+
+    /// <summary>
+    /// L1: Quét dọn các tệp/thư mục tạm (uploads, outputs, backups) cũ hơn khoảng thời gian chỉ định (mặc định 30 ngày).
+    /// Giữ lại avatars và các thư mục cấu hình hệ thống.
+    /// </summary>
+    int SweepOldArtifacts(TimeSpan maxAge);
 }

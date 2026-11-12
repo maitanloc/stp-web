@@ -20,17 +20,29 @@ public sealed class DeveloperSystemController : ControllerBase
     private readonly IExcelConversionService _excel;
     private readonly IMacroService _macros;
     private readonly StorageOptions _storage;
+    private readonly IFileStorage _fileStorage;
 
     public DeveloperSystemController(
         StpDbContext db,
         IExcelConversionService excel,
         IMacroService macros,
-        IOptions<StorageOptions> storage)
+        IOptions<StorageOptions> storage,
+        IFileStorage fileStorage)
     {
         _db = db;
         _excel = excel;
         _macros = macros;
         _storage = storage.Value;
+        _fileStorage = fileStorage;
+    }
+
+    /// <summary>L1: Quét dọn các tệp tạm (uploads, outputs, backups) cũ hơn số ngày chỉ định (mặc định 30 ngày).</summary>
+    [HttpPost("sweep")]
+    public ActionResult<object> Sweep([FromQuery] int days = 30)
+    {
+        days = Math.Clamp(days, 1, 365);
+        var removed = _fileStorage.SweepOldArtifacts(TimeSpan.FromDays(days));
+        return Ok(new { cleaned = removed, cutoffDays = days, serverTime = DateTimeOffset.UtcNow });
     }
 
     /// <summary>Thông tin môi trường cho trang developer.</summary>
