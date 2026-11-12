@@ -395,6 +395,7 @@ public sealed class SummaryToolController : ControllerBase
         [FromQuery] bool onlyMissingNumber = false,
         [FromQuery] bool missingSheetNumberFirst = false,
         [FromQuery] bool onlyNeedsNormalization = false,
+        [FromQuery] bool sortByNumber = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
@@ -414,7 +415,8 @@ public sealed class SummaryToolController : ControllerBase
                     onlyMissingDocumentNumber,
                     onlyMissingNumber,
                     missingSheetNumberFirst,
-                    onlyNeedsNormalization),
+                    onlyNeedsNormalization,
+                    sortByNumber),
                 out var scope,
                 out var scopeError))
         {
@@ -999,7 +1001,8 @@ public sealed class SummaryToolController : ControllerBase
             request.OnlyMissingDocumentNumber,
             request.OnlyMissingNumber,
             request.MissingSheetNumberFirst,
-            request.OnlyNeedsNormalization);
+            request.OnlyNeedsNormalization,
+            request.SortByNumber);
 
         return true;
     }

@@ -532,6 +532,7 @@ export interface SummaryScopeRequest {
   onlyMissingNumber: boolean
   missingSheetNumberFirst: boolean
   onlyNeedsNormalization: boolean
+  sortByNumber?: boolean
 }
 
 export interface SummaryFilteredExportRequest {

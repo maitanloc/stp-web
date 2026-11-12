@@ -146,6 +146,7 @@ const onlyMissingDocumentNumber = ref(false)
 const onlyMissingNumber = ref(false)
 const onlyNeedsNormalization = ref(false)
 const missingSheetNumberFirst = ref(false)
+const sortByNumber = ref(false)
 
 const edits = ref(new Map<number, RowEdit>())
 const changedCount = computed(() => edits.value.size)
@@ -587,10 +588,15 @@ const scopeRequest = computed<SummaryScopeRequest>(() => ({
   onlyMissingNumber: onlyMissingNumber.value,
   onlyNeedsNormalization: onlyNeedsNormalization.value,
   missingSheetNumberFirst: missingSheetNumberFirst.value,
+  sortByNumber: sortByNumber.value,
 }))
 
 const scopeLabel = computed(() => {
   const parts: string[] = []
+
+  if (sortByNumber.value) {
+    parts.push('xếp theo số hồ sơ tăng dần')
+  }
 
   if (year.value !== '') {
     parts.push(`năm ${year.value}`)
@@ -1733,6 +1739,7 @@ async function inspect(): Promise<void> {
     onlyMissingNumber.value = false
     onlyNeedsNormalization.value = false
     missingSheetNumberFirst.value = false
+    sortByNumber.value = false
     page.value = 1
     pageSize.value = 20
     files.value = []
@@ -1934,6 +1941,7 @@ function queryParams(): Record<string, string | number | boolean | null | undefi
     onlyMissingNumber: onlyMissingNumber.value || undefined,
     onlyNeedsNormalization: onlyNeedsNormalization.value || undefined,
     missingSheetNumberFirst: missingSheetNumberFirst.value || undefined,
+    sortByNumber: sortByNumber.value || undefined,
   }
 }
 
@@ -2584,7 +2592,7 @@ watch(search, () => {
   }, 350)
 })
 
-watch([numberMode, numberFrom, numberTo, singleNumber], () => {
+watch([numberMode, numberFrom, numberTo, singleNumber, sortByNumber], () => {
   if (!session.value) return
   if (filterTimer) window.clearTimeout(filterTimer)
   filterTimer = window.setTimeout(() => {
@@ -3183,6 +3191,14 @@ onBeforeUnmount(() => {
                 <span class="checkbox-desc">Đưa lên đầu danh sách</span>
               </span>
             </label>
+
+            <label class="checkbox">
+              <input v-model="sortByNumber" type="checkbox" />
+              <span class="checkbox-text">
+                <span class="checkbox-title">Sắp xếp số hồ sơ tăng dần</span>
+                <span class="checkbox-desc">Thứ tự 1, 2, 3... (bỏ chọn để giữ theo dòng Excel gốc)</span>
+              </span>
+            </label>
           </div>
 
           <div class="summary-scope">
@@ -3336,8 +3352,22 @@ onBeforeUnmount(() => {
                     <th style="width: 116px">Hồ sơ</th>
                     <th style="width: 74px">Năm</th>
                     <th style="width: 108px">Số tờ ({{ session.sheetNumberColumn }})</th>
-                    <th style="width: 108px">Hồ sơ số ({{ session.documentNumberColumn }})</th>
-                    <th style="width: 96px">Số ({{ session.numberColumn ?? 'B' }})</th>
+                    <th
+                      style="width: 108px; cursor: pointer; user-select: none"
+                      :title="sortByNumber ? 'Đang sắp xếp số hồ sơ tăng dần. Bấm để về thứ tự dòng file gốc' : 'Bấm để sắp xếp theo số hồ sơ tăng dần (1, 2, 3...)'"
+                      @click="sortByNumber = !sortByNumber"
+                    >
+                      Hồ sơ số ({{ session.documentNumberColumn }})
+                      <span v-if="sortByNumber" style="color: var(--accent, #3b82f6); margin-left: 2px">▲</span>
+                    </th>
+                    <th
+                      style="width: 96px; cursor: pointer; user-select: none"
+                      :title="sortByNumber ? 'Đang sắp xếp số hồ sơ tăng dần. Bấm để về thứ tự dòng file gốc' : 'Bấm để sắp xếp theo số hồ sơ tăng dần (1, 2, 3...)'"
+                      @click="sortByNumber = !sortByNumber"
+                    >
+                      Số ({{ session.numberColumn ?? 'B' }})
+                      <span v-if="sortByNumber" style="color: var(--accent, #3b82f6); margin-left: 2px">▲</span>
+                    </th>
                     <th>Trích yếu</th>
                     <th style="width: 320px">Giấy tờ trong ngoặc</th>
                   </tr>

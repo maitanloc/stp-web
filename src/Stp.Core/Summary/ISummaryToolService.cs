@@ -191,7 +191,8 @@ public sealed record SummaryScope(
     bool OnlyMissingDocumentNumber = false,
     bool OnlyMissingNumber = false,
     bool MissingSheetNumberFirst = false,
-    bool OnlyNeedsNormalization = false)
+    bool OnlyNeedsNormalization = false,
+    bool SortByNumber = false)
 {
     public static SummaryScope All { get; } = new();
 }

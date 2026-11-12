@@ -3008,7 +3008,20 @@ public sealed class SummaryToolService : ISummaryToolService
         }
 
         var result = query.ToList();
-        if (scope.MissingSheetNumberFirst)
+        if (scope.SortByNumber)
+        {
+            result = scope.MissingSheetNumberFirst
+                ? result
+                    .OrderBy(row => string.IsNullOrWhiteSpace(row.SheetNumber) ? 0 : 1)
+                    .ThenBy(row => ParseNumberLabel(row.DocumentNumber) ?? row.Number ?? int.MaxValue)
+                    .ThenBy(row => row.RowNumber)
+                    .ToList()
+                : result
+                    .OrderBy(row => ParseNumberLabel(row.DocumentNumber) ?? row.Number ?? int.MaxValue)
+                    .ThenBy(row => row.RowNumber)
+                    .ToList();
+        }
+        else if (scope.MissingSheetNumberFirst)
         {
             result = result
                 .OrderBy(row => string.IsNullOrWhiteSpace(row.SheetNumber) ? 0 : 1)

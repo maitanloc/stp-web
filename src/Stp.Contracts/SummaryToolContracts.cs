@@ -115,7 +115,8 @@ public sealed record SummaryScopeRequest(
     bool OnlyMissingDocumentNumber = false,
     bool OnlyMissingNumber = false,
     bool MissingSheetNumberFirst = false,
-    bool OnlyNeedsNormalization = false);
+    bool OnlyNeedsNormalization = false,
+    bool SortByNumber = false);
 
 public sealed record SummaryFilteredExportRequest(
     IReadOnlyList<SummaryChangeRequest>? Changes,
