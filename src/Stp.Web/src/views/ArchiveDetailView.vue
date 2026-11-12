@@ -187,10 +187,12 @@ watch(bookId, () => {
   typeFilter.value = ''
   search.value = ''
   page.value = 1
-  void reload()
+  void reload().catch(() => {})
 })
 
-onMounted(reload)
+onMounted(() => {
+  void reload().catch(() => {})
+})
 </script>
 
 <template>

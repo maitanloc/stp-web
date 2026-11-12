@@ -2665,7 +2665,7 @@ watch(lastSummaryCellChanged, (evt) => {
 // Lắng nghe áp dụng hàng loạt từ đồng đội
 watch(lastSummaryBulkChanged, (evt) => {
   if (!evt || evt.sessionId !== session.value?.sessionId || evt.actor === myActorName.value) return
-  void fetchSharedEdits(evt.sessionId)
+  void fetchSharedEdits(evt.sessionId).catch(() => {})
   toast.info('Đồng đội cập nhật', `${evt.actor} vừa áp dụng thay đổi cho ${formatNumber(evt.count)} dòng.`)
 })
 

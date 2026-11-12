@@ -988,6 +988,7 @@ public sealed class SummaryToolService : ISummaryToolService
         string fileName,
         long fileSizeBytes)
     {
+        FileStorage.SanitizeExcelPackage(filePath);
         using var workbook = new XLWorkbook(filePath);
 
         var yearSheets = workbook.Worksheets

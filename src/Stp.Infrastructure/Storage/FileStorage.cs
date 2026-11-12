@@ -70,6 +70,7 @@ public sealed class FileStorage : IFileStorage
             }
         }
 
+        SanitizeExcelPackage(path);
         return new StoredFile(Path.GetFileName(path), path, new FileInfo(path).Length);
     }
 
@@ -110,6 +111,7 @@ public sealed class FileStorage : IFileStorage
             await source.CopyToAsync(target, cancellationToken).ConfigureAwait(false);
         }
 
+        SanitizeExcelPackage(path);
         return new StoredFile(Path.GetFileName(path), path, new FileInfo(path).Length);
     }
 
@@ -291,6 +293,62 @@ public sealed class FileStorage : IFileStorage
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Sửa các lỗi dị tật của file Excel do phần mềm bên ngoài (WPS/bản Excel cũ) sinh ra
+    /// khiến ClosedXML ném ArgumentException ("Picture names cannot be empty").
+    /// </summary>
+    public static void SanitizeExcelPackage(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+
+        var ext = Path.GetExtension(path);
+        if (!string.Equals(ext, ".xlsx", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(ext, ".xlsm", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(ext, ".xltx", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(ext, ".xltm", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            using var zip = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Update);
+            foreach (var entry in zip.Entries.ToArray())
+            {
+                if (entry.FullName.StartsWith("xl/drawings/drawing", StringComparison.OrdinalIgnoreCase) &&
+                    entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                {
+                    string content;
+                    using (var reader = new StreamReader(entry.Open(), Encoding.UTF8))
+                    {
+                        content = reader.ReadToEnd();
+                    }
+
+                    if (System.Text.RegularExpressions.Regex.IsMatch(content, @"cNvPr\s+[^>]*\bname\s*=\s*""\s*"""))
+                    {
+                        var counter = 1;
+                        var fixedContent = System.Text.RegularExpressions.Regex.Replace(
+                            content,
+                            @"(<[^:>]+:cNvPr\s+[^>]*\bname\s*=\s*"")(\s*"")",
+                            m => $"{m.Groups[1].Value}Drawing_{counter++}\"");
+
+                        var fullName = entry.FullName;
+                        entry.Delete();
+                        var newEntry = zip.CreateEntry(fullName, System.IO.Compression.CompressionLevel.Optimal);
+                        using (var writer = new StreamWriter(newEntry.Open(), Encoding.UTF8))
+                        {
+                            writer.Write(fixedContent);
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Bỏ qua nếu lỗi nạp zip — để parser chính xử lý
+        }
     }
 
     private static void TryDelete(string path)

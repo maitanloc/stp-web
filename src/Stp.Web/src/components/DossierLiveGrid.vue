@@ -231,7 +231,7 @@ function resetData(): void {
   if (scrollHost.value) scrollHost.value.scrollTop = 0
   windowStart.value = 0
   windowEnd.value = 60
-  void bootstrap()
+  void bootstrap().catch(() => {})
 }
 
 async function bootstrap(): Promise<void> {
@@ -246,14 +246,16 @@ watch(
   () => [props.bookId, props.year, props.type, props.search],
   () => {
     const token = ++reloadToken
-    void Promise.resolve().then(() => {
-      if (token === reloadToken) resetData()
-    })
+    void Promise.resolve()
+      .then(() => {
+        if (token === reloadToken) resetData()
+      })
+      .catch(() => {})
   },
 )
 
 onMounted(() => {
-  void bootstrap()
+  void bootstrap().catch(() => {})
 })
 
 onBeforeUnmount(() => {
@@ -497,7 +499,7 @@ function historyLineFor(row: DossierSummaryResponse): string {
 const router = useRouter()
 
 function openDossier(id: string): void {
-  void router.push({ name: 'dossier', params: { id } })
+  void router.push({ name: 'dossier', params: { id } }).catch(() => {})
 }
 
 defineExpose({ resetData })
