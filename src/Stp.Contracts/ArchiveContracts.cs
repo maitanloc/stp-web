@@ -106,6 +106,17 @@ public sealed record DocumentLineResponse(
     string ToSo,
     string GhiChu);
 
+/// <summary>
+/// Kết quả tìm nhanh hồ sơ cho thanh lệnh Ctrl+K (H2): số hồ sơ + năm +
+/// trích yếu gốc để hiện ngay trong palette, mở chi tiết bằng Id.
+/// </summary>
+public sealed record DossierSearchHitResponse(
+    Guid Id,
+    int Year,
+    string NumberLabel,
+    string Type,
+    string OriginalSummary);
+
 public sealed record PagedResponse<T>(
     IReadOnlyList<T> Items,
     int Total,

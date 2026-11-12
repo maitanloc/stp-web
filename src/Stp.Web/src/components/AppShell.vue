@@ -3,36 +3,31 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   CaseUpper,
-  Combine,
-  FileSpreadsheet,
   FolderOpen,
-  LayoutDashboard,
-  ListChecks,
-  Menu,
   Moon,
+  Menu,
+  Pin,
   RefreshCw,
+  Search,
   ShieldCheck,
   Sun,
-  Users,
-  Wrench,
   X,
 } from '@lucide/vue'
 import { request } from '../api/client'
 import type { HealthResponse } from '../api/types'
-import { initTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
+import { initTeamIdentity } from '../composables/useTeamIdentity'
 import { useTheme } from '../composables/useTheme'
+import {
+  isPinned,
+  startBadgePolling,
+  stopBadgePolling,
+  toolBadge,
+  toolSections,
+  togglePin,
+  type ToolDef,
+} from '../composables/useToolRegistry'
+import CommandPalette from './CommandPalette.vue'
 import NotificationBell from './NotificationBell.vue'
-
-interface NavItem {
-  label: string
-  to: string
-  icon: typeof LayoutDashboard
-}
-
-interface NavSection {
-  label: string
-  items: NavItem[]
-}
 
 const route = useRoute()
 const { theme, toggleTheme } = useTheme()
@@ -40,6 +35,7 @@ const { theme, toggleTheme } = useTheme()
 const sidebarOpen = ref(false)
 const healthy = ref<boolean | null>(null)
 const largeText = ref(false)
+const palette = ref<InstanceType<typeof CommandPalette> | null>(null)
 let healthTimer: number | undefined
 
 function toggleLargeText(): void {
@@ -52,32 +48,9 @@ function toggleLargeText(): void {
   }
 }
 
-const sections = computed<NavSection[]>(() => [
-  {
-    label: 'Quy trình',
-    items: [
-      { label: 'Tổng quan', to: '/', icon: LayoutDashboard },
-      { label: 'Chuyển đổi Excel', to: '/chuyen-doi', icon: FileSpreadsheet },
-      { label: 'Gộp nhiều file', to: '/gop-file', icon: Combine },
-      { label: 'Bổ sung trích yếu', to: '/trich-yeu', icon: ListChecks },
-      { label: 'Đồng bộ từ Excel', to: '/dong-bo', icon: RefreshCw },
-    ],
-  },
-  {
-    label: 'Tra cứu',
-    items: [{ label: 'Kho hồ sơ', to: '/kho', icon: FolderOpen }],
-  },
-  {
-    label: 'Hệ thống',
-    items: [
-      // Mục Quản lý tài khoản chỉ hiện cho quản trị viên đã đăng nhập.
-      ...(teamIdentity.value?.role === 'admin'
-        ? [{ label: 'Quản lý tài khoản', to: '/quan-ly', icon: Users }]
-        : []),
-      { label: 'Không gian nâng cao', to: '/nang-cao', icon: Wrench },
-    ],
-  },
-])
+function pinLabel(tool: ToolDef): string {
+  return isPinned(tool) ? `Bỏ ghim "${tool.label}"` : `Ghim "${tool.label}" lên đầu`
+}
 
 const pageTitle = computed(() => String(route.meta.title ?? 'STP Archive'))
 const pageSubtitle = computed(() => String(route.meta.subtitle ?? ''))
@@ -100,6 +73,7 @@ onMounted(() => {
   void checkHealth()
   void initTeamIdentity()
   healthTimer = window.setInterval(() => void checkHealth(), 60_000)
+  startBadgePolling()
   try {
     largeText.value = localStorage.getItem('stp.largeText') === '1'
   } catch {
@@ -110,6 +84,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (healthTimer) window.clearInterval(healthTimer)
+  stopBadgePolling()
 })
 </script>
 
@@ -127,7 +102,7 @@ onUnmounted(() => {
       </RouterLink>
 
       <nav class="nav" aria-label="Điều hướng chính">
-        <template v-for="section in sections" :key="section.label">
+        <template v-for="section in toolSections" :key="section.label">
           <div class="nav-section">{{ section.label }}</div>
           <RouterLink
             v-for="item in section.items"
@@ -138,7 +113,18 @@ onUnmounted(() => {
             @click="sidebarOpen = false"
           >
             <component :is="item.icon" :size="17" />
-            <span>{{ item.label }}</span>
+            <span class="grow">{{ item.label }}</span>
+            <span v-if="toolBadge(item)" class="nav-badge">{{ toolBadge(item) }}</span>
+            <button
+              type="button"
+              class="nav-pin"
+              :class="{ 'is-pinned': isPinned(item) }"
+              :title="pinLabel(item)"
+              :aria-label="pinLabel(item)"
+              @click.prevent.stop="togglePin(item)"
+            >
+              <Pin :size="13" />
+            </button>
           </RouterLink>
         </template>
       </nav>
@@ -178,6 +164,16 @@ onUnmounted(() => {
         </div>
 
         <div class="topbar-actions">
+          <button
+            class="btn btn-secondary btn-sm palette-trigger"
+            type="button"
+            title="Thanh lệnh nhanh (Ctrl+K)"
+            @click="palette?.openPalette()"
+          >
+            <Search :size="14" />
+            <span class="palette-trigger-label">Tìm nhanh</span>
+            <kbd class="palette-kbd">Ctrl K</kbd>
+          </button>
           <NotificationBell />
           <RouterLink class="btn btn-secondary btn-sm" to="/dong-bo">
             <RefreshCw :size="14" />
@@ -214,5 +210,7 @@ onUnmounted(() => {
         </RouterView>
       </main>
     </div>
+
+    <CommandPalette ref="palette" />
   </div>
 </template>

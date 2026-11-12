@@ -95,6 +95,15 @@ export interface DossierSummaryResponse {
   documentCount: number
 }
 
+/** H2: kết quả tìm nhanh hồ sơ cho thanh lệnh Ctrl+K. */
+export interface DossierSearchHitResponse {
+  id: string
+  year: number
+  numberLabel: string
+  type: string
+  originalSummary: string
+}
+
 export interface DocumentLineResponse {
   stt: number
   soKyHieu: string

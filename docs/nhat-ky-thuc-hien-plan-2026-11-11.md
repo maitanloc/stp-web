@@ -160,8 +160,25 @@
   24 ô chèn vào draft; nút "Xem tin cũ hơn" nối page cũ lên đầu)
 
 ### Nhóm H — Trụ E shell
-- [ ] H1. Tool registry + badge đếm trên sidebar
-- [ ] H2. Ctrl+K command palette (tìm hồ sơ, nhảy tool, chạy lệnh)
+- [x] H1. Tool registry + badge đếm trên sidebar
+  (`useToolRegistry.ts` nguồn DUY NHẤT khai báo 8 tool — sidebar + palette
+  cùng dùng; badge động 60s/lần dùng API sẵn có: Kho hồ sơ = tổng hồ sơ
+  67,7k, Bổ sung trích yếu = số phiên inspect, Đồng bộ = job đang chạy
+  (ẩn khi 0); ghim tool ưa thích: nút Pin hiện khi hover trên từng item,
+  lưu localStorage `stp.pinnedTools`, tool ghim nổi lên ĐẦU đúng nhóm
+  của nó — verify: ghim "Bổ sung trích yếu" → lên đầu Quy trình, bỏ ghim
+  → trả lại thứ tự)
+- [x] H2. Ctrl+K command palette (tìm hồ sơ, nhảy tool, chạy lệnh)
+  (`CommandPalette.vue` mount trong AppShell, mở bằng Ctrl+K/Cmd+K hoặc
+  nút "Tìm nhanh Ctrl K" trên topbar; KHÔNG Transition — v-if thuần như
+  fix dock; tìm hồ sơ: GET /api/dossiers/search?q= — token AND kiểu
+  Google, MỌI từ phải khớp (số hồ sơ OR trích yếu gốc OR ghi chú), ưu
+  tiên khớp số hồ sơ, mới nhất trước, debounce 250ms, token chặn stale;
+  nhảy tool: lọc label không dấu (NFD strip); chạy lệnh: đổi theme,
+  chữ lớn, ghim/bỏ ghim tool đang mở; bàn phím ↑↓/Enter/Esc + click,
+  footer gợi ý phím; verify browser: gõ "kết hôn" → nhóm Hồ sơ 22614·2016
+  → bấm → /ho-so/:id; gõ "kho" → bấm Kho hồ sơ → /kho; Ctrl+K mở, Esc
+  đóng; lệnh theme dark↔light thật (data-theme)
 
 ### Nhóm I — GĐ 1 voice (trích yếu siêu tốc)
 - [ ] I1. Mic + Web Speech + parser catalog (loại + giấy tờ + số đọc từng chữ số)
