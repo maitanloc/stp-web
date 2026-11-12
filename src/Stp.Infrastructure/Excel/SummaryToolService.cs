@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,12 @@ public sealed class SummaryToolService : ISummaryToolService
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(12);
     private const string MarkerFileName = "summary-session.json";
+    private const string ActiveSessionMarker = "active-summary-session.json";
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true
+    };
     private const int MaxPreviewRows = 500;
     private const int MinArchiveYear = 1900;
     private const int MaxArchiveYear = 2100;
@@ -329,9 +336,24 @@ public sealed class SummaryToolService : ISummaryToolService
                 createdAt = parsed;
             }
 
-            if (createdAt < DateTimeOffset.UtcNow - SessionLifetime)
+            var activePath = Path.Combine(_storage.RootPath, ActiveSessionMarker);
+            var isPinnedActive = false;
+            if (File.Exists(activePath))
             {
-                // Quá hạn: xoá cả thư mục và bỏ qua.
+                try
+                {
+                    var activeJson = File.ReadAllText(activePath);
+                    isPinnedActive = activeJson.Contains(sessionId.ToString(), StringComparison.OrdinalIgnoreCase);
+                }
+                catch
+                {
+                    // bỏ qua lỗi đọc marker kiểm tra ghim
+                }
+            }
+
+            if (!isPinnedActive && createdAt < DateTimeOffset.UtcNow - SessionLifetime)
+            {
+                // Quá hạn và không phải phiên ghim: xoá cả thư mục và bỏ qua.
                 _storage.DeleteDirectory(directory);
                 return null;
             }
@@ -351,6 +373,10 @@ public sealed class SummaryToolService : ISummaryToolService
             var fileInfo = new FileInfo(filePath);
             var session = Parse(sessionId, filePath, fileInfo.Name, fileInfo.Length);
             _sessions[sessionId] = session;
+
+            var edits = _sessionEdits.GetOrAdd(sessionId, _ => new ConcurrentDictionary<int, SummaryChange>());
+            TryLoadEdits(sessionId, edits);
+
             return session;
         }
         catch (Exception ex)
@@ -908,19 +934,53 @@ public sealed class SummaryToolService : ISummaryToolService
     {
         lock (_activeSessionLock)
         {
-            if (_activeSession is null)
+            if (_activeSession is not null)
             {
-                return null;
+                var current = GetSession(_activeSession.SessionId);
+                if (current is not null)
+                {
+                    return _activeSession;
+                }
             }
 
-            var session = GetSession(_activeSession.SessionId);
-            if (session is null)
+            // Thử khôi phục từ tệp persistent trên đĩa (sống qua các lần restart service)
+            var activePath = Path.Combine(_storage.RootPath, ActiveSessionMarker);
+            if (File.Exists(activePath))
             {
-                _activeSession = null;
-                return null;
+                try
+                {
+                    var json = File.ReadAllText(activePath);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("sessionId", out var idProp)
+                        && Guid.TryParse(idProp.GetString(), out var restoredId))
+                    {
+                        var session = GetSession(restoredId);
+                        if (session is not null)
+                        {
+                            var fileName = root.TryGetProperty("fileName", out var fn) ? fn.GetString() ?? session.FileName : session.FileName;
+                            var uploadedBy = root.TryGetProperty("uploadedBy", out var ub) ? ub.GetString() ?? "Quản trị" : "Quản trị";
+                            var uploadedAt = root.TryGetProperty("uploadedAt", out var ua) && DateTimeOffset.TryParse(ua.GetString(), out var dt) ? dt : session.CreatedAt;
+
+                            _activeSession = new SummaryActiveSessionInfo(
+                                session.SessionId,
+                                fileName,
+                                uploadedBy,
+                                uploadedAt,
+                                session.Rows.Count);
+
+                            return _activeSession;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Không thể đọc marker phiên active từ {Path}", activePath);
+                }
             }
 
-            return _activeSession;
+            _activeSession = null;
+            return null;
         }
     }
 
@@ -940,6 +1000,25 @@ public sealed class SummaryToolService : ISummaryToolService
                 string.IsNullOrWhiteSpace(uploadedBy) ? "Quản trị" : uploadedBy.Trim(),
                 DateTimeOffset.UtcNow,
                 session.Rows.Count);
+
+            try
+            {
+                Directory.CreateDirectory(_storage.RootPath);
+                var activePath = Path.Combine(_storage.RootPath, ActiveSessionMarker);
+                var json = JsonSerializer.Serialize(new
+                {
+                    sessionId = _activeSession.SessionId,
+                    fileName = _activeSession.FileName,
+                    uploadedBy = _activeSession.UploadedBy,
+                    uploadedAt = _activeSession.UploadedAt,
+                    rowCount = _activeSession.RowCount
+                }, JsonOptions);
+                File.WriteAllText(activePath, json);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Lỗi ghi marker phiên active xuống đĩa");
+            }
         }
     }
 
@@ -948,32 +1027,98 @@ public sealed class SummaryToolService : ISummaryToolService
         lock (_activeSessionLock)
         {
             _activeSession = null;
+            try
+            {
+                var activePath = Path.Combine(_storage.RootPath, ActiveSessionMarker);
+                if (File.Exists(activePath))
+                {
+                    File.Delete(activePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Lỗi xoá marker phiên active trên đĩa");
+            }
+        }
+    }
+
+    private void PersistEdits(Guid sessionId, ConcurrentDictionary<int, SummaryChange> edits)
+    {
+        try
+        {
+            var dir = _storage.GetJobUploadDirectory(sessionId);
+            Directory.CreateDirectory(dir);
+            var editsPath = Path.Combine(dir, "edits.json");
+            var json = JsonSerializer.Serialize(edits.Values, JsonOptions);
+            File.WriteAllText(editsPath, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Lỗi lưu edits.json cho phiên {SessionId}", sessionId);
+        }
+    }
+
+    private void TryLoadEdits(Guid sessionId, ConcurrentDictionary<int, SummaryChange> edits)
+    {
+        try
+        {
+            var dir = _storage.GetJobUploadDirectory(sessionId);
+            var editsPath = Path.Combine(dir, "edits.json");
+            if (!File.Exists(editsPath)) return;
+
+            var json = File.ReadAllText(editsPath);
+            var list = JsonSerializer.Deserialize<List<SummaryChange>>(json, JsonOptions);
+            if (list != null)
+            {
+                foreach (var c in list)
+                {
+                    edits[c.RowNumber] = c;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Lỗi đọc edits.json cho phiên {SessionId}", sessionId);
         }
     }
 
     public IReadOnlyDictionary<int, SummaryChange> GetSessionEdits(Guid sessionId)
     {
-        if (_sessionEdits.TryGetValue(sessionId, out var edits))
+        var edits = _sessionEdits.GetOrAdd(sessionId, id =>
         {
-            return edits;
-        }
+            var dict = new ConcurrentDictionary<int, SummaryChange>();
+            TryLoadEdits(id, dict);
+            return dict;
+        });
 
-        return new Dictionary<int, SummaryChange>();
+        return edits;
     }
 
     public void RecordEdit(Guid sessionId, SummaryChange change)
     {
-        var edits = _sessionEdits.GetOrAdd(sessionId, _ => new ConcurrentDictionary<int, SummaryChange>());
+        var edits = _sessionEdits.GetOrAdd(sessionId, id =>
+        {
+            var dict = new ConcurrentDictionary<int, SummaryChange>();
+            TryLoadEdits(id, dict);
+            return dict;
+        });
         edits[change.RowNumber] = change;
+        PersistEdits(sessionId, edits);
     }
 
     public void RecordBulkEdits(Guid sessionId, IReadOnlyList<SummaryChange> changes)
     {
-        var edits = _sessionEdits.GetOrAdd(sessionId, _ => new ConcurrentDictionary<int, SummaryChange>());
+        var edits = _sessionEdits.GetOrAdd(sessionId, id =>
+        {
+            var dict = new ConcurrentDictionary<int, SummaryChange>();
+            TryLoadEdits(id, dict);
+            return dict;
+        });
         foreach (var change in changes)
         {
             edits[change.RowNumber] = change;
         }
+        PersistEdits(sessionId, edits);
     }
 
     /// <summary>

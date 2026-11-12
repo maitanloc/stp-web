@@ -11,11 +11,14 @@ import {
   Eraser,
   FilePenLine,
   FileSpreadsheet,
+  FileText,
   Info,
   Mic,
   Radio,
   RefreshCw,
+  Save,
   Search,
+  Settings,
   Star,
   TriangleExclamationPoint,
   Users,
@@ -25,6 +28,8 @@ import { download, queryString, request, saveBlob } from '../api/client'
 import type {
   SummaryActiveSessionResponse,
   SummaryCatalogItem,
+  SummaryCatalogPresetResponse,
+  SummaryCatalogPresetUpsertRequest,
   SummaryChangeRequest,
   SummaryDirectSyncResponse,
   SummaryFilteredPreviewResponse,
@@ -779,6 +784,91 @@ function bulkApplyStandardSeven(): void {
   if (!session.value) return
   bulkItems.value = [...STANDARD_SEVEN]
   toast.info('Đã chọn bộ 7 chuẩn', 'Bấm "Áp dụng cho dòng đã chọn" để xác nhận.')
+}
+
+// ===== Quản lý Bộ Mẫu Giấy Tờ do Admin cấu hình (Presets Studio) =====
+const catalogPresets = ref<SummaryCatalogPresetResponse[]>([])
+const presetsLoading = ref(false)
+const presetModalOpen = ref(false)
+const editingPreset = ref<SummaryCatalogPresetUpsertRequest | null>(null)
+
+async function fetchCatalogPresets(): Promise<void> {
+  presetsLoading.value = true
+  try {
+    const list = await request<SummaryCatalogPresetResponse[]>('/api/summary/catalog/presets')
+    if (list && list.length > 0) {
+      catalogPresets.value = list
+    }
+  } catch (err) {
+    console.warn('Lỗi đọc catalog presets', err)
+  } finally {
+    presetsLoading.value = false
+  }
+}
+
+function applyPreset(preset: SummaryCatalogPresetResponse): void {
+  if (!session.value) return
+  bulkItems.value = [...preset.items]
+  toast.info(`Đã chọn "${preset.name}"`, 'Bấm "Áp dụng cho dòng đã chọn" để xác nhận.')
+}
+
+function openCreatePresetModal(): void {
+  editingPreset.value = {
+    id: null,
+    name: '',
+    dossierType: type.value || 'Đăng ký kết hôn',
+    items: bulkItems.value.length > 0 ? [...bulkItems.value] : [...STANDARD_SEVEN],
+    isDefault: false,
+    order: catalogPresets.value.length + 1,
+  }
+  presetModalOpen.value = true
+}
+
+function openEditPresetModal(preset: SummaryCatalogPresetResponse): void {
+  editingPreset.value = {
+    id: preset.id,
+    name: preset.name,
+    dossierType: preset.dossierType,
+    items: [...preset.items],
+    isDefault: preset.isDefault,
+    order: preset.order,
+  }
+  presetModalOpen.value = true
+}
+
+async function savePreset(): Promise<void> {
+  if (!editingPreset.value || !editingPreset.value.name.trim()) {
+    toast.warning('Tên bộ mẫu', 'Vui lòng nhập tên bộ mẫu.')
+    return
+  }
+  if (!editingPreset.value.items || editingPreset.value.items.length === 0) {
+    toast.warning('Giấy tờ rỗng', 'Chọn ít nhất một loại giấy tờ cho bộ mẫu.')
+    return
+  }
+
+  try {
+    await request<SummaryCatalogPresetResponse>('/api/summary/catalog/presets', {
+      method: 'POST',
+      body: editingPreset.value,
+    })
+    toast.success('Đã lưu bộ mẫu', `Bộ mẫu "${editingPreset.value.name}" đã được lưu cho cả phòng dùng chung.`)
+    presetModalOpen.value = false
+    editingPreset.value = null
+    void fetchCatalogPresets()
+  } catch (err) {
+    toast.error('Lỗi lưu bộ mẫu', errorMessage(err))
+  }
+}
+
+async function deletePreset(id: string, name: string): Promise<void> {
+  if (!confirm(`Bạn có chắc muốn xoá bộ mẫu "${name}"?`)) return
+  try {
+    await request(`/api/summary/catalog/presets/${id}`, { method: 'DELETE' })
+    toast.info('Đã xoá bộ mẫu', `Đã xoá bộ mẫu "${name}".`)
+    void fetchCatalogPresets()
+  } catch (err) {
+    toast.error('Lỗi xoá bộ mẫu', errorMessage(err))
+  }
 }
 
 /**
@@ -2705,6 +2795,7 @@ watch(lastTeamSessionChanged, async (evt) => {
 let presenceCleanTimer: number | undefined
 
 onMounted(() => {
+  void fetchCatalogPresets()
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('keydown', onSpeedKeydown)
   // E1: chuyển tab / thu nhỏ cửa sổ — đẩy bản nháp lên server ngay.
@@ -3272,6 +3363,18 @@ onBeforeUnmount(() => {
               <Check :size="14" />
               {{ applyingMissing ? 'Đang áp...' : 'Áp dụng cho dòng lọc còn thiếu' }}
             </button>
+            <div v-if="catalogPresets.length > 0" class="row wrap" style="gap: 4px; align-items: center">
+              <button
+                v-for="p in catalogPresets.slice(0, 3)"
+                :key="'quick-m-' + p.id"
+                class="btn btn-secondary btn-xs"
+                type="button"
+                :title="p.items.join(', ')"
+                @click="applyPreset(p)"
+              >
+                {{ p.name }}
+              </button>
+            </div>
           </div>
 
           <div v-if="rowsError" class="alert alert-danger">
@@ -3280,99 +3383,149 @@ onBeforeUnmount(() => {
             <button class="btn btn-secondary btn-sm" type="button" @click="fetchRows">Thử lại</button>
           </div>
 
-          <div v-if="loadingRows" class="loading-block" style="padding: 24px 0">
-            <span class="spinner" />
-            <span>Đang tải hồ sơ...</span>
+          <div v-if="!loadingRows && rows.length > 0" class="summary-table-hint hint">
+            Tích ô ở đầu dòng để sửa nhiều dòng cùng lúc; muốn chỉ xuất đúng các dòng đã tích, bật
+            “Chỉ các dòng đã chọn” ở bước xem trước.
           </div>
-
-          <div v-else-if="rows.length === 0" class="table-wrap">
-            <EmptyState
-              title="Không có hồ sơ phù hợp"
-              description="Thử bỏ bộ lọc năm, loại hồ sơ, số hồ sơ hoặc từ khoá tìm kiếm."
-            />
-          </div>
-
-          <template v-else>
-            <div class="summary-table-hint hint">
-              Tích ô ở đầu dòng để sửa nhiều dòng cùng lúc; muốn chỉ xuất đúng các dòng đã tích, bật
-              “Chỉ các dòng đã chọn” ở bước xem trước.
-            </div>
-            <div v-if="selected.size > 0" class="summary-bulkbar">
-              <div class="row wrap" style="gap: 8px; align-items: center">
-                <span class="badge badge-brand">{{ formatNumber(selected.size) }} dòng đã chọn</span>
-                <SummaryItemPicker
-                  v-model="bulkItems"
-                  :catalog="session.catalog"
-                  :counts="catalogCounts"
-                  placeholder="Giấy tờ áp dụng hàng loạt..."
-                  @custom-added="persistCatalogCustom"
-                />
-                <button class="btn btn-primary btn-sm" type="button" :disabled="bulkApplying" @click="applyBulk">
-                  <Check :size="14" />
-                  Áp dụng cho dòng đã chọn
-                </button>
+          <div v-if="selected.size > 0 && !loadingRows" class="summary-bulkbar">
+            <div class="row wrap" style="gap: 8px; align-items: center">
+              <span class="badge badge-brand">{{ formatNumber(selected.size) }} dòng đã chọn</span>
+              <SummaryItemPicker
+                v-model="bulkItems"
+                :catalog="session.catalog"
+                :counts="catalogCounts"
+                placeholder="Giấy tờ áp dụng hàng loạt..."
+                @custom-added="persistCatalogCustom"
+              />
+              <button class="btn btn-primary btn-sm" type="button" :disabled="bulkApplying" @click="applyBulk">
+                <Check :size="14" />
+                Áp dụng cho dòng đã chọn
+              </button>
+              <!-- Các bộ mẫu do Admin cấu hình -->
+              <div class="row wrap" style="gap: 6px; align-items: center">
                 <button
+                  v-if="catalogPresets.length === 0"
                   class="btn btn-secondary btn-sm"
                   type="button"
                   :disabled="bulkApplying"
-                  title="7 giấy tờ luôn xuất hiện cùng nhau ở 98% hồ sơ đăng ký kết hôn có danh sách — đánh dấu từ dữ liệu thật"
+                  title="Bộ 7 giấy tờ chuẩn mặc định"
                   @click="bulkApplyStandardSeven"
                 >
                   <Star :size="14" />
                   Bộ 7 chuẩn
                 </button>
                 <button
-                  v-if="selectedNormalizableCount > 0"
+                  v-for="preset in catalogPresets"
+                  :key="preset.id"
                   class="btn btn-secondary btn-sm"
                   type="button"
-                  @click="normalizeSelected"
+                  :disabled="bulkApplying"
+                  :title="`${preset.name} (${preset.items.length} giấy tờ): ${preset.items.join(', ')}`"
+                  @click="applyPreset(preset)"
                 >
-                  <CircleCheck :size="14" />
-                  Sửa mở đầu đúng mẫu ({{ formatNumber(selectedNormalizableCount) }})
+                  <Star v-if="preset.isDefault" :size="14" style="color: #f59e0b" />
+                  <FileText v-else :size="14" />
+                  {{ preset.name }}
+                </button>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  type="button"
+                  title="Cấu hình / Thêm các bộ mẫu giấy tờ cho từng loại hồ sơ"
+                  @click="presetModalOpen = true"
+                >
+                  <Settings :size="14" />
+                  Bộ mẫu
                 </button>
               </div>
-              <button class="btn btn-ghost btn-sm" type="button" @click="clearSelection">
-                <X :size="14" />
-                Bỏ chọn
+              <button
+                v-if="selectedNormalizableCount > 0"
+                class="btn btn-secondary btn-sm"
+                type="button"
+                @click="normalizeSelected"
+              >
+                <CircleCheck :size="14" />
+                Sửa mở đầu đúng mẫu ({{ formatNumber(selectedNormalizableCount) }})
               </button>
             </div>
+            <button class="btn btn-ghost btn-sm" type="button" @click="clearSelection">
+              <X :size="14" />
+              Bỏ chọn
+            </button>
+          </div>
 
-            <div class="table-wrap">
-              <table class="table table-hover summary-table">
-                <thead>
-                  <tr>
-                    <th style="width: 42px">
-                      <input
-                        type="checkbox"
-                        :checked="allPageSelected"
-                        aria-label="Chọn tất cả dòng trong trang"
-                        @change="toggleSelectPage"
-                      />
-                    </th>
-                    <th style="width: 116px">Hồ sơ</th>
-                    <th style="width: 74px">Năm</th>
-                    <th style="width: 108px">Số tờ ({{ session.sheetNumberColumn }})</th>
-                    <th
-                      style="width: 108px; cursor: pointer; user-select: none"
-                      :title="sortByNumber ? 'Đang sắp xếp số hồ sơ tăng dần. Bấm để về thứ tự dòng file gốc' : 'Bấm để sắp xếp theo số hồ sơ tăng dần (1, 2, 3...)'"
-                      @click="sortByNumber = !sortByNumber"
-                    >
-                      Hồ sơ số ({{ session.documentNumberColumn }})
-                      <span v-if="sortByNumber" style="color: var(--accent, #3b82f6); margin-left: 2px">▲</span>
-                    </th>
-                    <th
-                      style="width: 96px; cursor: pointer; user-select: none"
-                      :title="sortByNumber ? 'Đang sắp xếp số hồ sơ tăng dần. Bấm để về thứ tự dòng file gốc' : 'Bấm để sắp xếp theo số hồ sơ tăng dần (1, 2, 3...)'"
-                      @click="sortByNumber = !sortByNumber"
-                    >
-                      Số ({{ session.numberColumn ?? 'B' }})
-                      <span v-if="sortByNumber" style="color: var(--accent, #3b82f6); margin-left: 2px">▲</span>
-                    </th>
-                    <th>Trích yếu</th>
-                    <th style="width: 320px">Giấy tờ trong ngoặc</th>
+          <div class="table-wrap">
+            <table class="table table-hover summary-table">
+              <thead>
+                <tr>
+                  <th style="width: 42px">
+                    <input
+                      type="checkbox"
+                      :checked="allPageSelected"
+                      aria-label="Chọn tất cả dòng trong trang"
+                      @change="toggleSelectPage"
+                    />
+                  </th>
+                  <th style="width: 116px">Hồ sơ</th>
+                  <th style="width: 74px">Năm</th>
+                  <th style="width: 108px">Số tờ ({{ session.sheetNumberColumn }})</th>
+                  <th
+                    style="width: 108px; cursor: pointer; user-select: none"
+                    :title="sortByNumber ? 'Đang sắp xếp số hồ sơ tăng dần. Bấm để về thứ tự dòng file gốc' : 'Bấm để sắp xếp theo số hồ sơ tăng dần (1, 2, 3...)'"
+                    @click="sortByNumber = !sortByNumber"
+                  >
+                    Hồ sơ số ({{ session.documentNumberColumn }})
+                    <span v-if="sortByNumber" style="color: var(--accent, #3b82f6); margin-left: 2px">▲</span>
+                  </th>
+                  <th
+                    style="width: 96px; cursor: pointer; user-select: none"
+                    :title="sortByNumber ? 'Đang sắp xếp số hồ sơ tăng dần. Bấm để về thứ tự dòng file gốc' : 'Bấm để sắp xếp theo số hồ sơ tăng dần (1, 2, 3...)'"
+                    @click="sortByNumber = !sortByNumber"
+                  >
+                    Số ({{ session.numberColumn ?? 'B' }})
+                    <span v-if="sortByNumber" style="color: var(--accent, #3b82f6); margin-left: 2px">▲</span>
+                  </th>
+                  <th>Trích yếu</th>
+                  <th style="width: 320px">Giấy tờ trong ngoặc</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- SKELETON LOADING SHIMMER: hiển thị khung xương mượt mà khi đang nạp -->
+                <template v-if="loadingRows">
+                  <tr v-for="skelIdx in 8" :key="'skel-' + skelIdx" class="skeleton-tr">
+                    <td><div class="skeleton-shimmer" style="width: 16px; height: 16px; border-radius: 3px;"></div></td>
+                    <td>
+                      <div class="skeleton-shimmer" style="width: 65px; height: 16px; margin-bottom: 4px;"></div>
+                      <div class="skeleton-shimmer" style="width: 45px; height: 12px;"></div>
+                    </td>
+                    <td><div class="skeleton-shimmer" style="width: 42px; height: 16px;"></div></td>
+                    <td><div class="skeleton-shimmer" style="width: 55px; height: 16px;"></div></td>
+                    <td><div class="skeleton-shimmer" style="width: 50px; height: 16px;"></div></td>
+                    <td><div class="skeleton-shimmer" style="width: 45px; height: 16px;"></div></td>
+                    <td>
+                      <div class="skeleton-shimmer" :style="{ width: (55 + (skelIdx * 11) % 35) + '%', height: '16px', marginBottom: '6px' }"></div>
+                      <div class="skeleton-shimmer" :style="{ width: (40 + (skelIdx * 7) % 25) + '%', height: '12px' }"></div>
+                    </td>
+                    <td>
+                      <div class="row wrap" style="gap: 4px">
+                        <div class="skeleton-shimmer" style="width: 70px; height: 20px; border-radius: 999px;"></div>
+                        <div class="skeleton-shimmer" style="width: 85px; height: 20px; border-radius: 999px;"></div>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
+                </template>
+
+                <template v-else-if="rows.length === 0">
+                  <tr>
+                    <td colspan="8" style="padding: 40px 16px; text-align: center;">
+                      <EmptyState
+                        title="Không có hồ sơ phù hợp"
+                        description="Thử bỏ bộ lọc năm, loại hồ sơ, số hồ sơ hoặc từ khoá tìm kiếm."
+                      />
+                    </td>
+                  </tr>
+                </template>
+
+                <template v-else>
                   <template v-for="row in rows" :key="row.rowNumber">
                     <tr
                       :class="{
@@ -3692,10 +3845,10 @@ onBeforeUnmount(() => {
                       </td>
                     </tr>
                   </template>
-                </tbody>
-              </table>
-            </div>
-          </template>
+                </template>
+              </tbody>
+            </table>
+          </div>
 
           <div class="summary-pager">
             <span class="hint">
@@ -4362,6 +4515,121 @@ onBeforeUnmount(() => {
               <Database :size="16" />
               {{ directSyncing ? 'Đang nạp vào CSDL...' : 'Xác nhận nạp vào Kho' }}
             </button>
+          </div>
+        </div>
+      </div>
+      </Transition>
+
+      <!-- Modal: Quản lý Bộ Mẫu Giấy Tờ do Admin cấu hình -->
+      <Transition name="modal">
+      <div v-if="presetModalOpen" class="modal-backdrop" @click.self="presetModalOpen = false">
+        <div class="modal" style="width: min(680px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title">Cấu hình Bộ mẫu Giấy tờ (Admin Presets)</div>
+              <div class="card-subtitle">
+                Admin tự thiết lập các bộ giấy tờ chuẩn theo từng loại hộ tịch (Kết hôn, Khai sinh, Khai tử...)
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="presetModalOpen = false">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="modal-body stack" style="gap: 16px">
+            <!-- Danh sách các bộ mẫu hiện tại -->
+            <div>
+              <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px">Danh sách các bộ mẫu đang có:</div>
+              <div style="display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto">
+                <div
+                  v-for="p in catalogPresets"
+                  :key="p.id"
+                  class="card"
+                  style="padding: 10px 14px; display: flex; justify-content: space-between; align-items: center"
+                >
+                  <div style="min-width: 0">
+                    <div style="display: flex; align-items: center; gap: 6px">
+                      <strong style="font-size: 0.95rem">{{ p.name }}</strong>
+                      <span v-if="p.dossierType" class="badge">{{ p.dossierType }}</span>
+                      <span v-if="p.isDefault" class="badge badge-brand">Mặc định</span>
+                    </div>
+                    <div class="hint truncate" style="margin-top: 3px" :title="p.items.join(', ')">
+                      {{ p.items.join(', ') }} ({{ p.items.length }} giấy tờ)
+                    </div>
+                  </div>
+                  <div class="row" style="gap: 6px; flex-shrink: 0; margin-left: 12px">
+                    <button class="btn btn-secondary btn-xs" type="button" @click="openEditPresetModal(p)">
+                      Sửa
+                    </button>
+                    <button
+                      v-if="!p.isDefault"
+                      class="btn btn-danger btn-xs"
+                      type="button"
+                      @click="deletePreset(p.id, p.name)"
+                    >
+                      Xoá
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Form thêm / sửa bộ mẫu -->
+            <div class="card" style="padding: 14px; background: var(--bg-surface-2, rgba(255,255,255,0.03))">
+              <div style="font-weight: 600; margin-bottom: 10px">
+                {{ editingPreset?.id ? 'Chỉnh sửa bộ mẫu' : 'Thêm bộ mẫu mới' }}
+              </div>
+              <div class="row wrap" style="gap: 10px">
+                <label class="field grow">
+                  <span class="label">Tên bộ mẫu</span>
+                  <input
+                    v-if="editingPreset"
+                    v-model="editingPreset.name"
+                    class="input"
+                    placeholder="VD: Bộ hồ sơ Khai sinh chuẩn"
+                  />
+                </label>
+                <label class="field" style="width: 200px">
+                  <span class="label">Loại hồ sơ áp dụng</span>
+                  <input
+                    v-if="editingPreset"
+                    v-model="editingPreset.dossierType"
+                    class="input"
+                    placeholder="VD: Đăng ký khai sinh"
+                  />
+                </label>
+              </div>
+
+              <div style="margin-top: 10px">
+                <span class="label" style="display: block; margin-bottom: 4px">Danh sách giấy tờ thành phần</span>
+                <SummaryItemPicker
+                  v-if="editingPreset && session"
+                  v-model="editingPreset.items"
+                  :catalog="session.catalog"
+                  :counts="catalogCounts"
+                  placeholder="Gõ hoặc chọn giấy tờ đưa vào bộ mẫu..."
+                  @custom-added="persistCatalogCustom"
+                />
+              </div>
+
+              <div class="row-between" style="margin-top: 14px">
+                <button
+                  v-if="editingPreset?.id"
+                  class="btn btn-ghost btn-sm"
+                  type="button"
+                  @click="openCreatePresetModal"
+                >
+                  Huỷ sửa / Tạo mới
+                </button>
+                <span v-else></span>
+                <button class="btn btn-primary btn-sm" type="button" @click="savePreset">
+                  <Save :size="14" />
+                  {{ editingPreset?.id ? 'Cập nhật bộ mẫu' : 'Lưu bộ mẫu mới' }}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" @click="presetModalOpen = false">Đóng</button>
           </div>
         </div>
       </div>

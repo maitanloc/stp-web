@@ -419,6 +419,25 @@ export interface SummaryCatalogItem {
   dossierTypeHint: string | null
 }
 
+export interface SummaryCatalogPresetResponse {
+  id: string
+  name: string
+  dossierType?: string | null
+  items: string[]
+  isDefault: boolean
+  order: number
+  createdAt: string
+}
+
+export interface SummaryCatalogPresetUpsertRequest {
+  id?: string | null
+  name: string
+  dossierType?: string | null
+  items: string[]
+  isDefault?: boolean
+  order?: number | null
+}
+
 export interface SummaryRowResponse {
   rowNumber: number
   year: number | null

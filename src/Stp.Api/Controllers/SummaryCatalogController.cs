@@ -20,10 +20,83 @@ public sealed class SummaryCatalogController : ControllerBase
     private const int MaxItemLength = 300;
 
     private readonly ICatalogDictionary _catalog;
+    private readonly ICatalogPresetService _presets;
 
-    public SummaryCatalogController(ICatalogDictionary catalog)
+    public SummaryCatalogController(
+        ICatalogDictionary catalog,
+        ICatalogPresetService presets)
     {
         _catalog = catalog;
+        _presets = presets;
+    }
+
+    /// <summary>Danh sách các bộ mẫu giấy tờ (presets) do Admin cấu hình.</summary>
+    [HttpGet("presets")]
+    public ActionResult<IReadOnlyList<SummaryCatalogPresetResponse>> ListPresets()
+    {
+        var list = _presets.GetPresets()
+            .Select(p => new SummaryCatalogPresetResponse(
+                p.Id,
+                p.Name,
+                p.DossierType,
+                p.Items,
+                p.IsDefault,
+                p.Order,
+                p.CreatedAt))
+            .ToList();
+
+        return Ok(list);
+    }
+
+    /// <summary>Thêm mới hoặc cập nhật bộ mẫu giấy tờ do Admin cấu hình.</summary>
+    [HttpPost("presets")]
+    public ActionResult<SummaryCatalogPresetResponse> UpsertPreset(
+        [FromBody] SummaryCatalogPresetUpsertRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Tên bộ mẫu không hợp lệ",
+                Detail = "Tên bộ mẫu không được để trống.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var result = _presets.UpsertPreset(
+            request.Id,
+            request.Name,
+            request.DossierType,
+            request.Items,
+            request.IsDefault,
+            request.Order);
+
+        return Ok(new SummaryCatalogPresetResponse(
+            result.Id,
+            result.Name,
+            result.DossierType,
+            result.Items,
+            result.IsDefault,
+            result.Order,
+            result.CreatedAt));
+    }
+
+    /// <summary>Xoá một bộ mẫu giấy tờ.</summary>
+    [HttpDelete("presets/{id:guid}")]
+    public IActionResult DeletePreset(Guid id)
+    {
+        var deleted = _presets.DeletePreset(id);
+        if (!deleted)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Không tìm thấy bộ mẫu",
+                Detail = $"Không tìm thấy bộ mẫu giấy tờ với mã {id}",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        return NoContent();
     }
 
     /// <summary>Danh sách mục đang hoạt động, sắp theo tần suất "hay gặp nhất".</summary>

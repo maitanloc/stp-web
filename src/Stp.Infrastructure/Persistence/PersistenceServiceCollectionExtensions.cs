@@ -28,6 +28,7 @@ public static class PersistenceServiceCollectionExtensions
 
         services.AddScoped<IArchiveSyncService, ArchiveSyncService>();
         services.AddSingleton<ICatalogDictionary, CatalogStore>();
+        services.AddSingleton<ICatalogPresetService, CatalogPresetService>();
         return services;
     }
 }

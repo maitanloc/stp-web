@@ -247,3 +247,20 @@ public sealed record SummaryDirectSyncResponse(
     int UpdatedCount,
     int ConflictCount,
     string? Message);
+
+public sealed record SummaryCatalogPresetResponse(
+    Guid Id,
+    string Name,
+    string? DossierType,
+    IReadOnlyList<string> Items,
+    bool IsDefault,
+    int Order,
+    DateTimeOffset CreatedAt);
+
+public sealed record SummaryCatalogPresetUpsertRequest(
+    Guid? Id,
+    string Name,
+    string? DossierType,
+    IReadOnlyList<string> Items,
+    bool IsDefault = false,
+    int? Order = null);
