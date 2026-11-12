@@ -382,8 +382,10 @@ watch(tab, (value) => {
       </div>
     </TransitionGroup>
 
-    <!-- Panel chính -->
-    <Transition name="dock" mode="out-in">
+    <!-- Panel chính — v-if/v-else thuần, KHÔNG bọc Transition:
+         Transition (nextFrame = requestAnimationFrame) kẹt vĩnh viễn khi tab
+         không focus / bị throttle → với mode="out-in" panel không bao giờ
+         được render. Mở/đóng tức thì ổn hơn fade 0.15s. -->
     <section v-if="open" class="dock-panel" aria-label="Liên lạc nhóm">
       <header class="dock-head">
         <div class="head-title">
@@ -610,7 +612,6 @@ watch(tab, (value) => {
       <span v-if="onlineOthers.length === 0" class="pill-label">Chat nhóm</span>
       <span v-if="unread > 0" class="unread-badge strong">{{ unread > 9 ? '9+' : unread }}</span>
     </button>
-    </Transition>
 
     <UserNameModal :open="nameModalOpen" @saved="saveName" @closed="onModalClosed" />
     <LoginModal :open="loginModalOpen" @logged="onLogged" @closed="loginModalOpen = false" />
