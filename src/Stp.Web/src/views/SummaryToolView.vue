@@ -6,22 +6,27 @@ import {
   Check,
   CircleCheck,
   Clock,
+  Database,
   Download,
   Eraser,
   FilePenLine,
   FileSpreadsheet,
   Info,
   Mic,
+  Radio,
   RefreshCw,
   Search,
   Star,
   TriangleExclamationPoint,
+  Users,
   X,
 } from '@lucide/vue'
 import { download, queryString, request, saveBlob } from '../api/client'
 import type {
+  SummaryActiveSessionResponse,
   SummaryCatalogItem,
   SummaryChangeRequest,
+  SummaryDirectSyncResponse,
   SummaryFilteredPreviewResponse,
   SummaryInspectResponse,
   SummaryNumberMode,
@@ -51,7 +56,18 @@ import { useToast } from '../composables/useToast'
 import {
   clearTeamEditingState,
   setTeamEditingState,
+  teamOnline,
   teamRowMarks,
+  joinSummarySession,
+  leaveSummarySession,
+  sendSummaryCellFocus,
+  sendSummaryCellTyping,
+  sendSummaryCellCommit,
+  lastSummaryCellFocus,
+  lastSummaryCellTyping,
+  lastSummaryCellChanged,
+  lastSummaryBulkChanged,
+  lastTeamSessionChanged,
 } from '../composables/useTeamPresence'
 import { getUserName } from '../api/client'
 import { teamIdentity } from '../composables/useTeamIdentity'
@@ -170,6 +186,38 @@ watch(
     setTeamEditingState(currentSession?.sessionId ?? null, currentRow)
   },
 )
+
+// ===== Multiplayer Google Sheets & Active Session toàn phòng =====
+const activeTeamSession = ref<SummaryActiveSessionResponse | null>(null)
+const settingActiveSession = ref(false)
+const directSyncModalOpen = ref(false)
+const directSyncing = ref(false)
+const directSyncResult = ref<SummaryDirectSyncResponse | null>(null)
+
+// Con trỏ ô realtime: key = `${rowNumber}:${col}` -> { actor, at }
+const remoteFocusedCells = ref<Map<string, { actor: string; at: number }>>(new Map())
+// Gõ chữ realtime: key = `${rowNumber}:${col}` -> { actor, text, at }
+const remoteTypingCells = ref<Map<string, { actor: string; text: string; at: number }>>(new Map())
+// Hiệu ứng chớp sáng dòng vừa được sửa (Google Sheets pulse): Set<rowNumber>
+const flashingRows = ref<Set<number>>(new Set())
+
+const myActorName = computed(() => teamIdentity.value?.displayName ?? getUserName())
+const isAdmin = computed(() => {
+  const name = (getUserName() || '').toLowerCase()
+  return name === 'admin' || name === 'quan tri' || name === 'quản trị'
+})
+
+const roomCollaborators = computed(() => {
+  const me = myActorName.value
+  return teamOnline.value.filter((user) => user.actor !== me && (user.where || '').includes('trích yếu'))
+})
+
+function triggerRowFlash(rowNumber: number): void {
+  flashingRows.value.add(rowNumber)
+  window.setTimeout(() => {
+    flashingRows.value.delete(rowNumber)
+  }, 2500)
+}
 
 const previewOpen = ref(false)
 const previewMode = ref<'full' | 'filtered'>('full')
@@ -315,6 +363,31 @@ function loadResumeCandidates(): void {
     })
 }
 
+async function fetchSharedEdits(sessionId: string): Promise<void> {
+  try {
+    const list = await request<SummaryChangeRequest[]>(`/api/summary/${sessionId}/edits`)
+    if (!list || list.length === 0) return
+    const next = new Map(edits.value)
+    for (const item of list) {
+      const existing = next.get(item.rowNumber)
+      const rowRef = existing?.row ?? rows.value.find((r) => r.rowNumber === item.rowNumber)
+      if (rowRef) {
+        next.set(item.rowNumber, {
+          row: rowRef,
+          items: item.items ?? [],
+          summaryText: item.summaryText ?? null,
+          sheetNumber: item.sheetNumber ?? null,
+          documentNumber: item.documentNumber ?? null,
+          numberLabel: item.numberLabel ?? null,
+        })
+      }
+    }
+    edits.value = next
+  } catch {
+    // Bỏ qua nếu lỗi mạng
+  }
+}
+
 async function restoreFromServer(sessionId: string): Promise<boolean> {
   try {
     const data = await request<SummaryInspectResponse>(`/api/summary/${sessionId}`)
@@ -325,8 +398,12 @@ async function restoreFromServer(sessionId: string): Promise<boolean> {
     page.value = 1
     await fetchRows()
     await fetchYearReport()
+    // Nạp toàn bộ sửa đổi của cả phòng đã lưu trên server
+    await fetchSharedEdits(data.sessionId)
     restoreDraft(data.fileName)
     resetHistory()
+    // Tham gia nhóm làm việc chung qua SignalR
+    joinSummarySession(data.sessionId, myActorName.value ?? 'Quản trị')
     return true
   } catch {
     return false
@@ -334,18 +411,40 @@ async function restoreFromServer(sessionId: string): Promise<boolean> {
 }
 
 async function resumeLastSession(): Promise<void> {
-  let saved: { sessionId: string; fileName: string } | null = null
-  try {
-    const raw = localStorage.getItem(ACTIVE_SESSION_KEY)
-    if (raw) saved = JSON.parse(raw) as { sessionId: string; fileName: string }
-  } catch {
-    saved = null
-  }
-
-  if (!saved) return
-
   resuming.value = true
   try {
+    // 1. Kiểm tra trước tiên: Có file chung của cả phòng không?
+    try {
+      const active = await request<SummaryActiveSessionResponse>('/api/summary/active')
+      if (active && active.hasActiveSession && active.sessionId) {
+        activeTeamSession.value = active
+        const ok = await restoreFromServer(active.sessionId)
+        if (ok) {
+          toast.success(
+            'Đã vào file làm việc chung',
+            `File "${active.fileName}" do ${active.uploadedBy} tải lên cho cả phòng cùng làm.`,
+          )
+          return
+        }
+      }
+    } catch {
+      // Bỏ qua lỗi mạng
+    }
+
+    // 2. Không có file chung phòng -> Khôi phục phiên cá nhân lưu trong localStorage
+    let saved: { sessionId: string; fileName: string } | null = null
+    try {
+      const raw = localStorage.getItem(ACTIVE_SESSION_KEY)
+      if (raw) saved = JSON.parse(raw) as { sessionId: string; fileName: string }
+    } catch {
+      saved = null
+    }
+
+    if (!saved) {
+      loadResumeCandidates()
+      return
+    }
+
     const ok = await restoreFromServer(saved.sessionId)
     if (ok) {
       toast.success('Đã khôi phục phiên đang dở', `File ${saved.fileName} được mở lại — không cần import.`)
@@ -805,6 +904,101 @@ function commit(row: SummaryRowResponse, patch: Partial<Omit<RowEdit, 'row'>>): 
 
   edits.value = next
   pushHistory()
+
+  // Multiplayer: Gửi cập nhật tức thời lên server để lưu vào shared edits và broadcast cho toàn phòng
+  if (session.value) {
+    const changeReq: SummaryChangeRequest = {
+      rowNumber: row.rowNumber,
+      items: nextEdit.items,
+      summaryText: nextEdit.summaryText,
+      sheetNumber: nextEdit.sheetNumber,
+      documentNumber: nextEdit.documentNumber,
+      numberLabel: nextEdit.numberLabel,
+    }
+    void request(`/api/summary/${session.value.sessionId}/change`, {
+      method: 'POST',
+      body: changeReq,
+    }).catch(() => {})
+    sendSummaryCellCommit(session.value.sessionId, changeReq, myActorName.value ?? 'Quản trị')
+  }
+}
+
+function onCellFocus(row: SummaryRowResponse, col: string): void {
+  if (!session.value) return
+  sendSummaryCellFocus(session.value.sessionId, row.rowNumber, col, myActorName.value ?? 'Quản trị')
+}
+
+function onCellBlur(row: SummaryRowResponse, _col?: string): void {
+  if (!session.value) return
+  sendSummaryCellFocus(session.value.sessionId, row.rowNumber, '', myActorName.value ?? 'Quản trị')
+}
+
+function onCellInput(row: SummaryRowResponse, col: string, event: Event): void {
+  if (!session.value) return
+  const val = (event.target as HTMLInputElement).value
+  sendSummaryCellTyping(session.value.sessionId, row.rowNumber, col, val, myActorName.value ?? 'Quản trị')
+}
+
+async function toggleActiveTeamSession(): Promise<void> {
+  const active = session.value
+  if (!active) return
+
+  settingActiveSession.value = true
+  try {
+    if (activeTeamSession.value?.sessionId === active.sessionId) {
+      await request('/api/summary/active', { method: 'DELETE' })
+      activeTeamSession.value = null
+      toast.info('Đã dừng chia sẻ file chung', 'File này không còn tự động nạp cho cả phòng.')
+    } else {
+      const res = await request<SummaryActiveSessionResponse>('/api/summary/active', {
+        method: 'POST',
+        body: { sessionId: active.sessionId },
+      })
+      activeTeamSession.value = res
+      toast.success(
+        'Đã đặt làm file làm việc chung',
+        'Tất cả thành viên trong phòng khi mở app sẽ tự động vào chung file này.',
+      )
+    }
+  } catch (caught) {
+    toast.error('Thao tác thất bại', errorMessage(caught))
+  } finally {
+    settingActiveSession.value = false
+  }
+}
+
+async function doDirectSyncToArchive(): Promise<void> {
+  const active = session.value
+  if (!active) return
+
+  directSyncing.value = true
+  try {
+    const res = await request<SummaryDirectSyncResponse>(
+      `/api/summary/${active.sessionId}/sync-to-archive`,
+      {
+        method: 'POST',
+        body: { confirmSync: true },
+      },
+    )
+
+    directSyncResult.value = res
+    if (res.success) {
+      toast.success(
+        'Đã nạp thẳng vào Kho hồ sơ!',
+        `Thêm mới ${formatNumber(res.addedCount)} · Sửa ${formatNumber(res.updatedCount)} · Xung đột ${formatNumber(res.conflictCount)}. Toàn bộ dữ liệu đã được ghi vào Kho CSDL an toàn.`,
+      )
+      pushHistoryEntry(
+        'Nạp thẳng vào Kho',
+        `${active.fileName} · +${res.addedCount} / sửa ${res.updatedCount} / xung đột ${res.conflictCount}`,
+      )
+    } else {
+      toast.error('Chưa nạp được vào Kho', res.errorMessage ?? 'Không rõ lỗi')
+    }
+  } catch (caught) {
+    toast.error('Lỗi khi nạp vào Kho', errorMessage(caught))
+  } finally {
+    directSyncing.value = false
+  }
 }
 
 function setRowItems(row: SummaryRowResponse, items: string[]): void {
@@ -1015,6 +1209,8 @@ async function applyToMissingInScope(): Promise<void> {
         'bulk',
         `Gán bộ cho ${formatNumber(applied)} dòng còn thiếu trong phạm vi lọc`,
       )
+      // Broadcast bulk change cho cả phòng
+      broadcastBulkChanges(allChanges.value)
     }
   } catch (caught) {
     toast.error('Không áp được', errorMessage(caught))
@@ -1370,6 +1566,7 @@ function applyBulk(): void {
   bulkApplying.value = true
   let applied = 0
   const next = new Map(edits.value)
+  const changesApplied: SummaryChangeRequest[] = []
 
   for (const row of rows.value) {
     if (!selected.value.has(row.rowNumber)) continue
@@ -1394,6 +1591,14 @@ function applyBulk(): void {
       num !== row.numberLabel
     ) {
       next.set(row.rowNumber, nextEdit)
+      changesApplied.push({
+        rowNumber: row.rowNumber,
+        items: nextEdit.items,
+        summaryText: nextEdit.summaryText,
+        sheetNumber: nextEdit.sheetNumber,
+        documentNumber: nextEdit.documentNumber,
+        numberLabel: nextEdit.numberLabel,
+      })
     } else {
       next.delete(row.rowNumber)
     }
@@ -1403,6 +1608,9 @@ function applyBulk(): void {
   edits.value = next
   pushHistory()
   bulkApplying.value = false
+  if (changesApplied.length > 0) {
+    broadcastBulkChanges(changesApplied)
+  }
   toast.success(
     'Đã áp dụng danh mục',
     `${formatNumber(applied)} dòng trong trang hiện tại đã nhận ${bulkItems.value.length} loại giấy tờ.`,
@@ -1431,6 +1639,7 @@ function normalizeSelected(): void {
 
   const next = new Map(edits.value)
   let applied = 0
+  const changesApplied: SummaryChangeRequest[] = []
 
   for (const row of rows.value) {
     if (!selected.value.has(row.rowNumber) || !row.needsNormalization) continue
@@ -1447,15 +1656,28 @@ function normalizeSelected(): void {
     // Không ghi đè câu người dùng đã sửa tay; bản xuất vẫn tự chuẩn hoá tiền tố.
     if (current.summaryText !== null) continue
 
-    next.set(row.rowNumber, {
+    const summaryText = composeSummary(row, current.items)
+    const nextEdit = {
       ...current,
-      summaryText: composeSummary(row, current.items),
+      summaryText,
+    }
+    next.set(row.rowNumber, nextEdit)
+    changesApplied.push({
+      rowNumber: row.rowNumber,
+      items: nextEdit.items,
+      summaryText: nextEdit.summaryText,
+      sheetNumber: nextEdit.sheetNumber,
+      documentNumber: nextEdit.documentNumber,
+      numberLabel: nextEdit.numberLabel,
     })
     applied++
   }
 
   edits.value = next
   pushHistory()
+  if (changesApplied.length > 0) {
+    broadcastBulkChanges(changesApplied)
+  }
   toast.success(
     'Đã sửa mở đầu đúng mẫu',
     `${formatNumber(applied)} dòng đang chọn đã về đúng mẫu.`,
@@ -1766,6 +1988,12 @@ function closeSession(): void {
 
   if (changedCount.value > 0 && !window.confirm('Bỏ các thay đổi chưa xuất và đóng workbook?')) {
     return
+  }
+
+  leaveSummarySession(active.sessionId, myActorName.value ?? 'Quản trị')
+  if (isAdmin.value && activeTeamSession.value?.sessionId === active.sessionId) {
+    void request('/api/summary/active', { method: 'DELETE' }).catch(() => {})
+    activeTeamSession.value = null
   }
 
   void deleteSessionSilent(active.sessionId)
@@ -2374,11 +2602,115 @@ watch(pageSize, () => {
   void fetchRows()
 })
 
+function broadcastBulkChanges(changes: SummaryChangeRequest[]): void {
+  if (!session.value || changes.length === 0) return
+  void request(`/api/summary/${session.value.sessionId}/changes`, {
+    method: 'POST',
+    body: changes,
+  }).catch(() => {})
+}
+
+// Lắng nghe con trỏ ô của đồng đội trong phòng
+watch(lastSummaryCellFocus, (evt) => {
+  if (!evt || evt.sessionId !== session.value?.sessionId || evt.actor === myActorName.value) return
+  // Xoá vị trí cũ của actor này
+  for (const [key, val] of remoteFocusedCells.value.entries()) {
+    if (val.actor === evt.actor) remoteFocusedCells.value.delete(key)
+  }
+  // Nếu có ô được chọn
+  if (evt.column) {
+    remoteFocusedCells.value.set(`${evt.rowNumber}:${evt.column}`, {
+      actor: evt.actor,
+      at: Date.now(),
+    })
+  }
+})
+
+// Lắng nghe gõ chữ realtime
+watch(lastSummaryCellTyping, (evt) => {
+  if (!evt || evt.sessionId !== session.value?.sessionId || evt.actor === myActorName.value) return
+  remoteTypingCells.value.set(`${evt.rowNumber}:${evt.column}`, {
+    actor: evt.actor,
+    text: evt.text,
+    at: Date.now(),
+  })
+})
+
+// Lắng nghe ô được lưu / commit
+watch(lastSummaryCellChanged, (evt) => {
+  if (!evt || evt.sessionId !== session.value?.sessionId || evt.actor === myActorName.value) return
+  const targetRow = rows.value.find((r) => r.rowNumber === evt.rowNumber)
+  const existing = edits.value.get(evt.rowNumber)
+  const rowRef = targetRow ?? existing?.row
+  if (rowRef) {
+    const next = new Map(edits.value)
+    next.set(evt.rowNumber, {
+      row: rowRef,
+      items: evt.items,
+      summaryText: evt.summaryText,
+      sheetNumber: evt.sheetNumber,
+      documentNumber: evt.documentNumber,
+      numberLabel: evt.numberLabel,
+    })
+    edits.value = next
+  }
+  triggerRowFlash(evt.rowNumber)
+  // Xoá trạng thái gõ của ô đó
+  remoteTypingCells.value.delete(`${evt.rowNumber}:sheetNumber`)
+  remoteTypingCells.value.delete(`${evt.rowNumber}:documentNumber`)
+  remoteTypingCells.value.delete(`${evt.rowNumber}:numberLabel`)
+  remoteTypingCells.value.delete(`${evt.rowNumber}:summary`)
+})
+
+// Lắng nghe áp dụng hàng loạt từ đồng đội
+watch(lastSummaryBulkChanged, (evt) => {
+  if (!evt || evt.sessionId !== session.value?.sessionId || evt.actor === myActorName.value) return
+  void fetchSharedEdits(evt.sessionId)
+  toast.info('Đồng đội cập nhật', `${evt.actor} vừa áp dụng thay đổi cho ${formatNumber(evt.count)} dòng.`)
+})
+
+// Lắng nghe admin đổi/tải file làm việc chung
+watch(lastTeamSessionChanged, async (evt) => {
+  if (!evt) return
+  if (evt.sessionId) {
+    activeTeamSession.value = {
+      hasActiveSession: true,
+      sessionId: evt.sessionId,
+      fileName: evt.fileName,
+      uploadedBy: evt.uploadedBy,
+      uploadedAt: evt.uploadedAt,
+      rowCount: evt.rowCount,
+      editCount: evt.editCount,
+    }
+    if (session.value?.sessionId !== evt.sessionId) {
+      toast.info(
+        'File làm chung mới',
+        `${evt.uploadedBy} vừa mở file "${evt.fileName}" cho cả phòng cùng làm. Đang tự nạp...`,
+      )
+      await restoreFromServer(evt.sessionId)
+    }
+  } else {
+    activeTeamSession.value = null
+  }
+})
+
+let presenceCleanTimer: number | undefined
+
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('keydown', onSpeedKeydown)
   // E1: chuyển tab / thu nhỏ cửa sổ — đẩy bản nháp lên server ngay.
   document.addEventListener('visibilitychange', onVisibilityChange)
+  // Dọn dẹp con trỏ và typing rác nếu đồng đội đóng tab
+  presenceCleanTimer = window.setInterval(() => {
+    const now = Date.now()
+    for (const [k, v] of remoteFocusedCells.value.entries()) {
+      if (now - v.at > 10000) remoteFocusedCells.value.delete(k)
+    }
+    for (const [k, v] of remoteTypingCells.value.entries()) {
+      if (now - v.at > 6000) remoteTypingCells.value.delete(k)
+    }
+  }, 3000)
   void resumeLastSession().then(() => {
     if (!session.value) loadResumeCandidates()
   })
@@ -2395,6 +2727,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onSpeedKeydown)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   clearTeamEditingState()
+  if (presenceCleanTimer) window.clearInterval(presenceCleanTimer)
   if (searchTimer) window.clearTimeout(searchTimer)
   if (filterTimer) window.clearTimeout(filterTimer)
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
@@ -2403,6 +2736,7 @@ onBeforeUnmount(() => {
   void syncServerDraft()
   if (session.value) {
     saveDraft()
+    leaveSummarySession(session.value.sessionId, myActorName.value ?? 'Quản trị')
     // KHÔNG xoá phiên trên server khi rời trang: F5/mất kết nối vẫn khôi phục được.
     // Phiên tự hết hạn sau 12 giờ (CleanupExpired ở backend).
   }
@@ -2498,6 +2832,56 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else>
+      <!-- Banner phiên làm việc chung toàn phòng (Google Sheets multiplayer) -->
+      <div v-if="activeTeamSession && activeTeamSession.sessionId === session.sessionId" class="team-session-banner">
+        <div class="team-session-banner-main">
+          <div class="team-live-indicator">
+            <span class="live-dot-pulse" />
+            <Radio :size="16" />
+            <span>PHIÊN LÀM VIỆC CHUNG CỦA PHÒNG</span>
+          </div>
+          <div class="team-session-desc">
+            File <strong>{{ activeTeamSession.fileName }}</strong> do <strong>{{ activeTeamSession.uploadedBy }}</strong> chia sẻ. Mọi người trong phòng đang thao tác chung trên file này trực tiếp như Google Sheets — ai sửa ô nào cả phòng đều thấy ngay!
+          </div>
+        </div>
+        <div class="team-session-banner-actions">
+          <div v-if="roomCollaborators.length > 0" class="team-session-collaborators">
+            <span class="hint" style="font-size: 12px">Cùng mở:</span>
+            <div class="avatar-group">
+              <span
+                v-for="user in roomCollaborators"
+                :key="user.actor"
+                class="tag-avatar"
+                :title="`${user.actor} đang xem`"
+                :style="renderAvatar(user.actor).style"
+              >
+                <img v-if="renderAvatar(user.actor).imageUrl" :src="renderAvatar(user.actor).imageUrl" class="avatar-img" />
+                <template v-else>{{ renderAvatar(user.actor).initials }}</template>
+              </span>
+            </div>
+          </div>
+          <button
+            class="btn btn-primary btn-sm"
+            type="button"
+            title="Nạp trực tiếp toàn bộ dữ liệu file này vào Kho hồ sơ SQL Server"
+            @click="directSyncModalOpen = true"
+          >
+            <Database :size="14" />
+            Nạp thẳng vào Kho hồ sơ
+          </button>
+          <button
+            v-if="isAdmin"
+            class="btn btn-ghost btn-sm"
+            type="button"
+            :disabled="settingActiveSession"
+            title="Dừng phiên làm việc chung cho cả phòng"
+            @click="toggleActiveTeamSession"
+          >
+            Dừng chia sẻ file này
+          </button>
+        </div>
+      </div>
+
       <section class="card summary-session">
         <div class="card-body row-between wrap" style="gap: 14px">
           <div class="row" style="gap: 12px; min-width: 0">
@@ -2520,6 +2904,27 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="row wrap">
+            <button
+              v-if="isAdmin && (!activeTeamSession || activeTeamSession.sessionId !== session.sessionId)"
+              class="btn btn-secondary btn-sm"
+              type="button"
+              :disabled="settingActiveSession"
+              title="Chia sẻ file này để toàn bộ anh em khi mở app sẽ vào chung một file"
+              @click="toggleActiveTeamSession"
+            >
+              <Users :size="14" />
+              Đặt làm file làm chung
+            </button>
+            <button
+              v-if="!activeTeamSession || activeTeamSession.sessionId !== session.sessionId"
+              class="btn btn-secondary btn-sm"
+              type="button"
+              title="Nạp dữ liệu file này trực tiếp vào Kho hồ sơ SQL Server"
+              @click="directSyncModalOpen = true"
+            >
+              <Database :size="14" />
+              Nạp vào Kho
+            </button>
             <span v-if="draftStatus === 'saved' && draftSavedAt" class="badge badge-info" title="Bản nháp tự lưu trên máy này">
               <Clock :size="13" />
               Nháp {{ draftSavedAt.toLocaleTimeString('vi-VN') }}
@@ -2943,6 +3348,7 @@ onBeforeUnmount(() => {
                       :class="{
                         'is-edited': edits.has(row.rowNumber),
                         'is-team-marked': teamMarkRows.has(row.rowNumber),
+                        'is-remote-flashing': flashingRows.has(row.rowNumber),
                       }"
                       :style="
                         teamMarkRows.has(row.rowNumber)
@@ -2996,37 +3402,103 @@ onBeforeUnmount(() => {
                         </span>
                       </td>
                       <td>
-                        <input
-                          class="input summary-sheet-input"
-                          :class="{ 'is-missing': !sheetFor(row).trim() }"
-                          :value="sheetFor(row)"
-                          placeholder="VD: 01-20"
-                          :aria-label="`Số tờ dòng ${row.rowNumber}`"
-                          @change="onSheetChange(row, $event)"
-                        />
-                        <span v-if="!sheetFor(row).trim()" class="summary-missing-tag">Thiếu</span>
+                        <div
+                          class="cell-wrapper"
+                          :class="{
+                            'is-remote-focused': !!remoteFocusedCells.get(`${row.rowNumber}:sheetNumber`),
+                          }"
+                          :style="
+                            remoteFocusedCells.get(`${row.rowNumber}:sheetNumber`)
+                              ? ({ '--cursor-color': colorForName(remoteFocusedCells.get(`${row.rowNumber}:sheetNumber`)!.actor) } as Record<string, string>)
+                              : undefined
+                          "
+                        >
+                          <div
+                            v-if="remoteFocusedCells.get(`${row.rowNumber}:sheetNumber`)"
+                            class="cell-cursor-tag"
+                            :style="{ backgroundColor: colorForName(remoteFocusedCells.get(`${row.rowNumber}:sheetNumber`)!.actor) }"
+                          >
+                            {{ remoteFocusedCells.get(`${row.rowNumber}:sheetNumber`)!.actor }}
+                          </div>
+                          <input
+                            class="input summary-sheet-input"
+                            :class="{ 'is-missing': !sheetFor(row).trim() }"
+                            :value="remoteTypingCells.get(`${row.rowNumber}:sheetNumber`)?.text ?? sheetFor(row)"
+                            placeholder="VD: 01-20"
+                            :aria-label="`Số tờ dòng ${row.rowNumber}`"
+                            @focus="onCellFocus(row, 'sheetNumber')"
+                            @blur="onCellBlur(row, 'sheetNumber')"
+                            @input="onCellInput(row, 'sheetNumber', $event)"
+                            @change="onSheetChange(row, $event)"
+                          />
+                          <span v-if="!sheetFor(row).trim()" class="summary-missing-tag">Thiếu</span>
+                        </div>
                       </td>
                       <td>
-                        <input
-                          class="input summary-sheet-input"
-                          :class="{ 'is-missing': !docFor(row).trim() }"
-                          :value="docFor(row)"
-                          placeholder="VD: HS-01"
-                          :aria-label="`Hồ sơ số dòng ${row.rowNumber}`"
-                          @change="onDocChange(row, $event)"
-                        />
-                        <span v-if="!docFor(row).trim()" class="summary-missing-tag">Thiếu</span>
+                        <div
+                          class="cell-wrapper"
+                          :class="{
+                            'is-remote-focused': !!remoteFocusedCells.get(`${row.rowNumber}:documentNumber`),
+                          }"
+                          :style="
+                            remoteFocusedCells.get(`${row.rowNumber}:documentNumber`)
+                              ? ({ '--cursor-color': colorForName(remoteFocusedCells.get(`${row.rowNumber}:documentNumber`)!.actor) } as Record<string, string>)
+                              : undefined
+                          "
+                        >
+                          <div
+                            v-if="remoteFocusedCells.get(`${row.rowNumber}:documentNumber`)"
+                            class="cell-cursor-tag"
+                            :style="{ backgroundColor: colorForName(remoteFocusedCells.get(`${row.rowNumber}:documentNumber`)!.actor) }"
+                          >
+                            {{ remoteFocusedCells.get(`${row.rowNumber}:documentNumber`)!.actor }}
+                          </div>
+                          <input
+                            class="input summary-sheet-input"
+                            :class="{ 'is-missing': !docFor(row).trim() }"
+                            :value="remoteTypingCells.get(`${row.rowNumber}:documentNumber`)?.text ?? docFor(row)"
+                            placeholder="VD: HS-01"
+                            :aria-label="`Hồ sơ số dòng ${row.rowNumber}`"
+                            @focus="onCellFocus(row, 'documentNumber')"
+                            @blur="onCellBlur(row, 'documentNumber')"
+                            @input="onCellInput(row, 'documentNumber', $event)"
+                            @change="onDocChange(row, $event)"
+                          />
+                          <span v-if="!docFor(row).trim()" class="summary-missing-tag">Thiếu</span>
+                        </div>
                       </td>
                       <td>
-                        <input
-                          class="input summary-sheet-input"
-                          :class="{ 'is-missing': !numFor(row).trim() }"
-                          :value="numFor(row)"
-                          placeholder="VD: 36"
-                          :aria-label="`Số hồ sơ dòng ${row.rowNumber}`"
-                          @change="onNumChange(row, $event)"
-                        />
-                        <span v-if="!numFor(row).trim()" class="summary-missing-tag">Thiếu</span>
+                        <div
+                          class="cell-wrapper"
+                          :class="{
+                            'is-remote-focused': !!remoteFocusedCells.get(`${row.rowNumber}:numberLabel`),
+                          }"
+                          :style="
+                            remoteFocusedCells.get(`${row.rowNumber}:numberLabel`)
+                              ? ({ '--cursor-color': colorForName(remoteFocusedCells.get(`${row.rowNumber}:numberLabel`)!.actor) } as Record<string, string>)
+                              : undefined
+                          "
+                        >
+                          <div
+                            v-if="remoteFocusedCells.get(`${row.rowNumber}:numberLabel`)"
+                            class="cell-cursor-tag"
+                            :style="{ backgroundColor: colorForName(remoteFocusedCells.get(`${row.rowNumber}:numberLabel`)!.actor) }"
+                          >
+                            {{ remoteFocusedCells.get(`${row.rowNumber}:numberLabel`)!.actor }}
+                          </div>
+                          <input
+                            class="input summary-sheet-input"
+                            :class="{ 'is-missing': !numFor(row).trim() }"
+                            :value="remoteTypingCells.get(`${row.rowNumber}:numberLabel`)?.text ?? numFor(row)"
+                            placeholder="VD: 36"
+                            :aria-label="`Số hồ sơ dòng ${row.rowNumber}`"
+                            @focus="onCellFocus(row, 'numberLabel')"
+                            @blur="onCellBlur(row, 'numberLabel')"
+                            @input="onCellInput(row, 'numberLabel', $event)"
+                            @change="onNumChange(row, $event)"
+                          />
+                          <span v-if="!numFor(row).trim()" class="summary-missing-tag">Thiếu</span>
+                        </div>
                       </td>
                       <td>
                         <div
@@ -3788,6 +4260,77 @@ onBeforeUnmount(() => {
               @click="archiveLastExport"
             >
               {{ archiving ? 'Đang lưu...' : 'Lưu vào Kho' }}
+            </button>
+          </div>
+        </div>
+      </div>
+      </Transition>
+      <!-- Modal: Nạp thẳng vào Kho hồ sơ không cần qua bước tải file -->
+      <Transition name="modal">
+      <div v-if="directSyncModalOpen && session" class="modal-backdrop" @click.self="directSyncModalOpen = false">
+        <div class="modal" style="width: min(560px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title">Nạp thẳng vào Kho hồ sơ</div>
+              <div class="card-subtitle">
+                Đưa toàn bộ dữ liệu đang sửa trực tiếp vào bảng Dossiers trong SQL Server — không cần tải file về rồi upload lại.
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="directSyncModalOpen = false">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="modal-body stack" style="gap: 14px">
+            <div class="card" style="padding: 12px 14px; background: var(--surface)">
+              <div class="row-between">
+                <span class="muted">Workbook nguồn:</span>
+                <strong>{{ session.fileName }}</strong>
+              </div>
+              <div class="row-between" style="margin-top: 6px">
+                <span class="muted">Tổng số hồ sơ:</span>
+                <strong>{{ formatNumber(session.rowCount) }}</strong>
+              </div>
+              <div class="row-between" style="margin-top: 6px">
+                <span class="muted">Số dòng đã sửa:</span>
+                <span class="badge badge-brand">{{ formatNumber(changedCount) }} dòng</span>
+              </div>
+            </div>
+
+            <div v-if="directSyncResult" class="alert alert-success">
+              <CircleCheck :size="18" />
+              <div class="grow">
+                <strong>Nạp thành công vào Kho!</strong>
+                <div style="margin-top: 2px">
+                  Thêm mới <strong>{{ formatNumber(directSyncResult.addedCount) }}</strong> ·
+                  Sửa <strong>{{ formatNumber(directSyncResult.updatedCount) }}</strong> ·
+                  Xung đột <strong>{{ formatNumber(directSyncResult.conflictCount) }}</strong>.
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="alert alert-info">
+              <Info :size="16" />
+              <div class="grow">
+                Hệ thống sẽ tổng hợp file gốc cùng toàn bộ thay đổi của anh em, tạo phiên bản đồng bộ và nạp an toàn vào SQL Server. Cả phòng đều sẽ nhận được thông báo.
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" @click="directSyncModalOpen = false">
+              {{ directSyncResult ? 'Đóng' : 'Huỷ' }}
+            </button>
+            <RouterLink v-if="directSyncResult" class="btn btn-primary" to="/kho">
+              Mở Kho hồ sơ ngay
+            </RouterLink>
+            <button
+              v-else
+              class="btn btn-primary"
+              type="button"
+              :disabled="directSyncing"
+              @click="doDirectSyncToArchive"
+            >
+              <Database :size="16" />
+              {{ directSyncing ? 'Đang nạp vào CSDL...' : 'Xác nhận nạp vào Kho' }}
             </button>
           </div>
         </div>

@@ -56,3 +56,4 @@ export function cleanupExpiredLocalStorage(maxAgeDays = 30): number {
 
   return cleanedCount
 }
+

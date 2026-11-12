@@ -4457,3 +4457,169 @@ pre,
     max-height: 92vh;
   }
 }
+
+/* ==========================================================================
+   Multiplayer Realtime Google Sheets Experience (Bổ sung trích yếu)
+   ========================================================================== */
+
+.team-session-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+
+.team-session-banner-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.team-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--brand);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.live-dot-pulse {
+  width: 9px;
+  height: 9px;
+  background-color: #ef4444;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  animation: livePulse 1.8s infinite;
+}
+
+@keyframes livePulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 7px rgba(239, 68, 68, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.team-session-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.team-session-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.team-session-collaborators {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+}
+
+.team-session-collaborators .avatar-group {
+  display: flex;
+  align-items: center;
+}
+
+.team-session-collaborators .tag-avatar {
+  margin-left: -6px;
+  border: 2px solid var(--surface);
+}
+
+.team-session-collaborators .tag-avatar:first-child {
+  margin-left: 0;
+}
+
+/* Kho hồ sơ - Banner gợi ý */
+.team-session-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+
+.team-session-alert .live-icon {
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+/* Cell wrapper & Realtime cursors */
+.cell-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+.cell-cursor-tag {
+  position: absolute;
+  top: -10px;
+  left: 4px;
+  z-index: 10;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffffff;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  animation: tagFadeIn 0.2s ease-out;
+}
+
+@keyframes tagFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cell-wrapper.is-remote-focused .summary-sheet-input {
+  outline: 2px solid var(--cursor-color, #2563eb) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2) !important;
+  background-color: rgba(255, 255, 255, 0.95);
+}
+
+/* Dòng vừa được đồng đội lưu thay đổi */
+.summary-table tbody tr.is-remote-flashing {
+  animation: rowRemotePulse 2.5s ease-out;
+}
+
+@keyframes rowRemotePulse {
+  0% {
+    background-color: rgba(16, 185, 129, 0.35);
+  }
+  40% {
+    background-color: rgba(16, 185, 129, 0.2);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+

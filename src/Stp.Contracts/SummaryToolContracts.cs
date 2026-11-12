@@ -224,3 +224,25 @@ public sealed record SummaryDraftResponse(
     string FileName,
     DateTimeOffset SavedAt,
     System.Text.Json.JsonElement Payload);
+
+/// <summary>Thông tin phiên làm việc chung của cả phòng (Team Active Session).</summary>
+public sealed record SummaryActiveSessionResponse(
+    bool HasActiveSession,
+    Guid? SessionId,
+    string? FileName,
+    string? UploadedBy,
+    DateTimeOffset? UploadedAt,
+    int RowCount,
+    int EditCount);
+
+/// <summary>Yêu cầu thiết lập phiên làm việc chung của phòng.</summary>
+public sealed record SummarySetActiveSessionRequest(
+    Guid SessionId);
+
+/// <summary>Kết quả nạp trực tiếp phiên trích yếu vào Kho hồ sơ (SQL Server).</summary>
+public sealed record SummaryDirectSyncResponse(
+    bool Success,
+    int AddedCount,
+    int UpdatedCount,
+    int ConflictCount,
+    string? Message);

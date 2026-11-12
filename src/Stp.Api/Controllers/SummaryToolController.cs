@@ -1,10 +1,14 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Stp.Api.Hubs;
+using Stp.Api.Services;
 using Stp.Contracts;
 using Stp.Core.Domain;
+using Stp.Core.Storage;
 using Stp.Core.Summary;
-using Stp.Api.Services;
+using Stp.Core.Sync;
 using Stp.Infrastructure.Persistence;
 
 namespace Stp.Api.Controllers;
@@ -26,15 +30,27 @@ public sealed class SummaryToolController : ControllerBase
     private readonly ISummaryToolService _summary;
     private readonly IDbContextFactory<StpDbContext> _factory;
     private readonly TeamAudit _audit;
+    private readonly IHubContext<TeamHub> _hubContext;
+    private readonly NotificationService _notifications;
+    private readonly IArchiveSyncService _sync;
+    private readonly IFileStorage _storage;
 
     public SummaryToolController(
         ISummaryToolService summary,
         IDbContextFactory<StpDbContext> factory,
-        TeamAudit audit)
+        TeamAudit audit,
+        IHubContext<TeamHub> hubContext,
+        NotificationService notifications,
+        IArchiveSyncService sync,
+        IFileStorage storage)
     {
         _summary = summary;
         _factory = factory;
         _audit = audit;
+        _hubContext = hubContext;
+        _notifications = notifications;
+        _sync = sync;
+        _storage = storage;
     }
 
     /// <summary>Mở workbook và tách danh mục giấy tờ trong cột trích yếu.</summary>
@@ -62,6 +78,26 @@ public sealed class SummaryToolController : ControllerBase
                 file.FileName,
                 cancellationToken);
 
+            var actor = await TeamAudit.ActorFromAsync(HttpContext);
+            _summary.SetActiveSession(session.SessionId, actor);
+
+            _notifications.NotifyAllExcept(
+                actor,
+                "system",
+                "Phiên làm việc chung mới",
+                $"{actor} vừa tải lên file làm việc chung: {file.FileName} ({session.Rows.Count:N0} hồ sơ)",
+                "/trich-yeu");
+
+            _ = _hubContext.Clients.All.SendAsync("teamSessionChanged", new
+            {
+                sessionId = session.SessionId,
+                fileName = session.FileName,
+                uploadedBy = actor,
+                uploadedAt = DateTimeOffset.UtcNow,
+                rowCount = session.Rows.Count,
+                editCount = 0
+            });
+
             return Ok(ToResponse(session));
         }
         catch (Exception ex) when (ex is InvalidDataException
@@ -73,6 +109,243 @@ public sealed class SummaryToolController : ControllerBase
                 Title = "Không đọc được workbook",
                 Detail = ex.Message,
                 Status = StatusCodes.Status400BadRequest
+            });
+        }
+    }
+
+    /// <summary>Lấy thông tin phiên làm việc chung đang hoạt động của cả phòng.</summary>
+    [HttpGet("active")]
+    public ActionResult<SummaryActiveSessionResponse> GetActive()
+    {
+        var active = _summary.GetActiveSession();
+        if (active is null)
+        {
+            return Ok(new SummaryActiveSessionResponse(
+                HasActiveSession: false,
+                SessionId: null,
+                FileName: null,
+                UploadedBy: null,
+                UploadedAt: null,
+                RowCount: 0,
+                EditCount: 0));
+        }
+
+        var edits = _summary.GetSessionEdits(active.SessionId);
+        return Ok(new SummaryActiveSessionResponse(
+            HasActiveSession: true,
+            SessionId: active.SessionId,
+            FileName: active.FileName,
+            UploadedBy: active.UploadedBy,
+            UploadedAt: active.UploadedAt,
+            RowCount: active.RowCount,
+            EditCount: edits.Count));
+    }
+
+    /// <summary>Thiết lập một phiên làm việc có sẵn thành phiên làm việc chung của phòng.</summary>
+    [HttpPost("active")]
+    public async Task<ActionResult<SummaryActiveSessionResponse>> SetActive(
+        [FromBody] SummarySetActiveSessionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var session = _summary.GetSession(request.SessionId);
+        if (session is null)
+        {
+            return NotFoundProblem("Không tìm thấy phiên làm việc.");
+        }
+
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        _summary.SetActiveSession(request.SessionId, actor);
+
+        _notifications.NotifyAllExcept(
+            actor,
+            "system",
+            "Phiên làm việc chung",
+            $"{actor} vừa chọn file làm việc chung: {session.FileName} ({session.Rows.Count:N0} hồ sơ)",
+            "/trich-yeu");
+
+        _ = _hubContext.Clients.All.SendAsync("teamSessionChanged", new
+        {
+            sessionId = session.SessionId,
+            fileName = session.FileName,
+            uploadedBy = actor,
+            uploadedAt = DateTimeOffset.UtcNow,
+            rowCount = session.Rows.Count,
+            editCount = _summary.GetSessionEdits(session.SessionId).Count
+        });
+
+        return Ok(new SummaryActiveSessionResponse(
+            HasActiveSession: true,
+            SessionId: session.SessionId,
+            FileName: session.FileName,
+            UploadedBy: actor,
+            UploadedAt: DateTimeOffset.UtcNow,
+            RowCount: session.Rows.Count,
+            EditCount: _summary.GetSessionEdits(session.SessionId).Count));
+    }
+
+    /// <summary>Huỷ thiết lập phiên làm việc chung của phòng.</summary>
+    [HttpDelete("active")]
+    public ActionResult ClearActive()
+    {
+        _summary.ClearActiveSession();
+        _ = _hubContext.Clients.All.SendAsync("teamSessionCleared");
+        return NoContent();
+    }
+
+    /// <summary>Lấy toàn bộ các chỉnh sửa chung của phiên trên server (Shared Edits).</summary>
+    [HttpGet("{sessionId:guid}/edits")]
+    public ActionResult<IReadOnlyList<SummaryChangeRequest>> GetEdits(Guid sessionId)
+    {
+        var edits = _summary.GetSessionEdits(sessionId);
+        var list = edits.Values.Select(change => new SummaryChangeRequest(
+            change.RowNumber,
+            change.Items,
+            change.SummaryText,
+            change.SheetNumber,
+            change.DocumentNumber,
+            change.NumberLabel)).ToList();
+
+        return Ok(list);
+    }
+
+    /// <summary>Ghi nhận một thay đổi của dòng và phát realtime cho đồng đội (Google Sheets live commit).</summary>
+    [HttpPost("{sessionId:guid}/change")]
+    public async Task<IActionResult> RecordChange(
+        Guid sessionId,
+        [FromBody] SummaryChangeRequest request)
+    {
+        if (request.RowNumber <= 0)
+        {
+            return BadRequest("RowNumber không hợp lệ.");
+        }
+
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        var change = new SummaryChange(
+            request.RowNumber,
+            request.Items ?? Array.Empty<string>(),
+            request.SummaryText,
+            request.SheetNumber,
+            request.DocumentNumber,
+            request.NumberLabel);
+
+        _summary.RecordEdit(sessionId, change);
+
+        _ = _hubContext.Clients.Group($"summary:{sessionId}").SendAsync("summaryCellChanged", new
+        {
+            sessionId,
+            rowNumber = request.RowNumber,
+            items = request.Items ?? Array.Empty<string>(),
+            summaryText = request.SummaryText,
+            sheetNumber = request.SheetNumber,
+            documentNumber = request.DocumentNumber,
+            numberLabel = request.NumberLabel,
+            actor,
+            timestamp = DateTimeOffset.UtcNow
+        });
+
+        return Ok(new { success = true });
+    }
+
+    /// <summary>Ghi nhận nhiều thay đổi cùng lúc (áp bộ loại / bulk) và phát realtime cho đồng đội.</summary>
+    [HttpPost("{sessionId:guid}/changes")]
+    public async Task<IActionResult> RecordBulkChanges(
+        Guid sessionId,
+        [FromBody] IReadOnlyList<SummaryChangeRequest> requests)
+    {
+        if (requests == null || requests.Count == 0)
+        {
+            return Ok(new { count = 0 });
+        }
+
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        var changes = requests.Select(request => new SummaryChange(
+            request.RowNumber,
+            request.Items ?? Array.Empty<string>(),
+            request.SummaryText,
+            request.SheetNumber,
+            request.DocumentNumber,
+            request.NumberLabel)).ToList();
+
+        _summary.RecordBulkEdits(sessionId, changes);
+
+        _ = _hubContext.Clients.Group($"summary:{sessionId}").SendAsync("summaryBulkChanged", new
+        {
+            sessionId,
+            count = changes.Count,
+            actor,
+            timestamp = DateTimeOffset.UtcNow
+        });
+
+        return Ok(new { count = changes.Count });
+    }
+
+    /// <summary>
+    /// Nạp trực tiếp phiên trích yếu vào Kho hồ sơ (CSDL SQL Server) mà không cần tải file về máy.
+    /// </summary>
+    [HttpPost("{sessionId:guid}/sync-to-archive")]
+    public async Task<ActionResult<SummaryDirectSyncResponse>> SyncToArchive(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        var session = _summary.GetSession(sessionId);
+        if (session is null)
+        {
+            return NotFoundProblem("Không tìm thấy phiên làm việc.");
+        }
+
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        var edits = _summary.GetSessionEdits(sessionId).Values.ToList();
+
+        try
+        {
+            // 1. Xuất workbook Excel hoàn thiện kèm mọi thay đổi
+            var exportResult = await _summary.ExportFilteredAsync(
+                sessionId,
+                edits,
+                new SummaryScope(), // Phạm vi toàn bộ
+                cancellationToken,
+                session.FileName);
+
+            var tempFileName = $"direct-sync-{sessionId:N}.xlsx";
+            using var stream = new MemoryStream(exportResult.Content);
+            var stored = await _storage.SaveUploadAsync(stream, tempFileName, sessionId, cancellationToken);
+
+            // 2. Chạy dịch vụ đồng bộ chuẩn vào SQL Server
+            var syncOutcome = await _sync.ApplyAsync(new SyncRequest
+            {
+                FilePath = stored.FullPath,
+                SourceFileName = session.FileName
+            }, cancellationToken);
+
+            // 3. Ghi nhật ký & thông báo cả nhóm
+            _audit.Write(
+                actor,
+                "sync-direct",
+                "ArchiveWorkbook",
+                syncOutcome.WorkbookId?.ToString(),
+                $"{session.FileName}: nạp trực tiếp {syncOutcome.UpdatedCount} hồ sơ vào Kho (thêm {syncOutcome.AddedCount})");
+
+            _notifications.NotifyAllExcept(
+                actor,
+                "system",
+                "Đồng bộ Kho hoàn tất",
+                $"{actor} vừa nạp trực tiếp dữ liệu {session.FileName} vào Kho ({syncOutcome.UpdatedCount:N0} cập nhật, {syncOutcome.AddedCount:N0} thêm mới)",
+                "/kho");
+
+            return Ok(new SummaryDirectSyncResponse(
+                syncOutcome.Success,
+                syncOutcome.AddedCount,
+                syncOutcome.UpdatedCount,
+                syncOutcome.ConflictCount,
+                syncOutcome.ErrorMessage));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new ProblemDetails
+            {
+                Title = "Lỗi đồng bộ vào Kho",
+                Detail = ex.Message,
+                Status = StatusCodes.Status500InternalServerError
             });
         }
     }

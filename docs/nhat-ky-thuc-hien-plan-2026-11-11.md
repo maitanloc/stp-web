@@ -251,20 +251,31 @@
 - [x] L2. Dọn localStorage history/draft quá hạn
   (cleanupExpiredLocalStorage dọn stp.summary.draft.* và stp.summary.history.* cũ hơn 30 ngày hoặc JSON corrupt; gọi tự động lúc App.vue mount)
 
+### Nhóm M — Trích yếu Multiplayer (Google Sheets thời gian thực cho cả phòng)
+- [x] M1. Phiên làm việc chung toàn phòng (Active Team Session):
+  - Admin tải file lên hoặc bấm "Đặt làm file làm chung", hệ thống tự động gán session chung của phòng. Cả phòng (Lan, Lộc,...) khi mở trang Bổ sung trích yếu sẽ tự động nạp thẳng vào đúng file đó, ẩn dropzone tải file.
+  - Server gửi notification đẩy + chuông rung báo toàn phòng; trang Kho hồ sơ hiển thị banner hướng dẫn "Vào làm cùng anh em".
+- [x] M2. Con trỏ ô & Live Typing & Hiệu ứng chớp sáng (Realtime Multiplayer):
+  - Đồng đội click ô nào (Số tờ, Hồ sơ số, Số, Trích yếu) hiển thị viền màu cộng tác viên theo palette 14 màu Google Workspace kèm tag tên nổi bật.
+  - Đồng đội gõ phím, chữ chạy theo thời gian thực (`SummaryCellTypingEvent`). Khi ô được lưu hoặc bấm phím `C`, chip áp dụng thì cả phòng nhận ngay (`SummaryCellChangedEvent`, `SummaryBulkChangedEvent`) và dòng đó nháy sáng xanh dịu (`is-remote-flashing`).
+- [x] M3. Shared Edits Store & Nạp thẳng vào Kho hồ sơ (Direct Sync to Archive):
+  - Toàn bộ thay đổi của cả phòng được lưu trữ tập trung tại `SummaryToolService._sessionEdits` (Singleton trong RAM server). Người vào sau hoặc F5 được nạp đầy đủ 100% công sức của đồng đội qua `GET /api/summary/{sessionId}/edits`.
+  - Nút "Nạp thẳng vào Kho hồ sơ" (`POST /api/summary/{sessionId}/sync-to-archive`): chuyển đổi toàn bộ file + shared edits và áp trực tiếp vào CSDL SQL Server `Dossiers` qua `IArchiveSyncService.ApplyAsync`, ghi `AuditLogs` và thông báo toàn phòng mà không cần tải file về máy.
+  - Unit tests mới `ActiveSession_SetAndGet_WorksAndClears`, `SharedEdits_RecordAndRetrieve_Works` đạt 89/89 tests passed 100%.
+
 ### Chốt phiên
-- [x] X1. Build + 82+ tests pass (87/87 passed) + deploy service + health tunnel 200
-  (dotnet build Stp.Api 0 lỗi; dotnet test 87/87 tests passed 100%; health local và ngrok https://mangle-tastiness-french.ngrok-free.dev/api/health đều 200 OK "database: connected", "migrations: applied")
+- [x] X1. Build + 82+ tests pass (89/89 passed) + deploy service + health tunnel 200
+  (dotnet build Stp.Api 0 lỗi; dotnet test 89/89 tests passed 100%; npm run build SPA 0 lỗi; robocopy dist sang wwwroot; health ngrok https://mangle-tastiness-french.ngrok-free.dev/api/health 200 OK "database: connected")
 - [x] X2. E2E browser / API verify các tính năng chính
-  (verify admin/lan login 200; dossier search token AND tiếng Việt 8 kết quả; comment theo dòng 200 tiếng Việt nguyên vẹn; history trả lastComment; robocopy dist sang wwwroot đầy đủ)
+  (verify admin/lan login 200; bundle frontend mới index-ZeZgFHgp.js và css index-C5Q_b2-m.css đã phục vụ trên cả localhost và ngrok tunnel)
 - [x] X3. Cập nhật 3 docs + AGENTS.md trạng thái "ĐÃ LÀM", commit + push
-  (docs/brainstorm-workspace-2-0.md, docs/phan-tich-luu-du-lieu-nguoi-dung.md, docs/ke-hoach-trich-yeu-sieu-toc.md, AGENTS.md đồng bộ trạng thái "ĐÃ LÀM"; ghi rõ các mục optional bỏ qua)
 - [x] X4. Tổng kết cuối phiên cho chủ đọc khi quay lại
-  (báo cáo chi tiết từng nhóm commit A–L và X, bảo toàn dữ liệu thật 67.718 hồ sơ)
+  (báo cáo chi tiết tính năng Google Sheets multiplayer trích yếu và hướng dẫn sử dụng)
 
 ## Ghi chú tiến trình (ghi thêm khi làm)
-- 11/11/2026 – 12/11/2026: thực hiện toàn bộ theo lệnh chủ AFK. Trình tự: A → B → C → D → E → F → G → H → I → J → K → L → X.
+- 11/11/2026 – 12/11/2026: thực hiện toàn bộ theo lệnh chủ AFK. Trình tự: A → B → C → D → E → F → G → H → I → J → K → L → M → X.
 - Các mục plan gốc ghi "chỉ làm khi cần" (Whisper server, OCR camera, bot chat, react message) — bỏ qua theo đúng plan, ghi rõ ở X3.
-- Toàn bộ commit theo mốc (14 commits):
+- Toàn bộ commit theo mốc (15 commits):
   - A `fb1226c`: import nhiều sheet theo luật năm (file nhập 1990-1995, sheet năm 1996+) + MigrateAsync startup
   - B `e4ca10c`: Workspace 2.0 Pha 0 - motion cho modal/route/dock + lazy fetch
   - A4 `5aa7dad`: quy ước cột CỐ ĐỊNH sheet năm (B=hồ sơ số, D=trích yếu, E=thời gian, F=ghi chú, G=số tờ)
@@ -279,4 +290,5 @@
   - J `8abd843`: J1-J2 bảng sống kho hồ sơ (virtualized grid + presence chip + comment theo dòng + history hover)
   - K `4ba3e8c`: K1 pipeline avatar upload (cắt client 96×96 webp -> POST -> cache ETag version + renderAvatar imageUrl + broadcast hub realtime)
   - L `4a6c39f`: L1-L2 data safety P2 - sweep job artifacts 30 ngày (IFileStorage + endpoint sweep) + dọn localStorage history/draft quá hạn
+  - M: Google Sheets multiplayer trích yếu (Active Team Session, live cursors & typing, shared edits store, 1-click nạp vào Kho)
   - X: commit chốt phiên tài liệu và hoàn tất bàn giao.

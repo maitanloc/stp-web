@@ -186,6 +186,9 @@ public sealed class SummaryToolService : ISummaryToolService
     private readonly ILogger<SummaryToolService> _logger;
     private readonly ISummaryPrintService? _printService;
     private readonly ConcurrentDictionary<Guid, SummaryWorkbook> _sessions = new();
+    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<int, SummaryChange>> _sessionEdits = new();
+    private readonly object _activeSessionLock = new();
+    private SummaryActiveSessionInfo? _activeSession;
     private readonly ICatalogDictionary? _catalogDictionary;
 
     public SummaryToolService(IFileStorage storage, ILogger<SummaryToolService> logger)
@@ -882,6 +885,15 @@ public sealed class SummaryToolService : ISummaryToolService
 
     public bool DeleteSession(Guid sessionId)
     {
+        _sessionEdits.TryRemove(sessionId, out _);
+        lock (_activeSessionLock)
+        {
+            if (_activeSession?.SessionId == sessionId)
+            {
+                _activeSession = null;
+            }
+        }
+
         if (!_sessions.TryRemove(sessionId, out _))
         {
             return false;
@@ -889,6 +901,78 @@ public sealed class SummaryToolService : ISummaryToolService
 
         _storage.DeleteDirectory(_storage.GetJobUploadDirectory(sessionId));
         return true;
+    }
+
+    public SummaryActiveSessionInfo? GetActiveSession()
+    {
+        lock (_activeSessionLock)
+        {
+            if (_activeSession is null)
+            {
+                return null;
+            }
+
+            var session = GetSession(_activeSession.SessionId);
+            if (session is null)
+            {
+                _activeSession = null;
+                return null;
+            }
+
+            return _activeSession;
+        }
+    }
+
+    public void SetActiveSession(Guid sessionId, string uploadedBy)
+    {
+        var session = GetSession(sessionId);
+        if (session is null)
+        {
+            throw new KeyNotFoundException($"Không tìm thấy phiên {sessionId}");
+        }
+
+        lock (_activeSessionLock)
+        {
+            _activeSession = new SummaryActiveSessionInfo(
+                session.SessionId,
+                session.FileName,
+                string.IsNullOrWhiteSpace(uploadedBy) ? "Quản trị" : uploadedBy.Trim(),
+                DateTimeOffset.UtcNow,
+                session.Rows.Count);
+        }
+    }
+
+    public void ClearActiveSession()
+    {
+        lock (_activeSessionLock)
+        {
+            _activeSession = null;
+        }
+    }
+
+    public IReadOnlyDictionary<int, SummaryChange> GetSessionEdits(Guid sessionId)
+    {
+        if (_sessionEdits.TryGetValue(sessionId, out var edits))
+        {
+            return edits;
+        }
+
+        return new Dictionary<int, SummaryChange>();
+    }
+
+    public void RecordEdit(Guid sessionId, SummaryChange change)
+    {
+        var edits = _sessionEdits.GetOrAdd(sessionId, _ => new ConcurrentDictionary<int, SummaryChange>());
+        edits[change.RowNumber] = change;
+    }
+
+    public void RecordBulkEdits(Guid sessionId, IReadOnlyList<SummaryChange> changes)
+    {
+        var edits = _sessionEdits.GetOrAdd(sessionId, _ => new ConcurrentDictionary<int, SummaryChange>());
+        foreach (var change in changes)
+        {
+            edits[change.RowNumber] = change;
+        }
     }
 
     /// <summary>

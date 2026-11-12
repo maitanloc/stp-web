@@ -91,6 +91,94 @@ export interface DossierCommentLive {
 
 export const lastDossierComment = ref<DossierCommentLive | null>(null)
 
+/** Sự kiện con trỏ ô Google Sheets: ai đang click vào ô nào */
+export interface SummaryCellFocusEvent {
+  sessionId: string
+  rowNumber: number
+  column: string
+  actor: string
+}
+
+/** Sự kiện gõ chữ realtime: text đang gõ chạy theo thời gian thực */
+export interface SummaryCellTypingEvent {
+  sessionId: string
+  rowNumber: number
+  column: string
+  text: string
+  actor: string
+}
+
+/** Sự kiện ô vừa được lưu / áp chip / gõ xong */
+export interface SummaryCellChangedEvent {
+  sessionId: string
+  rowNumber: number
+  items: string[]
+  summaryText: string | null
+  sheetNumber: string | null
+  documentNumber: string | null
+  numberLabel: string | null
+  actor: string
+  timestamp: string
+}
+
+/** Sự kiện áp hàng loạt (bulk / áp bộ loại) */
+export interface SummaryBulkChangedEvent {
+  sessionId: string
+  count: number
+  actor: string
+  timestamp: string
+}
+
+/** Sự kiện file làm chung của phòng vừa được đổi/tải lên */
+export interface TeamSessionChangedEvent {
+  sessionId: string
+  fileName: string
+  uploadedBy: string
+  uploadedAt: string
+  rowCount: number
+  editCount: number
+}
+
+export const lastSummaryCellFocus = ref<SummaryCellFocusEvent | null>(null)
+export const lastSummaryCellTyping = ref<SummaryCellTypingEvent | null>(null)
+export const lastSummaryCellChanged = ref<SummaryCellChangedEvent | null>(null)
+export const lastSummaryBulkChanged = ref<SummaryBulkChangedEvent | null>(null)
+export const lastTeamSessionChanged = ref<TeamSessionChangedEvent | null>(null)
+
+export function joinSummarySession(sessionId: string, actor: string): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection.invoke('joinSummarySession', sessionId, actor).catch(() => {})
+  }
+}
+
+export function leaveSummarySession(sessionId: string, actor: string): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection.invoke('leaveSummarySession', sessionId, actor).catch(() => {})
+  }
+}
+
+export function sendSummaryCellFocus(sessionId: string, rowNumber: number, column: string, actor: string): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection.invoke('summaryCellFocus', sessionId, rowNumber, column, actor).catch(() => {})
+  }
+}
+
+export function sendSummaryCellTyping(sessionId: string, rowNumber: number, column: string, text: string, actor: string): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection.invoke('summaryCellTyping', sessionId, rowNumber, column, text, actor).catch(() => {})
+  }
+}
+
+export function sendSummaryCellCommit(
+  sessionId: string,
+  request: { rowNumber: number; items: string[]; summaryText?: string | null; sheetNumber?: string | null; documentNumber?: string | null; numberLabel?: string | null },
+  actor: string,
+): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection.invoke('summaryCellCommit', sessionId, request, actor).catch(() => {})
+  }
+}
+
 /** J1: gửi bộ lọc bảng sống của mình cho cả nhóm (debounce ở nơi gọi). */
 export function sendGridFilter(
   actor: string,
@@ -337,6 +425,31 @@ async function startTeamHub(): Promise<void> {
           [payload.displayName]: `/api/team/avatar/${payload.userId}?v=${payload.avatarVersion}`,
         }
       }
+    })
+
+    // Multiplayer: phiên làm việc chung của cả phòng được cập nhật / đổi file
+    connection.on('teamSessionChanged', (payload: TeamSessionChangedEvent) => {
+      lastTeamSessionChanged.value = payload
+    })
+
+    // Multiplayer: con trỏ ô Google Sheets của đồng đội
+    connection.on('summaryCellFocus', (payload: SummaryCellFocusEvent) => {
+      lastSummaryCellFocus.value = payload
+    })
+
+    // Multiplayer: gõ chữ realtime từ đồng đội
+    connection.on('summaryCellTyping', (payload: SummaryCellTypingEvent) => {
+      lastSummaryCellTyping.value = payload
+    })
+
+    // Multiplayer: ô vừa được lưu / áp chip / gõ xong từ đồng đội
+    connection.on('summaryCellChanged', (payload: SummaryCellChangedEvent) => {
+      lastSummaryCellChanged.value = payload
+    })
+
+    // Multiplayer: thay đổi hàng loạt (áp bộ loại / bulk)
+    connection.on('summaryBulkChanged', (payload: SummaryBulkChangedEvent) => {
+      lastSummaryBulkChanged.value = payload
     })
 
     connection.onreconnecting(() => {

@@ -120,12 +120,17 @@
   - Trụ D - Bảng sống kho hồ sơ (Nhóm J, commit `8abd843`): `DossierLiveGrid.vue` virtualized 67k dòng (ROW_H 44px, fetch windowed), filter share realtime ("Áp dụng theo"), cursor chip đồng đội, comment theo dòng (`DossierComments` + composer + realtime broadcast), history hover giá rẻ.
   - Trụ E - Shell (Nhóm H, commit `2d642dd`): Tool registry 8 tool, badge động sidebar, ghim tool ưa thích, Ctrl+K command palette tìm kiếm hồ sơ và chạy lệnh.
   - Trụ G - Lazy loading & Data safety (Nhóm L, commit `4a6c39f`): Sweep artifacts 30 ngày (`IFileStorage.SweepOldArtifacts`), dọn dẹp localStorage hết hạn lúc boot app.
+- **Trích yếu Multiplayer (Google Sheets cho toàn phòng - Nhóm M)**:
+  - Active Team Session: Admin tải file lên, cả phòng tự động nạp chung đúng 1 file mà không ai phải import lại; chuông rung báo toàn phòng + banner chỉ dẫn tại Kho hồ sơ.
+  - Realtime Multiplayer: Con trỏ ô đổi màu theo từng cộng tác viên + tag tên nổi bật; chữ gõ chạy thời gian thực (`SummaryCellTypingEvent`); khi lưu ô/áp chip thì ô chớp sáng xanh dịu (`is-remote-flashing`).
+  - Shared Edits Store: Lưu tập trung tại `SummaryToolService._sessionEdits` trong RAM server (Singleton). Người vào sau hoặc F5 đều lấy đủ 100% sửa đổi của đồng đội qua `GET /api/summary/{sessionId}/edits`.
+  - Nạp thẳng vào Kho hồ sơ: 1-click `POST /api/summary/{sessionId}/sync-to-archive` nạp trực tiếp toàn bộ dữ liệu file + shared edits vào bảng `Dossiers` CSDL SQL Server (tái sử dụng `IArchiveSyncService.ApplyAsync`), ghi `AuditLogs` và thông báo toàn phòng.
 - **Data safety (P0, P1, P2)**:
   - P0.1 (Nhóm A2, commit `fb1226c`): `MigrateAsync()` tự động lúc startup + health báo trạng thái migrations.
   - P0.2 (Nhóm E1, commit `d72f99c`): Bảng `SummaryDrafts` backup draft lên server theo `(SessionId, UserName)`, tự phục hồi thông minh khi đổi máy/mất mạng.
   - P1: Cursor pagination cho chat (G4), seen server-side (G3).
   - P2: Quét dọn tệp tạm 30 ngày (L1), dọn dẹp localStorage (L2).
 - **Kết quả tổng thể**:
-  - 87/87 tests passed (100%).
+  - 89/89 tests passed (100%).
   - Dữ liệu thật 67.718 hồ sơ trong SQL Server `StpArchive` bảo toàn nguyên vẹn.
   - Service API và tunnel ngrok `https://mangle-tastiness-french.ngrok-free.dev` hoạt động liên tục, ổn định 200 OK.

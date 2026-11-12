@@ -662,3 +662,33 @@ export interface ActivityEventResponse {
   timestamp: string
 }
 
+/** Thông tin phiên làm việc chung của cả phòng (Team Active Session). */
+export interface SummaryActiveSessionResponse {
+  hasActiveSession: boolean
+  sessionId: string | null
+  fileName: string | null
+  uploadedBy: string | null
+  uploadedAt: string | null
+  rowCount: number
+  editCount: number
+}
+
+/** Kết quả nạp trực tiếp phiên trích yếu vào Kho hồ sơ (SQL Server). */
+export interface SummaryDirectSyncResponse {
+  success: boolean
+  addedCount: number
+  updatedCount: number
+  conflictCount: number
+  errorMessage: string | null
+}
+
+/** Yêu cầu thay đổi của một dòng (Single Source of Truth). */
+export interface SummaryChangeRequest {
+  rowNumber: number
+  items: string[]
+  summaryText?: string | null
+  sheetNumber?: string | null
+  documentNumber?: string | null
+  numberLabel?: string | null
+}
+

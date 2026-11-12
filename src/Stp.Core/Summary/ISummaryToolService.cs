@@ -329,7 +329,33 @@ public interface ISummaryToolService
 
     /// <summary>Danh sách phiên đang dở (kể cả sau restart server) để mở lại không cần import.</summary>
     IReadOnlyList<SummarySessionInfo> ListSessions();
+
+    /// <summary>Lấy thông tin phiên làm việc chung đang hoạt động của cả phòng.</summary>
+    SummaryActiveSessionInfo? GetActiveSession();
+
+    /// <summary>Thiết lập phiên làm việc chung cho phòng.</summary>
+    void SetActiveSession(Guid sessionId, string uploadedBy);
+
+    /// <summary>Huỷ phiên làm việc chung.</summary>
+    void ClearActiveSession();
+
+    /// <summary>Lấy toàn bộ các chỉnh sửa chung của một phiên.</summary>
+    IReadOnlyDictionary<int, SummaryChange> GetSessionEdits(Guid sessionId);
+
+    /// <summary>Ghi nhận một thay đổi của dòng vào kho chỉnh sửa chung của phiên.</summary>
+    void RecordEdit(Guid sessionId, SummaryChange change);
+
+    /// <summary>Ghi nhận nhiều thay đổi cùng lúc (hàng loạt / áp bộ loại).</summary>
+    void RecordBulkEdits(Guid sessionId, IReadOnlyList<SummaryChange> changes);
 }
+
+/// <summary>Thông tin phiên làm việc chung đang hoạt động của cả phòng.</summary>
+public sealed record SummaryActiveSessionInfo(
+    Guid SessionId,
+    string FileName,
+    string UploadedBy,
+    DateTimeOffset UploadedAt,
+    int RowCount);
 
 /// <summary>Thông tin phiên làm việc đã lưu để khôi phục.</summary>
 public sealed record SummarySessionInfo(

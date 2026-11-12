@@ -229,6 +229,75 @@ public sealed class SummaryToolServiceTests
         }
     }
 
+    [Fact]
+    public async Task ActiveSession_SetAndGet_WorksAndClears()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var source = CreateWorkbook(directory);
+            var service = CreateService(directory);
+            var session = await OpenSessionAsync(service, source);
+
+            // Initially null
+            service.ClearActiveSession();
+            Assert.Null(service.GetActiveSession());
+
+            // Set active session
+            service.SetActiveSession(session.SessionId, "Quản trị");
+            var active = service.GetActiveSession();
+            Assert.NotNull(active);
+            Assert.Equal(session.SessionId, active.SessionId);
+            Assert.Equal(session.FileName, active.FileName);
+            Assert.Equal("Quản trị", active.UploadedBy);
+            Assert.Equal(4, active.RowCount);
+
+            // Clear
+            service.ClearActiveSession();
+            Assert.Null(service.GetActiveSession());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SharedEdits_RecordAndRetrieve_Works()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var source = CreateWorkbook(directory);
+            var service = CreateService(directory);
+            var session = await OpenSessionAsync(service, source);
+
+            var change1 = new SummaryChange(5, new[] { "giấy khai sinh", "hộ chiếu" }, SheetNumber: "01-15");
+            service.RecordEdit(session.SessionId, change1);
+
+            var edits = service.GetSessionEdits(session.SessionId);
+            Assert.True(edits.ContainsKey(5));
+            Assert.Equal("01-15", edits[5].SheetNumber);
+            Assert.Equal(2, edits[5].Items.Count);
+
+            var bulkChanges = new List<SummaryChange>
+            {
+                new(6, new[] { "giấy báo tử" }),
+                new(7, new[] { "giấy xác nhận độc thân" })
+            };
+            service.RecordBulkEdits(session.SessionId, bulkChanges);
+
+            var allEdits = service.GetSessionEdits(session.SessionId);
+            Assert.Equal(3, allEdits.Count);
+            Assert.True(allEdits.ContainsKey(6));
+            Assert.True(allEdits.ContainsKey(7));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static void AssertWorkbookRequestsFullCalculation(string output)
     {
         var workbookXml = ReadEntry(output, "xl/workbook.xml");

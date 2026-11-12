@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { ArrowRight, FileSpreadsheet, FolderOpen, RefreshCw, Search } from '@lucide/vue'
+import { ArrowRight, FileSpreadsheet, FolderOpen, Radio, RefreshCw, Search } from '@lucide/vue'
 import { request } from '../api/client'
-import type { WorkbookResponse } from '../api/types'
+import type { SummaryActiveSessionResponse, WorkbookResponse } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { formatDateTime, formatNumber } from '../lib/format'
 import EmptyState from '../components/EmptyState.vue'
@@ -13,6 +13,7 @@ const workbooks = ref<WorkbookResponse[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
 const search = ref('')
+const activeTeamSession = ref<SummaryActiveSessionResponse | null>(null)
 
 const filtered = computed(() => {
   const term = search.value.trim().toLowerCase()
@@ -32,7 +33,12 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    workbooks.value = await request<WorkbookResponse[]>('/api/workbooks')
+    const [books, active] = await Promise.all([
+      request<WorkbookResponse[]>('/api/workbooks'),
+      request<SummaryActiveSessionResponse>('/api/summary/active').catch(() => null),
+    ])
+    workbooks.value = books
+    activeTeamSession.value = active && active.hasActiveSession ? active : null
   } catch (caught) {
     error.value = errorMessage(caught)
   } finally {
@@ -45,6 +51,17 @@ onMounted(load)
 
 <template>
   <div class="stack" style="gap: 18px">
+    <div v-if="activeTeamSession && activeTeamSession.hasActiveSession" class="team-session-alert">
+      <Radio :size="16" class="live-icon" />
+      <div class="grow">
+        <strong>Phiên trích yếu đang chạy chung:</strong> File <em>{{ activeTeamSession.fileName }}</em> (do {{ activeTeamSession.uploadedBy }} tải lên) đang được cả phòng làm trực tiếp như Google Sheets.
+      </div>
+      <RouterLink class="btn btn-primary btn-sm" to="/trich-yeu">
+        Vào làm cùng anh em
+        <ArrowRight :size="14" />
+      </RouterLink>
+    </div>
+
     <div class="row-between wrap">
       <div>
         <h1 class="page-title" style="font-size: 22px">Kho hồ sơ</h1>
