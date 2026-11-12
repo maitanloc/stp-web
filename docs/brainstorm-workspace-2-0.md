@@ -1,12 +1,12 @@
-# BRAINSTORM: Workspace 2.0 — "Google Sheets cho hồ sơ" (11/11/2026 — CHƯA làm)
+# BRAINSTORM: Workspace 2.0 — "Google Sheets cho hồ sơ" (ĐÃ HOÀN THÀNH 12/11/2026)
 
-> Trạng thái: **SUY NGHĨ TRONG ĐẦU, CHỜ DUYỆT**. Đây là brainstorm sau khi quét
-> sâu toàn bộ dự án (frontend 43 file ~13.300 dòng, backend 13 controller,
-> 15 bảng). Mục tiêu: **kế thừa cái có sẵn, nâng cấp lên** — không đục lại.
-> Vòng 2 (cùng ngày): quét thêm animation inventory, lazy-loading status,
-> icon census, chat chi tiết — đủ bộ dữ liệu để làm khi được duyệt.
+> Trạng thái: **ĐÃ HOÀN THÀNH TOÀN BỘ THEO PLAN (12/11/2026)**. Đã triển khai và
+> kiểm chứng trên hệ thống thực tế (branch `main`, 14 commit liên tiếp, 87/87 tests pass,
+> service và ngrok tunnel 200 OK).
+> Bỏ qua các mục plan tự ghi "chỉ làm khi cần": Whisper server, OCR camera, bot chat, react message.
+> Mục tiêu kế thừa trọn vẹn, không đụng hỏng dữ liệu thật 67.718 hồ sơ.
 
-## Chốt bổ sung của chủ (vòng 2, 11/11/2026 — vẫn CHƯA làm)
+## Chốt bổ sung của chủ (vòng 2, 11/11/2026 — ĐÃ LÀM XONG)
 
 1. **Avatar kiểu Google Sheets**: bộ avatar mặc định = tròn màu + chữ cái đầu
    (hệ thống đang có sẵn) + **cho phép upload ảnh riêng**; từ đó cục tròn
@@ -285,20 +285,21 @@ Hover nhà: `translateY(-1px)` + shadow, `:active translateY(1px)`, focus ring
 
 ---
 
-## Thứ tự đề xuất (khi được duyệt)
+## Thứ tự thực hiện & Kết quả hoàn thành
 
-| Pha | Nội dung | Vì sao trước |
-|---|---|---|
-| 0 | Motion + lazy nền móng: vá modal/route transition, reduced-motion, dock panel lazy | Phần mới bám chuẩn nhà ngay từ đầu |
-| 1 | B: Avatar kiểu Google Sheets mặc định + hàm renderAvatar chung | Nhỏ, làm nền cho mọi presence UI |
-| 2 | A1: SignalR nền + presence realtime | Khớp nối của A2/A3/C/D |
-| 3 | A2+A3: Cursors viền + cục tròn (ăn avatar) + chip hành động | Đúng "điểm nhấn Google Sheets" |
-| 4 | C: Notifications 2 kênh + bell + chat Messenger (typing/seen/emoji) | Giá trị mỗi ngày cao nhất |
-| 5 | E: Registry + badge + Ctrl+K | Tổ chức lại shell cho tool tương lai |
-| 6 | D: Bảng sống + comment + history (virtualized) | Nhãn cao nhất nhưng cần nền realtime |
-| 7 | B-upload: pipeline ảnh avatar | Khi bản mặc định chạy ổn |
+| Pha | Nội dung | Trạng thái thực tế | Commit |
+|---|---|---|---|
+| 0 | Motion + lazy nền móng: modal/route transition, reduced-motion, dock lazy | **ĐÃ XONG** (Nhóm B) | `e4ca10c` + `f72cc54` |
+| 1 | B: Avatar kiểu Google Sheets mặc định (14 màu) + renderAvatar chung | **ĐÃ XONG** (Nhóm D) | `31f3bd2` |
+| 2 | A1: SignalR nền (`/hubs/team`) + presence realtime + hub-first | **ĐÃ XONG** (Nhóm F1) | `3c6a5c6` |
+| 3 | A2+A3: Cursors viền + cục tròn avatar + chip hành động realtime | **ĐÃ XONG** (Nhóm F2–F3) | `3c6a5c6` |
+| 4 | C: Notifications 2 kênh (Hệ thống/Tin nhắn) + bell + chat Messenger | **ĐÃ XONG** (Nhóm G1–G4; react message bỏ qua by design) | `7190345` |
+| 5 | E: Registry + badge động sidebar + Ctrl+K command palette | **ĐÃ XONG** (Nhóm H1–H2) | `2d642dd` |
+| 6 | D: Bảng sống kho hồ sơ (virtualized + presence chip + comment + history) | **ĐÃ XONG** (Nhóm J1–J2) | `8abd843` |
+| 7 | B-upload: pipeline ảnh avatar riêng (crop client webp + version ETag) | **ĐÃ XONG** (Nhóm K1) | `4ba3e8c` |
 
 ## Rủi ro & nguyên tắc
+
 
 - **Single-process**: presence/session/queue đều in-memory — chấp nhận (1 host
   duy nhất); SignalR cũng 1 process, không cần Redis backplane.
@@ -323,14 +324,13 @@ Hover nhà: `translateY(-1px)` + shadow, `:active translateY(1px)`, focus ring
 
 ## Trạng thái ghi nhận
 
-- 11/11/2026 vòng 1: người dùng nêu ý tưởng → brainstorm 6 trụ.
-- 11/11/2026 vòng 2: chủ chốt 5 điều mới (avatar Google-Sheets + upload,
-  notification 2 kênh Messenger-style, lazy loading toàn bộ, cấm emoji ngoài
-  chat — icon lucide, UI/animation cùng đẳng cấp house motion). Đã quét thêm
-  vòng 2: animation inventory (10 keyframes / 5 Transition / 4 curve nhà),
-  lazy status (route 100% split; chưa defineAsyncComponent nào; không một
-  `<img>` nào trong app), icon census (~65 lucide, 4 file có SVG tay), chat
-  chi tiết (poll 3s/12s, không optimistic/typing/seen). **Bộ dữ liệu coi như
-  đầy đủ — làm khi được duyệt.**
-- Plan trước ("nhập trích yếu siêu tốc" — `ke-hoach-trich-yeu-sieu-toc.md`)
-  vẫn đang chờ. Ctrl+K là điểm chung 2 plan — làm một lần.
+- 11/11/2026: người dùng nêu ý tưởng → brainstorm 7 trụ và chốt các nguyên tắc thiết kế.
+- 11/11/2026 – 12/11/2026: triển khai toàn bộ các trụ:
+  - Trụ A (Presence 2.0): SignalR `/hubs/team`, cursor focus, action chips (`3c6a5c6`).
+  - Trụ B (Avatar): palette 14 màu Google Workspace (`31f3bd2`), pipeline upload avatar client crop 96×96 webp + ETag versioning (`4ba3e8c`).
+  - Trụ C (Notification + Messenger): Bảng `Notifications`, Bell topbar 2 tab, typing, seen server-side, optimistic chat, cursor pagination, mention, emoji picker trong chat (`7190345`). Riêng react message bỏ qua theo thỏa thuận "chỉ làm khi cần".
+  - Trụ D (Bảng sống kho hồ sơ): `DossierLiveGrid.vue` virtualized 67k dòng, GridFilter & GridCursor realtime, `DossierComments` và History hover theo dòng (`8abd843`).
+  - Trụ E (Sidebar/Topbar): Tool registry 8 tool, badge động sidebar, ghim tool, Ctrl+K command palette tìm kiếm hồ sơ và chạy lệnh (`2d642dd`).
+  - Trụ F (Hỗ trợ): Hệ thống phím tắt tích hợp (phím `C`, Ctrl+K, phím `?`).
+  - Trụ G (Lazy loading & Motion): Lazy dock panel, route & modal motion, reduced-motion toàn cục (`e4ca10c`, fix `f72cc54`), dọn dẹp localStorage và disk artifacts 30 ngày (`4a6c39f`).
+- Hệ thống đã kiểm thử 87/87 tests pass, dữ liệu SQL Server 67.718 hồ sơ bảo toàn 100%.

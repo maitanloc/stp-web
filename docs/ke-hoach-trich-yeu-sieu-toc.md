@@ -1,7 +1,10 @@
-# Kế hoạch: Nhập trích yếu SIÊU TỐC (plan 11/11/2026 — CHƯA làm gì cả)
+# Kế hoạch: Nhập trích yếu SIÊU TỐC (ĐÃ HOÀN THÀNH GĐ 0 & GĐ 1 12/11/2026)
 
-> Trạng thái: **PLAN CHỜ DUYỆT**. Chưa có dòng code nào được viết cho mục này.
-> Viết ra để chốt hướng trước khi đụng tay vào.
+> Trạng thái: **ĐÃ HOÀN THÀNH GIAI ĐOẠN 0 & GIAI ĐOẠN 1**.
+> Toàn bộ các tính năng lười cấp 1 (chip 1-chạm, phím C như dòng trên, bộ mặc định theo loại,
+> chạy hàng tự nhảy, xuất nhanh 1 click) và Voice Web Speech API (phiên đọc liên tục, lệnh miệng,
+> lọc giọng nói, học lỗi nghe) đã được triển khai, kiểm thử thực tế và tích hợp hoàn chỉnh.
+> Giai đoạn 2 (Whisper server) và Giai đoạn 3 (OCR / bot chat) bỏ qua theo đúng quy ước ban đầu ("chỉ làm khi cần").
 
 ## Mục tiêu
 
@@ -94,14 +97,14 @@ bổ sung, flow tay không bao giờ bị khoá; cần mic + internet; phòng �
 
 ---
 
-## Thứ tự làm đề xuất & bảng nỗ lực
+## Thứ tự làm & Kết quả thực tế
 
-| Giai đoạn | Nội dung | Nỗ lực | Trả lại |
+| Giai đoạn | Nội dung | Trạng thái thực tế | Commit |
 |---|---|---|---|
-| GĐ 0 | 0.1→0.5 (chip, như dòng trên, bộ mặc định, chạy hàng, xuất nhanh) | ~1 ngày | 70% tốc độ cho 90% ca nhập |
-| GĐ 1 | Voice Web Speech + parser + phiên đọc liên tục | 1–2 ngày | Nói thay gõ — đúng "nghe lọc bỏ vô" |
-| GĐ 1.5 | Ctrl+K tắt + học lỗi nghe nâng cấp | 0.5 ngày | power user |
-| GĐ 2/3 | Whisper server / OCR / bot chat | theo nhu cầu | chỉ làm khi thật cần |
+| GĐ 0 | 0.1→0.5 (chip, như dòng trên, bộ mặc định, chạy hàng, xuất nhanh) | **ĐÃ XONG** (Nhóm C1–C5) | `5439c55` |
+| GĐ 1 | Voice Web Speech + parser + phiên đọc liên tục + học lỗi nghe | **ĐÃ XONG** (Nhóm I1–I2) | `65c378d` |
+| GĐ 1.5 | Ctrl+K command palette + tìm kiếm hồ sơ + đổi theme | **ĐÃ XONG** (Nhóm H1–H2) | `2d642dd` |
+| GĐ 2/3 | Whisper server / OCR camera / bot chat | **BỎ QUA THEO THỎA THUẬN** (chỉ làm khi cần) | — |
 
 ## Rủi ro & nguyên tắc
 

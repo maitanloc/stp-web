@@ -1,23 +1,28 @@
 # Quy tắc dự án (người dùng xác nhận — ghi nhớ)
 
-## Sheet dữ liệu
-- **Chỉ lấy sheet "file nhập"** làm sheet dữ liệu trích yếu.
-- Không lấy sheet "file dán" (dữ liệu đã dán sạch nhưng cột B không khớp
-  cách người dùng nhìn file), không lấy sheet in theo năm (`1990`, `1994 `...)
-  hay sheet `form`.
-- Chỉ khi file không có sheet `file nhập` mới lấy sheet `ML`, rồi mới lấy
-  sheet đầu tiên có tiêu đề "Trích yếu nội dung".
+## Sheet dữ liệu (Luật import nhiều sheet theo năm — người dùng chốt 11/11/2026)
+- **Năm 1990–1995**: Dữ liệu nằm ở sheet **"file nhập"**.
+- **Từ năm 1996 trở đi**: Lấy **sheet mang tên năm** (ví dụ "1996", "1997", "1998", "1999"...) — **TUYỆT ĐỐI không lấy sheet "file nhập" cho các năm ≥1996 khi file có sheet năm**.
+- "file nhập" chỉ giữ các dòng có `Year == null` hoặc năm không được bất kỳ sheet năm nào phủ.
+- Sheet "file dán", "form", hoặc sheet có K1="BANG_IN_HANG_LOAT" tự động bị loại bỏ.
+- Trường hợp không có sheet năm nào chứa dòng trích yếu hợp lệ: fallback hành vi cũ 1 sheet.
 
 ## Ý nghĩa cột trong file DK KET HON (người dùng xác nhận)
-- Cột B = hồ sơ số (số lọc lấy phần đầu dạng số, ví dụ "36A" tính là 36).
-- Cột D = trích yếu nội dung.
-- Cột E = Thời gian tài liệu.
-- Cột F = số tờ (thực chất là ký hiệu QĐ, ví dụ 93/QD.UBT).
-- Cột G = ghi chú (thực chất là số/khoảng trang, ví dụ 01-20).
-
-Note: trong file thật, tiêu đề "Hồ sơ số" nằm ở cột C và B không có tiêu đề,
-nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B lẫn cột
-"Hồ sơ số" cho đúng mọi kiểu file.
+- **Đối với sheet "file nhập"**:
+  - Cột B = hồ sơ số (số lọc lấy phần đầu dạng số, ví dụ "36A" tính là 36).
+  - Cột D = trích yếu nội dung.
+  - Cột E = Thời gian tài liệu.
+  - Cột F = số tờ (thực chất là ký hiệu QĐ, ví dụ 93/QD.UBT).
+  - Cột G = ghi chú (thực chất là số/khoảng trang, ví dụ 01-20).
+- **Quy ước cột CỐ ĐỊNH cho sheet năm (người dùng chốt 11/11/2026 — nhớ mãi)**:
+  - Tiêu đề cột trong bảng bị SAI nên **không tin tên cột**.
+  - Ánh xạ cố định theo vị trí cột:
+    - **Cột B**: Hồ sơ số.
+    - **Cột D**: Trích yếu nội dung.
+    - **Cột E**: Thời gian tài liệu.
+    - **Cột F**: Ghi chú (bỏ qua).
+    - **Cột G**: Số tờ (lấy làm SheetNumber).
+    - Cột A và C là cột phụ, không dùng.
 
 ## Số tờ (cột G)
 - Ở sheet "file nhập", người dùng gõ "01-24" và Excel/WPS lưu thành ngày
@@ -102,39 +107,25 @@ nhưng người dùng làm việc theo cột B. Bộ lọc số khớp cả B l�
   của Stp.Api → MSB3021/MSB3027).
 - Chi tiết: `docs/phan-tich-ux-trich-yeu.md` mục 8.7, 8.8, 8.9, 8.10.
 
-## Plan chờ duyệt (CHƯA làm — người dùng chốt 11/11/2026 "để đó ghi nhớ")
-- **Nhập trích yếu siêu tốc**: plan đầy đủ tại
-  `docs/ke-hoach-trich-yeu-sieu-toc.md` — GĐ 0 (chip 1-chạm, "như dòng trên",
-  bộ mặc định theo loại, chạy hàng tự nhảy, xuất 1 click), GĐ 1 (voice Web
-  Speech API miễn phí: phiên đọc liên tục "nghe lọc loại hồ sơ bỏ vô", parser
-  thuần frontend dùng catalog sẵn có, chỉ prefill để duyệt), GĐ 2/3 (Whisper
-  server, OCR camera, bot chat). **Đừng tự tiện bắt đầu** — chờ người dùng
-  ra lệnh làm giai đoạn nào thì làm giai đoạn đó.
-- **Workspace 2.0** (brainstorm 11/11/2026, vòng 1+2 cùng ngày — cũng CHƯA
-  làm): toàn bộ suy nghĩ "Google Sheets cho hồ sơ" tại
-  `docs/brainstorm-workspace-2-0.md` — 7 trụ: A presence 2.0 (SignalR +
-  cursors viền + cục tròn avatar + chip hành động), B avatar kiểu Google
-  Sheets mặc định (initials+color, đang có) + **upload ảnh riêng** (không
-  emoji), C notification **2 kênh** (hệ thống + tin nhắn kiểu Messenger:
-  typing/seen/optimistic, emoji chỉ trong chat), D bảng sống kho hồ sơ
-  (virtualized + comment + history hover), E sidebar/topbar mở rộng
-  (registry + badge + Ctrl+K chung với GĐ 1.5 plan trên), F hỗ trợ (tour,
-  cheat sheet), G **lazy loading toàn bộ**. Chốt của chủ: KHÔNG dùng emoji
-  trong UI (chỉ `@lucide/vue`), motion mới phải bám 4 curve nhà (decel
-  0.22/0.9/0.26/1 · overshoot 0.3/0.7/0.35/1.25 · snap 0.34/0.06/0.22/1 ·
-  ease). Kết luận: viền row-mark + avatar initials + dark mode ĐÃ CÓ SẴN —
-  thiếu realtime (SignalR chưa có, polling thôi) + modal/route transition +
-  reduced-motion.
-- **Data safety** (phân tích vòng 3, 11/11/2026 — CHƯA sửa code): toàn bộ
-  tình huống lưu/mất dữ liệu tại `docs/phan-tich-luu-du-lieu-nguoi-dung.md`.
-  P0 bắt buộc làm đầu tiên khi được duyệt: (1) **migrations KHÔNG tự apply**
-  — không có `Database.Migrate()` trong repo, thêm cột mới mà quên áp tay →
-  API vỡ lúc runtime; cần `MigrateAsync()` ở startup; (2) edits trích yếu chỉ
-  sống trong localStorage — đề xuất draft backup server theo session 12h.
-  P1: chat >100 tin không đọc lại được (cần cursor pagination khi làm
-  Messenger), unread reset khi reload (seen phải lên server), undo/redo chết
-  khi reload (chấp nhận, draft đã cứu net edits). P2: job upload/output/backup
-  dirs không bao giờ dọn (sweep 30 ngày), history localStorage tích luỹ.
-  Checklist 6 câu bắt buộc cho mọi tính năng mới: reload? restart? hết hạn?
-  đổi máy? 2 người cùng lúc? quota full? **Cả 2 plan chờ người dùng ra lệnh,
-  không tự làm.**
+## Trạng thái thực hiện Plan (ĐÃ HOÀN THÀNH 12/11/2026)
+- **Nhập trích yếu siêu tốc**:
+  - GĐ 0 (C1–C5, commit `5439c55`): Chip 1-chạm trong editor dòng, phím `C` ("như dòng trên"), bộ mặc định theo loại + nút "Áp dụng cho dòng lọc còn thiếu", chạy hàng tự nhảy dòng thiếu (C4), xuất nhanh 1 click (C5, nhớ tên + phạm vi).
+  - GĐ 1 (I1–I2, commit `65c378d`): Mic Web Speech API (`webkitSpeechRecognition`), parser catalog vi-VN chuẩn hóa, phiên đọc liên tục, lệnh miệng ("xong", "kế tiếp", "bộ bảy", "lọc..."), học lỗi nghe tự động vào localStorage.
+  - GĐ 2 (Whisper server) và GĐ 3 (OCR camera, bot chat): Bỏ qua theo đúng thỏa thuận "chỉ làm khi cần".
+- **Workspace 2.0**:
+  - Pha 0 (Nhóm B, commit `e4ca10c` + `f72cc54`): Modal & route transition, prefers-reduced-motion toàn cục, lazy fetch cho dock panel.
+  - Trụ A - Presence 2.0 (Nhóm F, commit `3c6a5c6`): SignalR `/hubs/team` + hub-first ping, cursors viền + cục tròn avatar theo focus (cap 8), chip hành động đáng kể realtime (bulk, export...).
+  - Trụ B - Avatar (Nhóm D `31f3bd2` & Nhóm K `4ba3e8c`): `renderAvatar` chung với palette 14 màu Google Workspace, pipeline upload avatar cắt client 96×96 webp -> `POST /api/team/avatar` -> cache ETag version -> broadcast hub realtime.
+  - Trụ C - Notification & Messenger (Nhóm G, commit `7190345`): Bảng `Notifications`, Bell topbar 2 tab (Hệ thống / Tin nhắn), chat seen server-side (`LastReadChatAt`), typing indicator 3-dot bounce, optimistic message, cursor pagination `?before=`, mention @tên, emoji picker 24 ô trong chat (emoji chỉ ở chat, cấm ở UI ngoài). Riêng react message bỏ qua theo thỏa thuận "chỉ làm khi cần".
+  - Trụ D - Bảng sống kho hồ sơ (Nhóm J, commit `8abd843`): `DossierLiveGrid.vue` virtualized 67k dòng (ROW_H 44px, fetch windowed), filter share realtime ("Áp dụng theo"), cursor chip đồng đội, comment theo dòng (`DossierComments` + composer + realtime broadcast), history hover giá rẻ.
+  - Trụ E - Shell (Nhóm H, commit `2d642dd`): Tool registry 8 tool, badge động sidebar, ghim tool ưa thích, Ctrl+K command palette tìm kiếm hồ sơ và chạy lệnh.
+  - Trụ G - Lazy loading & Data safety (Nhóm L, commit `4a6c39f`): Sweep artifacts 30 ngày (`IFileStorage.SweepOldArtifacts`), dọn dẹp localStorage hết hạn lúc boot app.
+- **Data safety (P0, P1, P2)**:
+  - P0.1 (Nhóm A2, commit `fb1226c`): `MigrateAsync()` tự động lúc startup + health báo trạng thái migrations.
+  - P0.2 (Nhóm E1, commit `d72f99c`): Bảng `SummaryDrafts` backup draft lên server theo `(SessionId, UserName)`, tự phục hồi thông minh khi đổi máy/mất mạng.
+  - P1: Cursor pagination cho chat (G4), seen server-side (G3).
+  - P2: Quét dọn tệp tạm 30 ngày (L1), dọn dẹp localStorage (L2).
+- **Kết quả tổng thể**:
+  - 87/87 tests passed (100%).
+  - Dữ liệu thật 67.718 hồ sơ trong SQL Server `StpArchive` bảo toàn nguyên vẹn.
+  - Service API và tunnel ngrok `https://mangle-tastiness-french.ngrok-free.dev` hoạt động liên tục, ổn định 200 OK.

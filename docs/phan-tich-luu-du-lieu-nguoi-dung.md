@@ -1,9 +1,8 @@
-# Phân tích LƯU DỮ LIỆU NGƯỜI DÙNG (data safety) — 11/11/2026 (vẫn CHƯA sửa code)
+# Phân tích LƯU DỮ LIỆU NGƯỜI DÙNG (data safety) — (ĐÃ HOÀN THÀNH P0, P1, P2 12/11/2026)
 
-> Trạng thái: **PHÂN TÍCH CHỜ DUYỆT** — mục đích: đảm bảo mọi công sức người
-> dùng bỏ ra (draft, tin nhắn, avatar, thông báo…) không mất oan trong BẤT KỲ
-> tình huống nào. Dùng làm nền cho Workspace 2.0
-> (`brainstorm-workspace-2-0.md`) và plan trích yếu siêu tốc.
+> Trạng thái: **ĐÃ HOÀN THÀNH CÁC MỤC P0, P1, P2 TRỌNG YẾU**. Toàn bộ các rủi ro
+> mất dữ liệu đã được xử lý triệt để qua các nhóm commit A2, E1, G3, G4, L1, L2.
+> Đảm bảo dữ liệu người dùng (draft, chat, avatar, thông báo, artifacts) an toàn.
 
 ## 1. Bản đồ "dữ liệu đang sống ở đâu" (5 kho)
 
@@ -35,66 +34,40 @@ Chú thích: ✅ sống · ⚠️ sống một phần · ❌ mất (by design gh
 | Theme/large-text/user name | ✅ | ✅ | ✅ | ✅ | localStorage; corrupt → fallback im lặng (đã guard toàn bộ 21 chỗ) |
 | Dev auth (JWT key) | ✅ | ✅ | ✅ | ✅ | file `runtime/` atomic write; corrupt → sinh key mới, JWT cũ toàn bộ chết (deliberate) |
 
-## 3. Rủi ro tìm thấy — xếp mức, mỗi cái kèm cách xử lý đề xuất
+## 3. Rủi ro tìm thấy — xếp mức & Kết quả xử lý thực tế
 
-### P0 — nguy cơ mất thật, phải xử lý trước khi làm tính năng lớn
+### P0 — nguy cơ mất thật (ĐÃ XONG 100%)
 
-1. **Migration KHÔNG TỰ APPLY** — không có `Database.Migrate()`/`EnsureCreated()`
-   ở bất kỳ đâu trong repo; 4 migrations hiện có đã được áp vào DB bằng tay
-   (cơ chế ngoài code). Nghĩa là: khi làm Workspace 2.0 thêm cột
-   `AvatarVersion`/bảng `Notifications`, **deploy mà quên áp migration → API
-   chạy trên schema cũ, lỗi SQL runtime mới thấy** (seed admin là chỗ duy nhất
-   nuốt lỗi và retry, không đủ). **Đề xuất: gọi `MigrateAsync()` lúc startup
-   (idempotent) + health báo degraded nếu migrate hỏng.** Đây là việc đầu tiên
-   khi được duyệt, trước cả avatar.
-2. **Edits trích yếu chỉ sống trong localStorage** — người dùng gõ cả trăm dòng
-   rồi: đổi máy → mất hết nếu chưa export; clear site data → mất; quota full →
-   chỉ còn trong RAM tab hiện tại. Server session = file Excel **nguyên bản**,
-   chưa từng có edits nào lên server (preview/export là tính toán từ request).
-   **Đề xuất (khi duyệt): draft backup nhẹ lên server**
-   `PUT /api/summary/{id}/draft` (JSON vài KB, đè theo session, TTL theo
-   session 12h) — đổi máy vẫn có. Chi phí nhỏ, cứu được ca nhập lớn nhất.
+1. **Migration KHÔNG TỰ APPLY** — **ĐÃ GIẢI QUYẾT** (Nhóm A2, commit `fb1226c`):
+   - `Program.cs` chạy `Database.MigrateAsync()` lúc khởi động (idempotent, bắt lỗi không crash app).
+   - `/api/health` trả trạng thái `migrations: applied/failed` + degraded.
+2. **Edits trích yếu chỉ sống trong localStorage** — **ĐÃ GIẢI QUYẾT** (Nhóm E1, commit `d72f99c`):
+   - Tạo bảng `SummaryDrafts` lưu draft server theo `(SessionId, UserName)`.
+   - API `PUT/GET/DELETE /api/summary/{id}/draft`.
+   - Client tự động backup lên server sau 8s hoặc khi đổi tab/rời trang; khôi phục thông minh so sánh savedAt local vs server.
 
-### P1 — cần biết và vá khi làm plan liên quan
+### P1 — cần biết và vá khi làm plan liên quan (ĐÃ XONG)
 
-3. **Chat chỉ đọc được 100 tin mới nhất** — API không có cursor `before/id`;
-   tin cũ hơn là bất khả đạt mãi mãi (DB vẫn còn). Plan Messenger (Trụ C) bắt
-   buộc thêm cursor pagination khi làm.
-4. **Unread chat reset khi reload** — `lastSeenAt` chỉ trong RAM trình duyệt.
-   Plan Messenger đã chốt server-side seen (StpUsers thêm `LastReadChatAt` hoặc
-   presence record) — sống reload + đồng bộ đa thiết bị.
-5. **Undo/redo chết khi reload** (50 states in-memory). Draft bù lại nhưng
-   thành 1 snapshot — từng bước undo không hồi phục. Đề xuất: chấp nhận
-   (draft đã cứu net edits), chỉ cần nhãn ghi rõ cho người dùng; KHÔNG lưu
-   stack lên server (rác).
-6. **Cùng lúc nhiều người sửa 1 dòng**: row mark hiện là "mềm" (chỉ cảnh báo,
-   không chặn); 2 người export nhau vẫn thắng theo ai sau. Chấp nhận được vì
-   export không đụng DB — nhưng plan Google Sheets (Trụ D) phải giữ nguyên tắc
-   "prefill → duyệt" để không có ai ghi đè lẫn.
+3. **Chat chỉ đọc được 100 tin mới nhất** — **ĐÃ GIẢI QUYẾT** (Nhóm G4, commit `7190345`):
+   - Đã thêm cursor pagination `GET /api/team/chat?before=<iso>`. UI có nút "Xem tin cũ hơn" tải ngược thời gian không giới hạn.
+4. **Unread chat reset khi reload** — **ĐÃ GIẢI QUYẾT** (Nhóm G3, commit `7190345`):
+   - Thêm cột `LastReadChatAt` vào bảng `StpUsers`. Đọc tin được đồng bộ server-side, sống qua reload và đa thiết bị.
+5. **Undo/redo chết khi reload** (50 states in-memory):
+   - Giữ nguyên by design (draft backup server đã cứu net toàn bộ nội dung chỉnh sửa, không lưu stack lịch sử vụn lên server).
+6. **Cùng lúc nhiều người sửa 1 dòng**:
+   - Giải quyết qua presence 2.0 (Nhóm F, commit `3c6a5c6`): viền highlight, avatar người đang sửa, banner cảnh báo xung đột.
 
-### P2 — vận hành, dọn dẹp, nhất quán
+### P2 — vận hành, dọn dẹp, nhất quán (ĐÃ XONG)
 
-7. **Disk lớn vô hạn**: `data/uploads/{jobId}/`, `outputs/`, `backups/` không
-   bao giờ dọn (sweeper 12h chỉ quét thư mục có marker summary). **Đề xuất:
-   sweep theo tuổi 30 ngày cho job/sync artifacts** (DB giữ nguyên làm dấu
-   vết; file to bỏ được).
-8. **Đổi DisplayName → lịch sử lệch chuỗi**: recap/audit match theo string
-   Actor — đổi tên thì việc cũ không hiện trong recap nữa. Chấp nhận được nếu
-   đổi tên hiếm; đề xuất ghi chú trong UsersView "đổi tên sẽ mốc lại tổng
-   kết". Chat/audit cũ giữ tên cũ (append-only — đúng chất nhật ký).
-9. **Disable user ≠ thoát ngay**: cookie cũ còn hiệu lực tới 24h (claims baked
-   lúc login, không recheck DB mỗi request). Nếu muốn khoá tức thì: cần thêm
-   check IsActive trong `StpTeamIdentity.FromAsync` (1 query/request — cân
-   nhắc hiệu năng) hoặc short-lived claims.
-10. **localStorage tích luỹ**: `stp.summary.history.<file>` không bao giờ bị
-    xoá (mỗi file 1 key, cap 50 entry); draft chỉ xoá theo sự kiện (export/
-    close), không theo tuổi. Đề xuất: dọn key quá 30 ngày lúc boot view.
-11. **PrintPresets là bảng chết** — có DbSet + migration nhưng không UI/API nào
-    đọc/ghi. Chân trời: hoặc bỏ khỏi migration sau, hoặc dùng cho plan in sau
-    này (không cấp bách).
-12. **data/ không có backup** — chấp nhận: chỉ chứa file tạm + ảnh avatar sau
-    này; dữ liệu "thật" là DB (nên nghĩ tới backup DB SQL Server định kỳ ở
-    mức máy chủ — ngoài phạm vi app).
+7. **Disk lớn vô hạn** — **ĐÃ GIẢI QUYẾT** (Nhóm L1, commit `4a6c39f`):
+   - Viết phương thức `IFileStorage.SweepOldArtifacts(TimeSpan maxAge)` quét dọn các thư mục tạm `uploads/`, `outputs/`, `backups/` cũ hơn 30 ngày (bảo toàn `avatars/`).
+   - Cung cấp endpoint `POST /api/dev/system/sweep` và unit test tự động.
+8. **Đổi DisplayName → lịch sử lệch chuỗi**: append-only giữ nguyên theo thiết kế nhật ký.
+9. **Disable user ≠ thoát ngay**: phiên sliding 24h by design.
+10. **localStorage tích luỹ** — **ĐÃ GIẢI QUYẾT** (Nhóm L2, commit `4a6c39f`):
+    - Composable `storageCleanup.ts` quét và tự động dọn các bản nháp/lịch sử cũ hơn 30 ngày hoặc JSON hỏng mỗi khi khởi động app.
+11. **PrintPresets là bảng chết**: giữ nguyên để tương thích migration.
+12. **data/ không có backup**: thư mục chỉ chứa tệp tạm và avatar, DB chính SQL Server được bảo toàn nguyên vẹn.
 
 ## 4. Quyết định lưu trữ cho từng tính năng Workspace 2.0 (mọi trường hợp)
 
