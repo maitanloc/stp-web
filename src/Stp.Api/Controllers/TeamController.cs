@@ -28,37 +28,75 @@ public sealed class TeamController : ControllerBase
     private readonly IDbContextFactory<StpDbContext> _factory;
     private readonly TeamPresence _presence;
     private readonly TeamAudit _audit;
+    private readonly NotificationService _notifications;
 
     public TeamController(
         IDbContextFactory<StpDbContext> factory,
         TeamPresence presence,
-        TeamAudit audit)
+        TeamAudit audit,
+        NotificationService notifications)
     {
         _factory = factory;
         _presence = presence;
         _audit = audit;
+        _notifications = notifications;
     }
 
-    /// <summary>Đọc tin nhắn mới nhất của kênh chat tổng (tối đa 100, cũ → mới).</summary>
+    /// <summary>
+    /// Đọc tin nhắn kênh chat (G4 cursor pagination): mới nhất trước, ?before=
+    /// (iso của tin cũ nhất page trước) để lật page cũ hơn; tối đa 100 tin/page.
+    /// </summary>
     [HttpGet("chat")]
     public async Task<ActionResult<ChatMessagesResponse>> Chat(
-        [FromQuery] int? take)
+        [FromQuery] int? take,
+        [FromQuery] string? before)
     {
         var takeCount = Math.Clamp(take ?? MaxChatHistory, 1, MaxChatHistory);
-        using var db = _factory.CreateDbContext();
-        var items = await db.ChatMessages
+        await using var db = await _factory.CreateDbContextAsync();
+
+        var query = db.ChatMessages.AsNoTracking();
+
+        // Cursor ISO-8601 từ client (encodeURIComponent) — parse bất biến để
+        // không phụ thuộc culture máy chủ; sai định dạng thì bỏ qua (trả page mới).
+        if (!string.IsNullOrWhiteSpace(before)
+            && DateTimeOffset.TryParse(
+                before,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal
+                | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var cursor))
+        {
+            query = query.Where(message => message.CreatedAt < cursor);
+        }
+
+        var page = await query
             .OrderByDescending(message => message.CreatedAt)
-            .Take(takeCount)
+            .ThenByDescending(message => message.Id)
+            .Take(takeCount + 1)
             .ToListAsync();
 
-        return Ok(new ChatMessagesResponse(items
-            .OrderBy(message => message.CreatedAt)
-            .ThenBy(message => message.Id)
-            .Select(message => new ChatMessageResponse(message.Id, message.Actor, message.Body, message.CreatedAt))
-            .ToList()));
+        // Lấy thêm 1 tin để biết còn page cũ nữa không, rồi thả phần thừa đi.
+        var hasMore = page.Count > takeCount;
+        var items = hasMore ? page.Take(takeCount).ToList() : page;
+
+        // Cursor lật page cũ = mốc thời gian tin CŨ NHẤT trong page (before=
+        // lọc CreatedAt < cursor nên không trùng page vừa đọc).
+        var oldest = items.Count > 0 ? items.Min(message => message.CreatedAt) : (DateTimeOffset?)null;
+
+        var response = new ChatMessagesResponse(
+            items
+                .OrderBy(message => message.CreatedAt)
+                .ThenBy(message => message.Id)
+                .Select(message => new ChatMessageResponse(
+                    message.Id, message.Actor, message.Body, message.CreatedAt))
+                .ToList(),
+            oldest?.ToString("O"),
+            hasMore);
+
+        return Ok(response);
     }
 
-    /// <summary>Gửi tin nhắn vào kênh tổng (lưu DB, trả tin đã lưu).</summary>
+    /// <summary>Gửi tin nhắn vào kênh tổng (lưu DB, trả tin đã lưu) + thông báo cho nhóm (G1).</summary>
     [HttpPost("chat")]
     public async Task<ActionResult<ChatMessagesResponse>> PostChat(
         [FromBody] ChatPostRequest? request)
@@ -95,12 +133,64 @@ public sealed class TeamController : ControllerBase
             Body = body.Length <= MaxChatBody ? body : body[..MaxChatBody]
         };
 
-        using var db = _factory.CreateDbContext();
+        await using var db = await _factory.CreateDbContextAsync();
         db.ChatMessages.Add(message);
         await db.SaveChangesAsync();
 
+        // G1: tin nhắn mới → thông báo kind "chat" cho mọi thành viên khác,
+        // bấm bell là nhảy thẳng tới chat dock.
+        _notifications.NotifyAllExcept(
+            message.Actor,
+            "chat",
+            $"{message.Actor} nhắn tin nhóm",
+            message.Body,
+            "/trich-yeu");
+
         return Ok(new ChatMessagesResponse(
             [new ChatMessageResponse(message.Id, message.Actor, message.Body, message.CreatedAt)]));
+    }
+
+    /// <summary>
+    /// Đánh dấu đã đọc toàn bộ tin nhắn tới thời điểm này (G3) — mốc seen nằm
+    /// trên tài khoản nên đếm tin chưa đọc đúng trên mọi máy, mọi thiết bị.
+    /// </summary>
+    [HttpPost("chat/seen")]
+    public async Task<ActionResult<ChatSeenResponse>> MarkChatSeen()
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized();
+        }
+
+        await using var db = await _factory.CreateDbContextAsync();
+        var user = await db.StpUsers.SingleAsync(candidate => candidate.Id == identity.Id);
+        var seenAt = DateTimeOffset.UtcNow;
+        user.LastReadChatAt = seenAt;
+        await db.SaveChangesAsync();
+
+        return Ok(new ChatSeenResponse(seenAt, 0));
+    }
+
+    /// <summary>Mốc seen chat + số tin chưa đọc (G3) — cho bell tab "Tin nhắn".</summary>
+    [HttpGet("chat/seen")]
+    public async Task<ActionResult<ChatSeenResponse>> ChatSeen()
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized();
+        }
+
+        await using var db = await _factory.CreateDbContextAsync();
+        var user = await db.StpUsers.AsNoTracking().SingleAsync(candidate => candidate.Id == identity.Id);
+        var lastRead = user.LastReadChatAt ?? DateTimeOffset.MinValue;
+
+        var unread = await db.ChatMessages
+            .Where(message => message.CreatedAt > lastRead && message.Actor != identity.DisplayName)
+            .CountAsync();
+
+        return Ok(new ChatSeenResponse(user.LastReadChatAt ?? DateTimeOffset.MinValue, unread));
     }
 
     /// <summary>Đọc nhật ký hoạt động gần nhất (mới nhất lên đầu).</summary>
@@ -171,6 +261,83 @@ public sealed class TeamController : ControllerBase
         }
 
         _audit.Write(actor, verb, "SummarySession", null, detail);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Thông báo của người đang đăng nhập (G1): mới nhất trước + số chưa đọc
+    /// cho badge bell. Chưa đăng nhập → 401 (thông báo là của từng tài khoản).
+    /// </summary>
+    [HttpGet("notifications")]
+    public async Task<ActionResult<NotificationsResponse>> Notifications(
+        [FromQuery] int? take)
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized();
+        }
+
+        var takeCount = Math.Clamp(take ?? 40, 1, 100);
+        await using var db = await _factory.CreateDbContextAsync();
+
+        var items = await db.Notifications
+            .AsNoTracking()
+            .Where(item => item.ForUser == identity.DisplayName)
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
+            .Take(takeCount)
+            .ToListAsync();
+
+        var unread = await db.Notifications
+            .Where(item => item.ForUser == identity.DisplayName && !item.IsRead)
+            .CountAsync();
+
+        return Ok(new NotificationsResponse(items
+            .Select(item => new NotificationItemResponse(
+                item.Id, item.Kind, item.Title, item.Body, item.Link, item.CreatedAt, item.IsRead))
+            .ToList(),
+            unread));
+    }
+
+    /// <summary>Đánh dấu đã đọc: { all: true } hoặc { ids: [...] } (G1).</summary>
+    [HttpPost("notifications/read")]
+    public async Task<IActionResult> MarkNotificationsRead(
+        [FromBody] NotificationsReadRequest? request)
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized();
+        }
+
+        await using var db = await _factory.CreateDbContextAsync();
+        var query = db.Notifications
+            .Where(item => item.ForUser == identity.DisplayName && !item.IsRead);
+
+        if (request is { All: true })
+        {
+            // Đánh dấu tất cả trong 1 lượt — số dòng nhỏ nên Update chấp nhận được.
+            await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.IsRead, true)
+                .SetProperty(item => item.ReadAt, DateTimeOffset.UtcNow));
+        }
+        else if (request?.Ids is { Count: > 0 })
+        {
+            var ids = request.Ids.ToHashSet();
+            var targets = await db.Notifications
+                .Where(item => item.ForUser == identity.DisplayName
+                               && !item.IsRead
+                               && ids.Contains(item.Id))
+                .ToListAsync();
+            foreach (var item in targets)
+            {
+                item.IsRead = true;
+                item.ReadAt = DateTimeOffset.UtcNow;
+            }
+        }
+
+        await db.SaveChangesAsync();
         return NoContent();
     }
 }

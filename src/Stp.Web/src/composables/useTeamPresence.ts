@@ -42,6 +42,28 @@ export const liveActivities = ref<LiveActivity[]>([])
 /** F3: chip hành động đáng kể nổi lên cho đồng đội, tự tan sau 8 giây. */
 export const actionChips = ref<Array<LiveActivity & { key: number }>>([])
 
+/** G2: thông báo đẩy qua hub — bell tự lọc forUser === mình và cập nhật badge. */
+export interface LiveNotification {
+  forUser: string
+  kind: string
+  title: string
+  body: string
+  link: string | null
+  timestamp: string
+}
+
+export const lastLiveNotification = ref<LiveNotification | null>(null)
+
+/** G3: người vừa bấm phím chat (hub đẩy về) — dock hiển thị "đang gõ…" 5s. */
+export const lastTypingActor = ref<{ actor: string; at: number } | null>(null)
+
+/** G3: báo "mình đang gõ" cho cả nhóm qua hub — gọi throttle 2s ở nơi gõ chat. */
+export function sendTeamTyping(actor: string): void {
+  if (hubConnection && hubConnection.state === 'Connected') {
+    void hubConnection.invoke('typing', actor).catch(() => {})
+  }
+}
+
 const SIGNIFICANT_ACTIONS = new Set([
   'export',
   'export-filtered',
@@ -165,6 +187,33 @@ async function startTeamHub(): Promise<void> {
         window.setTimeout(() => {
           actionChips.value = actionChips.value.filter((chip) => chip.key !== key)
         }, 8000)
+      }
+    })
+
+    // G2: bell realtime — server chỉ định người nhận, client tự lọc của mình.
+    connection.on('notification', (payload: {
+      forUser?: string
+      kind?: string
+      title?: string
+      body?: string
+      link?: string
+      timestamp?: string
+    }) => {
+      if (!payload?.forUser) return
+      lastLiveNotification.value = {
+        forUser: payload.forUser,
+        kind: payload.kind ?? 'system',
+        title: payload.title ?? '',
+        body: payload.body ?? '',
+        link: payload.link ?? null,
+        timestamp: payload.timestamp ?? new Date().toISOString(),
+      }
+    })
+
+    // G3: "ai đang gõ" — sự kiện thoáng qua, dock tự quản TTL hiển thị.
+    connection.on('typing', (payload: { actor?: string }) => {
+      if (payload?.actor) {
+        lastTypingActor.value = { actor: payload.actor, at: Date.now() }
       }
     })
 

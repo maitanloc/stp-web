@@ -130,10 +130,34 @@
   chip; actionLabel 'bulk' = "Áp giấy tờ hàng loạt")
 
 ### Nhóm G — Trụ C notification + Messenger
-- [ ] G1. Bảng Notifications (migration) + API list/unread/mark-read
-- [ ] G2. Bell topbar 2 tab (Hệ thống / Tin nhắn) + deep link
-- [ ] G3. Chat Messenger: seen server-side (LastReadChatAt), typing, optimistic
-- [ ] G4. Chat cursor pagination (>100 tin) + mention @tên + emoji picker trong chat
+- [x] G1. Bảng Notifications (migration) + API list/unread/mark-read
+  (bảng `Notifications` (migration `AddNotifications`, gộp luôn
+  `StpUsers.LastReadChatAt`): ForUser+IsRead index, Kind system/chat,
+  Title/Body/Link; `NotificationService.NotifyAllExcept` sinh cho mọi
+  tài khoản khác + broadcast hub "notification" fire-and-forget;
+  TeamAudit.Write gọi cho SIGNIFICANT (export*/sync/bulk — thật: xuất
+  bản lọc của user 11/11 sinh notification); PostChat sinh kind chat;
+  API: GET /api/team/notifications (items + unreadCount), POST
+  /api/team/notifications/read ({all} hoặc {ids}, ExecuteUpdateAsync);
+  curl verify: lan chat → admin unread 3→4, read all → 0)
+- [x] G2. Bell topbar 2 tab (Hệ thống / Tin nhắn) + deep link
+  (`NotificationBell.vue` gắn đầu topbar-actions: badge đỏ đếm unread,
+  poll 20s + realtime qua hub (badge 1→2 ngay sau bulk của lan —
+  đã verify), panel 340px, tab Hệ thống/Tin nhắn bật theo tab còn unread,
+  bấm item → markRead(id) + router.push(link) (verify /trich-yeu),
+  "Đọc hết tab này"; item có dot theo kind + thời gian relative)
+- [x] G3. Chat Messenger: seen server-side (LastReadChatAt), typing, optimistic
+  (POST/GET /api/team/chat/seen — mốc seen trên tài khoản, badge đúng trên
+  mọi máy (verify: seen → unread 0, lastReadAt ghi); dock đóng chỉ dò seen
+  12s, mở tải tin 3s; typing qua hub `typing` (Clients.Others) — gõ throttle
+  2s, "X đang gõ…" 3 dot bounce, tự tan 5s; optimistic: tin hiện ngay `tmp-*`,
+  server xác nhận fetchChat thay bản thật, lỗi thì gỡ + trả khung soạn)
+- [x] G4. Chat cursor pagination (>100 tin) + mention @tên + emoji picker trong chat
+  (GET ?before=<iso> — cursor = min CreatedAt trong page, parse
+  InvariantCulture + AdjustToUniversal (fix 2 bug: items[0] là tin MỚI nhất
+  trong list gốc; curl test phải encode %2B); verify 2 page không trùng +
+  hasMore đúng; mentionParts tô đậm @mention (không v-html); emoji grid
+  24 ô chèn vào draft; nút "Xem tin cũ hơn" nối page cũ lên đầu)
 
 ### Nhóm H — Trụ E shell
 - [ ] H1. Tool registry + badge đếm trên sidebar

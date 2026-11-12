@@ -27,7 +27,20 @@ public sealed record ChatPostRequest(string Actor, string Body);
 
 public sealed record ChatMessageResponse(Guid Id, string Actor, string Body, DateTimeOffset CreatedAt);
 
-public sealed record ChatMessagesResponse(IReadOnlyList<ChatMessageResponse> Items);
+/// <summary>
+/// Page chat (G4): Items cũ → mới; NextCursor = mốc thời gian tin cũ nhất
+/// trong page (iso) để tải page cũ hơn bằng ?before=; HasMore cho biết còn
+/// tin cũ hơn nữa không.
+/// </summary>
+public sealed record ChatMessagesResponse(
+    IReadOnlyList<ChatMessageResponse> Items,
+    string? NextCursor = null,
+    bool HasMore = false);
+
+/// <summary>Mốc seen chat server-side (G3) + số tin chưa đọc theo mốc đó.</summary>
+public sealed record ChatSeenResponse(
+    DateTimeOffset LastReadAt,
+    int UnreadCount);
 
 /// <summary>Dòng nhật ký hoạt động — ai vừa làm gì (xuất, đồng bộ…).</summary>
 public sealed record ActivityEventResponse(
@@ -48,3 +61,23 @@ public sealed record ActivityEventsResponse(IReadOnlyList<ActivityEventResponse>
 public sealed record TeamActionRequest(
     string Verb,
     string? Detail = null);
+
+/// <summary>Một thông báo cho bell topbar (G1).</summary>
+public sealed record NotificationItemResponse(
+    Guid Id,
+    string Kind,
+    string Title,
+    string Body,
+    string? Link,
+    DateTimeOffset CreatedAt,
+    bool IsRead);
+
+/// <summary>Danh sách thông báo + số chưa đọc (G2).</summary>
+public sealed record NotificationsResponse(
+    IReadOnlyList<NotificationItemResponse> Items,
+    int UnreadCount);
+
+/// <summary>Đánh dấu đã đọc: tất cả, hoặc danh sách id cụ thể.</summary>
+public sealed record NotificationsReadRequest(
+    bool All = false,
+    IReadOnlyList<Guid>? Ids = null);

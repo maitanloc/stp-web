@@ -28,4 +28,10 @@ public sealed class StpUser
     public bool IsActive { get; set; } = true;
 
     public DateTimeOffset? LastLoginAt { get; set; }
+
+    /// <summary>
+    /// Lần cuối người dùng đọc kênh chat (G3) — server giữ mốc seen để đếm tin
+    /// chưa đọc đúng trên mọi máy, thay cho mốc localStorage từng máy.
+    /// </summary>
+    public DateTimeOffset? LastReadChatAt { get; set; }
 }

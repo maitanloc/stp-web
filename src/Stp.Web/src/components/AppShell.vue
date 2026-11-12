@@ -21,6 +21,7 @@ import { request } from '../api/client'
 import type { HealthResponse } from '../api/types'
 import { initTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
 import { useTheme } from '../composables/useTheme'
+import NotificationBell from './NotificationBell.vue'
 
 interface NavItem {
   label: string
@@ -177,6 +178,7 @@ onUnmounted(() => {
         </div>
 
         <div class="topbar-actions">
+          <NotificationBell />
           <RouterLink class="btn btn-secondary btn-sm" to="/dong-bo">
             <RefreshCw :size="14" />
             Đồng bộ

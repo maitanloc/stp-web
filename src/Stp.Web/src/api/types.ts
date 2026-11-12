@@ -589,6 +589,35 @@ export interface ChatMessageResponse {
   createdAt: string
 }
 
+/** G4: page chat có cursor — nextCursor (iso tin cũ nhất) + hasMore để lật page cũ. */
+export interface ChatMessagesResponse {
+  items: ChatMessageResponse[]
+  nextCursor?: string | null
+  hasMore?: boolean
+}
+
+/** G3: mốc seen chat server-side + số tin chưa đọc theo mốc đó. */
+export interface ChatSeenResponse {
+  lastReadAt: string
+  unreadCount: number
+}
+
+/** G1: một thông báo của bell topbar. */
+export interface NotificationItemResponse {
+  id: string
+  kind: string
+  title: string
+  body: string
+  link: string | null
+  createdAt: string
+  isRead: boolean
+}
+
+export interface NotificationsResponse {
+  items: NotificationItemResponse[]
+  unreadCount: number
+}
+
 export interface ActivityEventsResponse {
   items: ActivityEventResponse[]
 }

@@ -54,4 +54,19 @@ public sealed class TeamHub : Hub
                 Array.Empty<PresenceRowMarkResponse>());
         }
     }
+
+    /// <summary>
+    /// "Ai đang gõ" (G3): client gọi khi người dùng gõ chat (throttle 2s phía
+    /// client), broadcast cho cả nhóm. Không lưu gì — tín hiệu thoáng qua.
+    /// </summary>
+    public void Typing(string? actor)
+    {
+        var name = string.IsNullOrWhiteSpace(actor) ? "Ai đó" : actor.Trim();
+        if (name.Length > 100)
+        {
+            name = name[..100];
+        }
+
+        _ = Clients.Others.SendAsync("typing", new { actor = name });
+    }
 }

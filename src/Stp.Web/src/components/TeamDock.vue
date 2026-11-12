@@ -3,10 +3,19 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getUserName, request } from '../api/client'
 import { initTeamIdentity, logoutTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
-import type { ActivityEventResponse, ChatMessageResponse } from '../api/types'
+import type { ActivityEventResponse, ChatMessageResponse, ChatMessagesResponse, ChatSeenResponse } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { actionLabel, clockTime, colorForName, renderAvatar, relativeTime } from '../lib/team'
-import { pingPresence, startTeamPresence, teamOnline, liveActivities, actionChips, hubStatus } from '../composables/useTeamPresence'
+import {
+  lastTypingActor,
+  pingPresence,
+  sendTeamTyping,
+  startTeamPresence,
+  teamOnline,
+  liveActivities,
+  actionChips,
+  hubStatus,
+} from '../composables/useTeamPresence'
 import { useToast } from '../composables/useToast'
 import LoginModal from './LoginModal.vue'
 import UserNameModal from './UserNameModal.vue'
@@ -34,10 +43,28 @@ const activities = ref<ActivityEventResponse[]>([])
 const draft = ref('')
 const sending = ref(false)
 
+// G4: lật page chat cũ hơn — cursor + cờ còn page.
+const olderCursor = ref<string | null>(null)
+const hasOlder = ref(false)
+const loadingOlder = ref(false)
+
+// G4: emoji picker trong khung soạn chat.
+const EMOJIS = ['😀', '😂', '🙂', '😉', '😍', '🤔', '😴', '😅', '👍', '👏', '🙏', '💪', '🔥', '🎉', '✅', '❌', '⏳', '📌', '❤️', '😭', '😮', '😎', '🫡', '🤝']
+const emojiOpen = ref(false)
+
+// G3: typing qua hub — ai vừa bấm phím soạn tin (tự tan sau 5 giây).
+const typingWho = ref<string | null>(null)
+let typingTimer: ReturnType<typeof setTimeout> | null = null
+
 const listElement = ref<HTMLElement | null>(null)
 let lastSeenAt: number | null = null
 
+// G3: mốc seen nằm trên server (LastReadChatAt) — đếm tin chưa đọc đúng trên
+// mọi máy; chưa đăng nhập thì lùi về mốc localStorage như trước.
+const serverUnread = ref<number | null>(null)
+
 const unread = computed(() => {
+  if (serverUnread.value !== null) return serverUnread.value
   if (lastSeenAt === null) return 0
   return messages.value.filter((message) => new Date(message.createdAt).getTime() > lastSeenAt!).length
 })
@@ -46,8 +73,65 @@ const onlineOthers = computed(() =>
   teamOnline.value.filter((entry) => entry.actor !== userName.value),
 )
 
+async function fetchChatSeen(): Promise<void> {
+  if (!teamIdentity.value) return
+  try {
+    const response = await request<ChatSeenResponse>('/api/team/chat/seen')
+    serverUnread.value = response.unreadCount
+  } catch {
+    // Bỏ qua — badge vẫn hoạt động theo mốc local.
+  }
+}
+
 function markChatRead(): void {
   lastSeenAt = Date.now()
+  if (teamIdentity.value) {
+    // Seen server-side: POST gọn, không cần đợi — badge cập nhật qua poll sau.
+    serverUnread.value = 0
+    void request('/api/team/chat/seen', { method: 'POST' }).catch(() => {})
+  }
+}
+
+/** G3: gõ chat → báo cho cả nhóm (throttle 2 giây, qua hub realtime). */
+let lastTypingSentAt = 0
+function onDraftInput(): void {
+  const name = userName.value
+  if (!name) return
+  const now = Date.now()
+  if (now - lastTypingSentAt < 2000) return
+  lastTypingSentAt = now
+  sendTeamTyping(name)
+}
+
+/** G3: nghe người khác gõ — hiển thị "X đang gõ…" 5 giây. */
+watch(lastTypingActor, (payload) => {
+  if (!payload || payload.actor === userName.value) return
+  typingWho.value = payload.actor
+  if (typingTimer) clearTimeout(typingTimer)
+  typingTimer = setTimeout(() => {
+    typingTypingExpired(payload.actor)
+  }, 5000)
+})
+
+function typingTypingExpired(actor: string): void {
+  if (typingWho.value === actor) typingWho.value = null
+}
+
+/** G4: tách @mention trong thân tin để tô đậm (không dùng v-html). */
+function mentionParts(body: string): Array<{ text: string; isMention: boolean }> {
+  return body
+    .split(/(@[^\s@]{1,60})/g)
+    .filter((part) => part.length > 0)
+    .map((part) => ({ text: part, isMention: part.startsWith('@') }))
+}
+
+function insertEmoji(emoji: string): void {
+  draft.value += emoji
+  emojiOpen.value = false
+}
+
+function toggleEmoji(): void {
+  emojiOpen.value = !emojiOpen.value
 }
 
 async function scrollChatBottom(): Promise<void> {
@@ -60,14 +144,35 @@ async function scrollChatBottom(): Promise<void> {
 
 async function fetchChat(): Promise<void> {
   try {
-    const response = await request<{ items: ChatMessageResponse[] }>('/api/team/chat?take=100')
+    const response = await request<ChatMessagesResponse>('/api/team/chat?take=100')
     messages.value = response.items
+    olderCursor.value = response.nextCursor ?? null
+    hasOlder.value = response.hasMore ?? false
     if (open.value && tab.value === 'chat') {
       markChatRead()
       void scrollChatBottom()
     }
   } catch {
     // Bỏ qua blip — lỗi gửi tin mới toast rõ.
+  }
+}
+
+/** G4: lật page tin cũ hơn — nối lên đầu danh sách, giữ vị trí đọc ở cuối. */
+async function loadOlder(): Promise<void> {
+  if (!olderCursor.value || loadingOlder.value) return
+  loadingOlder.value = true
+  try {
+    const response = await request<ChatMessagesResponse>(
+      `/api/team/chat?take=100&before=${encodeURIComponent(olderCursor.value)}`,
+    )
+    const currentBottom = messages.value
+    messages.value = [...currentBottom, ...response.items]
+    olderCursor.value = response.nextCursor ?? null
+    hasOlder.value = response.hasMore ?? false
+  } catch {
+    // Bỏ qua blip.
+  } finally {
+    loadingOlder.value = false
   }
 }
 
@@ -116,13 +221,26 @@ async function sendDraft(): Promise<void> {
   if (body.length === 0 || sending.value) return
 
   sending.value = true
+  // G3: optimistic — hiện tin của mình ngay, server xác nhận rồi thay bản thật.
+  const tmpId = `tmp-${Date.now()}` as unknown as `${string}-${string}-${string}-${string}-${string}`
+  const tmpMessage: ChatMessageResponse = {
+    id: tmpId,
+    actor,
+    body,
+    createdAt: new Date().toISOString(),
+  }
+  messages.value = [...messages.value, tmpMessage]
+  draft.value = ''
+  markChatRead()
+  void scrollChatBottom()
   try {
     await request('/api/team/chat', { method: 'POST', body: { actor, body } })
-    draft.value = ''
-    markChatRead()
+    typingTypingExpired(actor)
     await fetchChat()
-    void scrollChatBottom()
   } catch (error) {
+    // Gửi hỏng — gỡ tin optimistic, trả lại khung soạn để người dùng thử lại.
+    messages.value = messages.value.filter((message) => message.id !== tmpId)
+    draft.value = body
     toast.error('Không gửi được tin nhắn', errorMessage(error))
   } finally {
     sending.value = false
@@ -149,6 +267,7 @@ function saveName(name: string): void {
   nameModalOpen.value = false
   void pingPresence()
   void fetchChat()
+  void fetchChatSeen()
   toast.success(`Đã dùng tên "${name}"`)
 }
 
@@ -157,6 +276,7 @@ function onLogged(displayName: string): void {
   accountMenuOpen.value = false
   void pingPresence()
   void fetchChat()
+  void fetchChatSeen()
   toast.success(`Xin chào ${displayName}!`)
 }
 
@@ -165,6 +285,7 @@ async function doLogout(): Promise<void> {
   await logoutTeamIdentity()
   void pingPresence()
   void fetchChat()
+  serverUnread.value = null
   toast.success('Đã đăng xuất')
   if (!userName.value) {
     nameModalOpen.value = true
@@ -194,7 +315,11 @@ let activityTimer: ReturnType<typeof setInterval> | null = null
 
 function restartChatTimer(): void {
   if (chatTimer) clearInterval(chatTimer)
-  chatTimer = setInterval(() => void fetchChat(), open.value ? CHAT_OPEN_MS : CHAT_HIDDEN_MS)
+  // G3: dock đóng chỉ dò mốc seen (badge đếm đúng), dock mở thì tải tin.
+  chatTimer = setInterval(
+    () => (open.value ? void fetchChat() : void fetchChatSeen()),
+    open.value ? CHAT_OPEN_MS : CHAT_HIDDEN_MS,
+  )
 }
 
 onMounted(() => {
@@ -357,6 +482,15 @@ watch(tab, (value) => {
 
       <!-- Tab: Chat -->
       <div v-show="tab === 'chat'" class="chat-area">
+        <button
+          v-if="hasOlder"
+          type="button"
+          class="load-older"
+          :disabled="loadingOlder"
+          @click="loadOlder"
+        >
+          {{ loadingOlder ? 'Đang tải…' : 'Xem tin cũ hơn' }}
+        </button>
         <div ref="listElement" class="chat-list">
           <p v-if="messages.length === 0" class="blank">
             Chưa có tin nhắn nào — chào cả nhóm ở đây nhé.
@@ -378,18 +512,47 @@ watch(tab, (value) => {
               <span v-if="message.actor !== userName" class="who" :style="{ color: colorForName(message.actor) }">
                 {{ message.actor }}
               </span>
-              <p class="body">{{ message.body }}</p>
+              <p class="body">
+                <template v-for="(part, index) in mentionParts(message.body)" :key="index">
+                  <span v-if="part.isMention" class="mention">{{ part.text }}</span>
+                  <template v-else>{{ part.text }}</template>
+                </template>
+              </p>
               <span class="time">{{ clockTime(message.createdAt) }}</span>
             </div>
           </div>
         </div>
+        <div v-if="typingWho" class="typing-line">
+          <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
+          {{ typingWho }} đang gõ…
+        </div>
         <div class="chat-compose">
+          <div v-if="emojiOpen" class="emoji-panel">
+            <button
+              v-for="emoji in EMOJIS"
+              :key="emoji"
+              type="button"
+              class="emoji-cell"
+              @click="insertEmoji(emoji)"
+            >
+              {{ emoji }}
+            </button>
+          </div>
           <textarea
             v-model="draft"
             rows="1"
-            :placeholder="userName ? 'Nhập tin nhắn cho cả nhóm...' : 'Khai tên trước để chat'"
+            :placeholder="userName ? 'Nhập tin nhắn cho cả nhóm... @tên để nhắc ai đó' : 'Khai tên trước để chat'"
             @keydown.enter.exact.prevent="sendDraft()"
+            @input="onDraftInput"
           />
+          <button
+            type="button"
+            class="send send-emoji"
+            title="Chèn biểu tượng"
+            @click="toggleEmoji"
+          >
+            🙂
+          </button>
           <button
             type="button"
             class="send"
@@ -859,7 +1022,109 @@ watch(tab, (value) => {
   color: rgba(255, 255, 255, 0.75);
 }
 
+.load-older {
+  appearance: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.load-older:hover {
+  text-decoration: underline;
+}
+
+.load-older:disabled {
+  color: var(--muted-2);
+  cursor: default;
+}
+
+.typing-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--muted-2);
+  animation: typing-bounce 1.1s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.mention {
+  color: var(--brand);
+  font-weight: 700;
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+.emoji-panel {
+  position: absolute;
+  bottom: 52px;
+  left: 10px;
+  display: grid;
+  grid-template-columns: repeat(8, 30px);
+  gap: 2px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  z-index: 5;
+}
+
+.emoji-cell {
+  appearance: none;
+  border: none;
+  background: none;
+  font-size: 17px;
+  line-height: 30px;
+  height: 30px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.emoji-cell:hover {
+  background: var(--surface-2);
+}
+
+.send-emoji {
+  font-size: 15px;
+}
+
 .chat-compose {
+  position: relative;
   display: flex;
   gap: 8px;
   padding: 10px;

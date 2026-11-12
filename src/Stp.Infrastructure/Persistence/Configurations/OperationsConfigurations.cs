@@ -211,3 +211,22 @@ public sealed class SummaryDraftConfiguration : IEntityTypeConfiguration<Summary
         builder.HasIndex(x => x.SavedAt);
     }
 }
+
+public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notification>
+{
+    public void Configure(EntityTypeBuilder<Notification> builder)
+    {
+        builder.ToTable("Notifications");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.ForUser).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.Kind).HasMaxLength(20).IsRequired();
+        builder.Property(x => x.Title).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Body).HasMaxLength(400).IsRequired();
+        builder.Property(x => x.Link).HasMaxLength(200);
+
+        // Bell topbar: truy vấn unread của một người là nhịp nóng nhất.
+        builder.HasIndex(x => new { x.ForUser, x.IsRead });
+        builder.HasIndex(x => x.CreatedAt);
+    }
+}

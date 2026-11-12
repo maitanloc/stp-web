@@ -46,6 +46,8 @@ public sealed class StpDbContext : DbContext
 
     public DbSet<SummaryDraft> SummaryDrafts => Set<SummaryDraft>();
 
+    public DbSet<Notification> Notifications => Set<Notification>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
