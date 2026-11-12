@@ -11,6 +11,7 @@ import {
   FilePenLine,
   FileSpreadsheet,
   Info,
+  Mic,
   RefreshCw,
   Search,
   Star,
@@ -36,6 +37,12 @@ import type {
 } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { formatBytes, formatNumber } from '../lib/format'
+import {
+  applyLearned,
+  normalizeSpeech,
+  parseVoiceTranscript,
+} from '../lib/voiceParser'
+import { useVoiceInput } from '../composables/useVoiceInput'
 import EmptyState from '../components/EmptyState.vue'
 import AppSelect from '../components/AppSelect.vue'
 import FilePicker from '../components/FilePicker.vue'
@@ -827,12 +834,23 @@ function openSummaryEditor(row: SummaryRowResponse): void {
 function closeSummaryEditor(): void {
   editingSummaryRow.value = null
   summaryDraft.value = ''
+  voiceLearnCandidate.value = null
 }
 
 function saveSummaryEditor(row: SummaryRowResponse): void {
   const text = summaryDraft.value.trim()
+  const candidate = voiceLearnCandidate.value
   commit(row, { summaryText: text })
   closeSummaryEditor()
+  // I2 học lỗi nghe: người dùng nắn bản voice khác bản điền → nhớ cặp
+  // {nghe sai → người sửa}; lần sau parser tự thay trước khi match.
+  if (candidate && candidate.rowNumber === row.rowNumber && !voiceSuppressLearn) {
+    const prefill = candidate.prefill.trim()
+    if (prefill.length > 0 && text !== prefill) {
+      rememberVoiceCorrection(candidate.heard, text)
+    }
+  }
+  voiceLearnCandidate.value = null
   toast.success('Đã cập nhật trích yếu', `Dòng ${row.rowNumber} sẽ được ghi khi xuất.`)
   jumpToNextMissing(row.rowNumber)
 }
@@ -1021,6 +1039,224 @@ async function quickExportFiltered(): Promise<void> {
   await doExportFiltered()
   quickName.value = exportName.value.trim()
   localStorage.setItem(QUICK_NAME_KEY, quickName.value)
+}
+
+/* ==================== Nhóm I — phiên đọc trích yếu bằng giọng nói ====================
+ * GĐ 1: Web Speech API (Chrome/Edge, vi-VN, qua tunnel HTTPS được). Mọi câu
+ * nói chỉ PREFILL vào khung soạn để mắt duyệt — lưu/xuất không đổi một pixel.
+ * Parser + từ vựng nằm ở lib/voiceParser.ts (thuần, test được).
+ */
+
+const {
+  supported: voiceSupported,
+  listening: voiceListening,
+  interim: voiceInterim,
+  toggle: toggleVoiceInput,
+} = useVoiceInput({
+  onFinal: (text) => handleVoiceFinal(text),
+  onInterim: () => undefined,
+  onError: (message) => {
+    if (message) toast.error('Không nghe được', message)
+  },
+})
+
+const voiceLastHeard = ref('')
+
+/** Học lỗi nghe (I2): {máy nghe sai → người sửa} — tối đa 100 cặp. */
+interface VoiceLearnedPair {
+  heard: string
+  fixed: string
+}
+
+const VOICE_LEARN_KEY = 'stp.voiceLearn'
+const voiceLearned = ref<VoiceLearnedPair[]>(readVoiceLearned())
+let voiceLearnTimer: number | undefined
+
+function readVoiceLearned(): VoiceLearnedPair[] {
+  try {
+    const raw = localStorage.getItem(VOICE_LEARN_KEY)
+    const list = raw ? (JSON.parse(raw) as unknown) : []
+    if (!Array.isArray(list)) return []
+    return list.filter(
+      (item): item is VoiceLearnedPair =>
+        !!item &&
+        typeof item === 'object' &&
+        typeof (item as VoiceLearnedPair).heard === 'string' &&
+        typeof (item as VoiceLearnedPair).fixed === 'string',
+    )
+  } catch {
+    return []
+  }
+}
+
+function rememberVoiceCorrection(heard: string, fixed: string): void {
+  const normalizedHeard = normalizeSpeech(heard)
+  if (!normalizedHeard) return
+  voiceLearned.value = [
+    { heard, fixed },
+    ...voiceLearned.value.filter((pair) => normalizeSpeech(pair.heard) !== normalizedHeard),
+  ].slice(0, 100)
+  if (voiceLearnTimer) window.clearTimeout(voiceLearnTimer)
+  voiceLearnTimer = window.setTimeout(() => {
+    try {
+      localStorage.setItem(VOICE_LEARN_KEY, JSON.stringify(voiceLearned.value))
+    } catch {
+      // Học là tiện ích — không lưu được thì bỏ qua.
+    }
+  }, 700)
+}
+
+/** Dòng vừa được voice điền — nếu người dùng nắn khác thì thành bài học. */
+const voiceLearnCandidate = ref<{
+  rowNumber: number
+  heard: string
+  prefill: string
+} | null>(null)
+
+let voiceSuppressLearn = false
+
+function toggleVoice(): void {
+  if (!voiceSupported.value) {
+    toast.warning(
+      'Trình duyệt chưa hỗ trợ',
+      'Đọc giọng nói cần Chrome hoặc Edge (Web Speech API, tiếng Việt).',
+    )
+    return
+  }
+  toggleVoiceInput()
+  if (!voiceListening.value) {
+    voiceInterim.value = ''
+    voiceLastHeard.value = ''
+  }
+}
+
+/** Dòng đang mở editor — mục tiêu mặc định của câu nói. */
+const voiceTargetRow = computed<SummaryRowResponse | null>(() => {
+  if (editingSummaryRow.value == null) return null
+  return rows.value.find((row) => row.rowNumber === editingSummaryRow.value) ?? null
+})
+
+function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
+  const current = voiceTargetRow.value
+  if (command === 'commit') {
+    if (!current) {
+      toast.info('Chưa mở dòng nào', 'Mở "Sửa toàn bộ" một dòng rồi nói "xong".')
+      return
+    }
+    if (!summaryDraft.value.trim()) {
+      toast.info('Khung soạn trống', 'Không có gì để lưu.')
+      return
+    }
+    saveSummaryEditor(current)
+    return
+  }
+  if (command === 'next') {
+    const from = current?.rowNumber ?? rows.value[0]?.rowNumber ?? 0
+    const next = nextMissingRow(from)
+    if (!next) {
+      toast.info('Hết dòng thiếu', 'Không còn dòng thiếu danh mục trong phạm vi đang xem.')
+      return
+    }
+    openSummaryEditor(next)
+    void scrollEditorIntoView()
+    return
+  }
+  if (command === 'prev') {
+    const ordered = [...rows.value].sort((a, b) => a.rowNumber - b.rowNumber)
+    const index = current ? ordered.findIndex((row) => row.rowNumber === current.rowNumber) : -1
+    const previous = index > 0 ? ordered[index - 1] : null
+    if (!previous) {
+      toast.info('Đây là dòng đầu', 'Không còn dòng nào phía trước.')
+      return
+    }
+    openSummaryEditor(previous)
+    void scrollEditorIntoView()
+    return
+  }
+  // "bộ bảy" — điền Bộ 7 chuẩn vào dòng đang mở.
+  if (!current) {
+    toast.info('Chưa mở dòng nào', 'Mở "Sửa toàn bộ" một dòng rồi nói "bộ bảy".')
+    return
+  }
+  voiceSuppressLearn = true
+  setRowItems(current, [...STANDARD_SEVEN])
+  voiceSuppressLearn = false
+  openSummaryEditor(current)
+  toast.success('Đã điền Bộ 7 chuẩn', 'Kiểm rồi bấm Lưu hoặc nói "xong".')
+}
+
+function handleVoiceFinal(text: string): void {
+  const active = session.value
+  if (!active) return
+  voiceLastHeard.value = text
+
+  const learned = applyLearned(text, voiceLearned.value)
+  const context = {
+    catalog: active.catalog,
+    types: active.types.map((item) => item.name),
+  }
+  const result = parseVoiceTranscript(learned, context)
+  if (!result) {
+    toast.info(
+      'Không hiểu câu này',
+      `"${text}" — nói loại hồ sơ + giấy tờ ("kết hôn — căn cước, hộ khẩu") hoặc lệnh "xong", "kế tiếp".`,
+    )
+    return
+  }
+
+  if (result.kind === 'command') {
+    runVoiceCommand(result.command)
+    return
+  }
+
+  if (result.kind === 'filter') {
+    if (result.type !== null) type.value = result.type
+    if (result.year !== null) year.value = result.year
+    const parts: string[] = []
+    if (result.type) parts.push(`loại ${result.type}`)
+    if (result.year !== null) parts.push(`năm ${result.year}`)
+    toast.success('Đã lọc bằng giọng nói', parts.length > 0 ? parts.join(' · ') : 'bỏ lọc loại')
+    return
+  }
+
+  // Prefill: điền vào dòng đang mở, hoặc dòng thiếu kế tiếp nếu chưa mở ai.
+  let row = voiceTargetRow.value
+  if (!row) row = nextMissingRow(rows.value[0]?.rowNumber ?? 0)
+  if (!row) {
+    toast.info('Không có dòng để điền', 'Bấm "Sửa toàn bộ" một dòng rồi nói tiếp.')
+    return
+  }
+
+  const spokenType = result.type
+  if (spokenType && row.type && normalizeSpeech(spokenType) !== normalizeSpeech(row.type)) {
+    toast.info(
+      'Loại nói khác loại dòng',
+      `Nói "${spokenType}" nhưng dòng ${row.rowNumber} là "${row.type}" — vẫn điền giấy tờ, kiểm trước khi lưu.`,
+    )
+  }
+
+  voiceSuppressLearn = true
+  if (result.sheetNumber !== null) {
+    commit(row, { sheetNumber: result.sheetNumber })
+  }
+  if (result.items.length > 0) {
+    setRowItems(row, result.items)
+  }
+  voiceSuppressLearn = false
+
+  openSummaryEditor(row)
+  void scrollEditorIntoView()
+  voiceLearnCandidate.value = {
+    rowNumber: row.rowNumber,
+    heard: text,
+    prefill: summaryFor(row),
+  }
+  toast.success(
+    'Đã điền — kiểm rồi lưu',
+    `Dòng ${row.rowNumber}: ${result.items.join(', ') || '(giữ nguyên danh mục)'}${
+      result.sheetNumber ? ' · số tờ ' + result.sheetNumber : ''
+    }`,
+  )
 }
 
 /** C2: chép bộ giấy tờ của dòng đứng ngay trên (trong danh sách đang xem). */
@@ -2045,6 +2281,13 @@ function onGlobalKeydown(event: KeyboardEvent): void {
     return
   }
 
+  // Nhóm I: Ctrl+M bật/tắt phiên đọc — bấm nút 🎶 hoặc nói thay gõ.
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'm') {
+    event.preventDefault()
+    toggleVoice()
+    return
+  }
+
   if (event.key === 'Escape') {
     if (editingSummaryRow.value !== null) {
       closeSummaryEditor()
@@ -2372,10 +2615,38 @@ onBeforeUnmount(() => {
               giấy tờ cho nhiều dòng cùng lúc.
             </div>
           </div>
-          <button class="btn btn-ghost btn-sm" type="button" :disabled="loadingRows" @click="fetchRows">
-            <RefreshCw :size="14" />
-            Làm mới
-          </button>
+          <div class="row" style="gap: 8px; align-items: center">
+            <button
+              class="btn btn-sm"
+              :class="voiceListening ? 'btn-danger voice-mic-on' : 'btn-secondary'"
+              type="button"
+              :disabled="!voiceSupported"
+              :title="
+                voiceSupported
+                  ? 'Phiên đọc giọng nói: nói “kết hôn — căn cước, hộ khẩu, hai ảnh” rồi “xong”. Ctrl+M để bật/tắt'
+                  : 'Đọc giọng nói cần Chrome hoặc Edge (Web Speech API)'
+              "
+              @click="toggleVoice"
+            >
+              <Mic :size="14" />
+              {{ voiceListening ? 'Đang nghe…' : 'Đọc giọng nói' }}
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" :disabled="loadingRows" @click="fetchRows">
+              <RefreshCw :size="14" />
+              Làm mới
+            </button>
+          </div>
+        </div>
+
+        <div v-if="voiceListening" class="voice-bar" role="status" aria-live="polite">
+          <span class="voice-dot" />
+          <span class="voice-live">
+            {{ voiceInterim || 'Đang nghe… nói “kết hôn — căn cước, hộ khẩu, hai ảnh”, hoặc “xong”, “kế tiếp”, “bộ bảy”, “lọc kết hôn 2025”' }}
+          </span>
+          <span v-if="voiceLastHeard" class="voice-heard" :title="`Câu vừa nghe: ${voiceLastHeard}`">
+            Đã nghe: {{ voiceLastHeard }}
+          </span>
+          <button class="btn btn-ghost btn-sm" type="button" @click="toggleVoice">Tắt mic</button>
         </div>
 
         <div class="card-body stack" style="gap: 14px">
@@ -2833,6 +3104,14 @@ onBeforeUnmount(() => {
                           <div class="summary-editor-head">
                             <strong>Sửa toàn bộ trích yếu · dòng {{ row.rowNumber }}</strong>
                             <span class="hint">Hồ sơ {{ row.numberLabel || '—' }}</span>
+                            <span
+                              v-if="voiceLearnCandidate?.rowNumber === row.rowNumber"
+                              class="badge badge-info"
+                              title="Giọng nói vừa điền — nắn khác đi rồi lưu, app sẽ tự nhớ lỗi nghe cho lần sau"
+                            >
+                              <Mic :size="12" />
+                              Điền từ giọng nói — nắn rồi lưu
+                            </span>
                             <button
                               class="btn btn-ghost btn-sm"
                               type="button"

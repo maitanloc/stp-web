@@ -181,8 +181,31 @@
   đóng; lệnh theme dark↔light thật (data-theme)
 
 ### Nhóm I — GĐ 1 voice (trích yếu siêu tốc)
-- [ ] I1. Mic + Web Speech + parser catalog (loại + giấy tờ + số đọc từng chữ số)
-- [ ] I2. Phiên đọc liên tục + lệnh (xong/kế tiếp/bộ bảy/lọc…) + học lỗi nghe
+- [x] I1. Mic + Web Speech + parser catalog (loại + giấy tờ + số đọc từng chữ số)
+  (Web Speech API `webkitSpeechRecognition` Chrome/Edge — 0 phí, 0
+  dependency, vi-VN, chạy trên tunnel HTTPS; `useVoiceInput.ts` chế độ đọc
+  liên tục: Chrome tự ngắt sau lặng → tự nối lại 350ms, lỗi quyền →
+  toast + ngừng hẳn không vòng lặp; `voiceParser.ts` thuần 100%:
+  normalize NFD-strip + tokenize tách dấu câu/gạch ngang, match 2 HƯỚNG
+  contiguous (đọc đủ OR nói ngắn "hộ khẩu" ⊆ "sổ hộ khẩu"), levenshtein
+  ≤1 cho từ ≥5 ký tự, số đọc TỪNG chữ số ("không ba lẻ năm"="035", số 0
+  đầu giữ nguyên), số lượng "hai ảnh"→"ảnh 3×4 ×2", học lỗi nghe thay
+  vào câu trước khi parse; 17/17 unit chạy esbuild+node: câu chuẩn,
+  4 lệnh, xong-cuối-câu, lọc năm đọc chữ=2025, số tờ chữ+digits,
+  items-only, learned, câu vô nghĩa=null)
+- [x] I2. Phiên đọc liên tục + lệnh (xong/kế tiếp/bộ bảy/lọc…) + học lỗi nghe
+  (nút "Đọc giọng nói" trong header tool + Ctrl+M; thanh sticky khi nghe:
+  dot nhấp nháy + live transcript + câu vừa nghe + tắt mic; lệnh:
+  "xong"=lưu + tự nhảy dòng thiếu (C4), "kế tiếp"/"quay lại"=mở dòng
+  thiếu/trước, "bộ bảy"=điền Bộ 7, "lọc <loại> năm <4 chữ số>"=đặt filter
+  (types thật của phiên + năm đọc chữ), "lọc tất cả"=bỏ lọc; prefill CHỜ
+  DUYỆT: điền items vào dòng đang mở (hoặc dòng thiếu kế tiếp), mở
+  editor + badge "Điền từ giọng nói — nắn rồi lưu", KHÔNG lưu tự động,
+  số tờ điền riêng; HỌC LỖI NGHE: khi lưu khác bản voice điền → ghi
+  {nghe sai → người sửa} vào localStorage `stp.voiceLearn` (tối đa 100
+  cặp, debounce 700ms), lần sau parser tự thay trước khi match; verify:
+  mic bấm → bắt recognition, máy automation chặn mic → toast đúng câu,
+  không kẹt bar; parser 17/17; build + robocopy ok
 
 ### Nhóm J — Trụ D bảng sống
 - [ ] J1. Grid virtualized kho hồ sơ + presence
