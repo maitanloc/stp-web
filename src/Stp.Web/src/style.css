@@ -3710,6 +3710,11 @@ pre,
   flex-direction: column;
   max-height: 430px;
   overflow: hidden;
+  /* Chặn cuộn XUYÊN từ panel ra trang: lăn/kéo trong panel (kể cả vùng
+     search/padding) không được làm bảng phía sau trượt — nếu không, trang
+     cuộn trong khi panel fixed đứng yên rồi onScroll đóng panel, cú click
+     "tick" kế tiếp rơi trúng form bên dưới (dễ tick nhầm ô khác). */
+  overscroll-behavior: contain;
   border: 1px solid var(--border-strong);
   border-radius: 14px;
   background: var(--surface);
@@ -4072,7 +4077,14 @@ pre,
 .cs-popover {
   position: fixed;
   z-index: 300;
-  overflow: hidden;
+  /* Cột dọc để .cs-list co theo max-height động (place() co panel khi màn ngắn). */
+  display: flex;
+  flex-direction: column;
+  /* Chặn cuộn XUYÊN từ panel ra trang (kể cả vùng search/padding không cuộn
+     được): lăn chuột trong panel không được làm trang sau trượt — trước đây
+     trang cuộn trong khi panel fixed đứng yên, nhìn như panel "lướt" tách
+     khỏi form, tick chọn sai chỗ. */
+  overscroll-behavior: contain;
   border: 1px solid var(--border-strong);
   border-radius: 14px;
   background: var(--surface);
@@ -4129,6 +4141,8 @@ pre,
 }
 
 .cs-list {
+  flex: 1;
+  min-height: 120px;
   max-height: 300px;
   overflow-y: auto;
   overscroll-behavior: contain;

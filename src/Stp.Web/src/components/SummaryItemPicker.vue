@@ -30,6 +30,7 @@ const debouncedQuery = ref('')
 const custom = ref('')
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const popoverRef = ref<HTMLDivElement | null>(null)
+const searchRef = ref<HTMLInputElement | null>(null)
 const dropUp = ref(false)
 const position = ref({ top: 0, left: 0, width: 360 })
 const activeIndex = ref(-1)
@@ -206,45 +207,46 @@ function openPopover(): void {
   nextTick(() => {
     place()
     activeIndex.value = 0
+    // autofocus gốc chỉ ăn 1 lần đầu trang — focus chủ động khi mỗi lần mở;
+    // preventScroll để không cuộn nhảy bảng phía sau (lỗi "biến dạng form").
+    searchRef.value?.focus({ preventScroll: true })
   })
 }
 
 /**
- * Đặt vị trí panel: đo chiều cao THẬT sau render thay vì ước lượng 430, rồi
- * chặn panel luôn nằm trọn viewport. Bug cũ: trigger thấp gần đáy màn hình thì
- * panel mở xuôi tràn ra ngoài — hàng "Thêm giấy tờ khác" + hint chìm dưới đáy.
+ * Đặt vị trí panel: hướng nào đủ chỗ cho chiều cao TỰ NHIÊN thì dùng hướng đó;
+ * cả hai hướng thiếu (màn hình ngắn) thì chọn hướng RỘNG HƠN và CO panel lại
+ * theo chỗ có (list tự cuộn bên trong). Panel KHÔNG BAO GIỜ đè nút mở/khu
+ * form — bug cũ: viewport ngắn → clamp đáy đẩy top về trên trigger, panel
+ * phủ lên cả form trông như "biến dạng".
  */
 function place(): void {
   const trigger = triggerRef.value
   const panel = popoverRef.value
   if (!open.value || !trigger || !panel) return
 
+  // Bỏ max-height cài lần trước để đo được chiều cao tự nhiên thật.
+  panel.style.maxHeight = ''
   const rect = trigger.getBoundingClientRect()
   const width = Math.min(390, window.innerWidth - 24)
   const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12))
 
-  const height = panel.offsetHeight || 430
+  const naturalH = panel.offsetHeight || 430
   const gap = 8
-  const spaceBelow = window.innerHeight - rect.bottom
-  const spaceAbove = rect.top
+  const spaceBelow = window.innerHeight - 12 - (rect.bottom + gap)
+  const spaceAbove = rect.top - gap - 12
 
-  let top: number
-  if (spaceBelow < height && spaceAbove > spaceBelow) {
-    dropUp.value = true
-    top = rect.top - gap
-  } else {
-    dropUp.value = false
-    top = rect.bottom + gap
+  dropUp.value = spaceBelow < naturalH && spaceAbove > spaceBelow
+
+  const avail = dropUp.value ? spaceAbove : spaceBelow
+  const maxH = Math.max(180, Math.min(naturalH, avail))
+  panel.style.maxHeight = `${maxH}px`
+
+  position.value = {
+    top: dropUp.value ? rect.top - gap : rect.bottom + gap,
+    left,
+    width,
   }
-
-  if (dropUp.value) {
-    // translateY(-100%): mép hiển thị = top - height. Chặn để panel trọn viewport.
-    top = Math.min(Math.max(top, height + 12), window.innerHeight - 12)
-  } else {
-    top = Math.max(12, Math.min(top, window.innerHeight - height - 12))
-  }
-
-  position.value = { top, left, width }
 }
 
 // Chọn/bỏ chọn một mục làm chips lớn ra → layout dịch → panel fixed đứng yên
@@ -342,11 +344,11 @@ onBeforeUnmount(() => {
         <div class="ms-search">
           <Search :size="14" />
           <input
+            ref="searchRef"
             v-model="query"
             class="input"
             type="search"
             placeholder="Tìm giấy tờ... (↑↓ + Enter)"
-            autofocus
             @input="onSearchInput"
             @keydown="onListKeydown"
           />

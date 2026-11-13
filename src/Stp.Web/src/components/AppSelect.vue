@@ -68,7 +68,9 @@ function selectValue(value: string): void {
   emit('update:modelValue', value)
   emit('change', value)
   close()
-  nextTick(() => triggerRef.value?.focus())
+  // preventScroll: tick option xong focus lại trigger — nếu không chặn thì
+  // trình duyệt CUỘN NHẢY về trigger, cả trang giật "biến dạng" (lỗi lướt).
+  nextTick(() => triggerRef.value?.focus({ preventScroll: true }))
 }
 
 function openPopover(): void {
@@ -86,6 +88,9 @@ function openPopover(): void {
     const panel = popoverRef.value
     if (!trigger) return
 
+    // Đo chiều cao TỰ NHIÊN: bỏ max-height cài lần trước để không đo nhầm bản đã co.
+    if (panel) panel.style.maxHeight = ''
+
     const rect = trigger.getBoundingClientRect()
     const width = Math.min(
       Math.max(rect.width, 220),
@@ -93,33 +98,29 @@ function openPopover(): void {
     )
     const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12))
 
-    // Dùng chiều cao THẬT của panel sau render (ước lượng cố định 360 làm panel
-    // mở lên bị cắt khuất trên thanh trang: các option đầu biến mất khỏi screen).
-    const height = panel?.offsetHeight ?? 320
+    // Hướng nào đủ chỗ cho chiều cao tự nhiên thì dùng hướng đó; cả hai thiếu
+    // (màn hình ngắn) thì chọn hướng RỘNG HƠN và CO panel theo chỗ có — panel
+    // KHÔNG BAO GIỜ đè nút mở/khu form (bug "biến dạng form" trên màn ngắn).
+    const naturalH = panel?.offsetHeight ?? 320
     const gap = 8
-    const spaceBelow = window.innerHeight - rect.bottom
-    const spaceAbove = rect.top
+    const spaceBelow = window.innerHeight - 12 - (rect.bottom + gap)
+    const spaceAbove = rect.top - gap - 12
 
-    let top: number
-    if (spaceBelow < height && spaceAbove > spaceBelow) {
-      dropUp.value = true
-      top = rect.top - gap
-    } else {
-      dropUp.value = false
-      top = rect.bottom + gap
+    dropUp.value = spaceBelow < naturalH && spaceAbove > spaceBelow
+
+    const avail = dropUp.value ? spaceAbove : spaceBelow
+    const maxH = Math.max(180, Math.min(naturalH, avail))
+    if (panel) panel.style.maxHeight = `${maxH}px`
+
+    position.value = {
+      top: dropUp.value ? rect.top - gap : rect.bottom + gap,
+      left,
+      width,
     }
-
-    if (dropUp.value) {
-      // translateY(-100%): mép hiển thị = top - height. Chặn để panel luôn nằm trọn viewport.
-      top = Math.min(Math.max(top, height + 12), window.innerHeight - 12)
-    } else {
-      top = Math.max(12, Math.min(top, window.innerHeight - height - 12))
-    }
-
-    position.value = { top, left, width }
 
     if (showSearch.value) {
-      searchRef.value?.focus()
+      // preventScroll: panel fixed luôn nằm trong viewport, focus ô tìm không được kéo trang.
+      searchRef.value?.focus({ preventScroll: true })
     }
     scrollActiveIntoView()
   })
