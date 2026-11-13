@@ -7,7 +7,9 @@ import type { ActivityEventResponse, ChatMessageResponse, ChatMessagesResponse, 
 import { errorMessage } from '../lib/errors'
 import { actionLabel, clockTime, colorForName, renderAvatar, relativeTime } from '../lib/team'
 import {
+  lastLiveChatMessage,
   lastTypingActor,
+  lastLiveNotification,
   pingPresence,
   sendTeamTyping,
   startTeamPresence,
@@ -65,21 +67,49 @@ async function onAvatarSelected(event: Event) {
     toast.error('Vui lòng chọn tệp hình ảnh')
     return
   }
+  const actorName = userName.value?.trim()
+  if (!actorName) {
+    nameModalOpen.value = true
+    toast.info('Vui lòng đặt tên trước khi đổi ảnh đại diện')
+    target.value = ''
+    return
+  }
   avatarUploading.value = true
   try {
-    const newVersion = await uploadAvatar(file)
-    if (teamIdentity.value) {
-      avatarMap.value = {
-        ...avatarMap.value,
-        [teamIdentity.value.displayName]: `/api/team/avatar/${teamIdentity.value.id}?v=${newVersion}`,
-      }
+    const result = await uploadAvatar(file, actorName)
+    avatarMap.value = {
+      ...avatarMap.value,
+      [actorName]: `/api/team/avatar/${result.userId}?v=${result.avatarVersion}`,
     }
-    toast.success('Đã cập nhật ảnh đại diện')
+    toast.success('Đã cập nhật ảnh đại diện thành công!')
   } catch (err) {
     toast.error(errorMessage(err) || 'Không tải ảnh đại diện lên được')
   } finally {
     avatarUploading.value = false
     target.value = ''
+  }
+}
+
+/** Âm thanh chuông báo tin nhắn nhẹ nhàng kiểu Messenger (Web Audio API) */
+function playNotificationChime(): void {
+  try {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextClass) return
+    const ctx = new AudioContextClass()
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(587.33, now) // D5
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.12) // A5
+    gain.gain.setValueAtTime(0.08, now)
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(now)
+    osc.stop(now + 0.3)
+  } catch {
+    // Không chặn nếu trình duyệt khoá âm thanh
   }
 }
 
@@ -125,6 +155,39 @@ function markChatRead(): void {
     serverUnread.value = 0
     void request('/api/team/chat/seen', { method: 'POST' }).catch(() => {})
   }
+}
+
+// ===== Thông báo nổi tin nhắn mới (kiểu Messenger) =====
+// Bubble ngay trên pill chat: avatar + tên + nội dung, bấm là mở thẳng tab
+// chat. Tin của MÌNH và lúc đang mở tab chat thì không nổi; lịch sử lần đầu
+// tải trang coi như đã đọc (chỉ nổi tin đến trong ~15 giây gần nhất).
+const chatToast = ref<ChatMessageResponse | null>(null)
+let chatToastTimer: ReturnType<typeof setTimeout> | null = null
+const seenMessageIds = new Set<string>()
+let chatToastSeeded = false
+
+function showChatToast(message: ChatMessageResponse): void {
+  if (chatToastTimer) clearTimeout(chatToastTimer)
+  chatToast.value = message
+  playNotificationChime()
+  // Tự tan 8 giây; tin kế tiếp đến thay nội dung và đếm lại giờ.
+  chatToastTimer = setTimeout(() => {
+    chatToast.value = null
+  }, 8000)
+}
+
+function dismissChatToast(): void {
+  if (chatToastTimer) clearTimeout(chatToastTimer)
+  chatToast.value = null
+}
+
+function openChatFromToast(): void {
+  dismissChatToast()
+  open.value = true
+  tab.value = 'chat'
+  markChatRead()
+  void fetchChat()
+  void scrollChatBottom()
 }
 
 /** G3: gõ chat → báo cho cả nhóm (throttle 2 giây, qua hub realtime). */
@@ -180,6 +243,34 @@ async function scrollChatBottom(): Promise<void> {
 async function fetchChat(): Promise<void> {
   try {
     const response = await request<ChatMessagesResponse>('/api/team/chat?take=100')
+    // Thông báo nổi: tin chưa từng thấy qua fetch này. Lần đầu sau khi mở app
+    // chỉ ghi nhận lịch sử làm seen — trừ tin vừa đến trong ~15 giây (fetch được
+    // kích hoạt ngay khi tin đến thì vẫn phải nổi, đúng kiểu Messenger).
+    const fresh = response.items.filter((message) => !seenMessageIds.has(message.id))
+    if (!chatToastSeeded) {
+      chatToastSeeded = true
+      const cutoff = Date.now() - 15000
+      const justArrived = [...fresh]
+        .reverse()
+        .find((message) =>
+          message.actor !== userName.value
+          && new Date(message.createdAt).getTime() >= cutoff
+          && !(open.value && tab.value === 'chat'))
+      if (justArrived) showChatToast(justArrived)
+    } else {
+      const latestIncoming = [...fresh]
+        .reverse()
+        .find((message) => message.actor !== userName.value)
+      if (latestIncoming && !(open.value && tab.value === 'chat')) {
+        showChatToast(latestIncoming)
+      }
+    }
+    for (const message of fresh) seenMessageIds.add(message.id)
+    // Chống phình bộ nhớ phiên dài: quá 1000 id thì dựng lại từ cửa sổ hiện có.
+    if (seenMessageIds.size > 1000) {
+      seenMessageIds.clear()
+      for (const message of response.items) seenMessageIds.add(message.id)
+    }
     messages.value = response.items
     olderCursor.value = response.nextCursor ?? null
     hasOlder.value = response.hasMore ?? false
@@ -285,6 +376,7 @@ async function sendDraft(): Promise<void> {
 function toggleOpen(): void {
   open.value = !open.value
   if (open.value) {
+    dismissChatToast()
     markChatRead()
     void fetchChat()
     void fetchActivity()
@@ -350,9 +442,19 @@ let activityTimer: ReturnType<typeof setInterval> | null = null
 
 function restartChatTimer(): void {
   if (chatTimer) clearInterval(chatTimer)
-  // G3: dock đóng chỉ dò mốc seen (badge đếm đúng), dock mở thì tải tin.
+  // G3: dock mở tải tin 3 giây; dock đóng dò mốc seen cho badge — hub rớt thì
+  // kéo luôn danh sách tin để bubble "tin nhắn mới" vẫn nổi đúng nhịp.
   chatTimer = setInterval(
-    () => (open.value ? void fetchChat() : void fetchChatSeen()),
+    () => {
+      if (open.value) {
+        void fetchChat()
+        return
+      }
+      void fetchChatSeen()
+      // Luôn kéo nhẹ danh sách tin mỗi 12 giây: hub sống thì realtime đã nổi
+      // bubble; sự kiện hub bị nuốt (reconnect nhất thời) vẫn được lưới này phủ.
+      void fetchChat()
+    },
     open.value ? CHAT_OPEN_MS : CHAT_HIDDEN_MS,
   )
 }
@@ -395,6 +497,53 @@ watch(tab, (value) => {
     void scrollChatBottom()
   }
 })
+
+// Realtime chat qua SignalR: tin nhắn mới broadcast từ server đổ về tức thì
+watch(lastLiveChatMessage, (newMsg) => {
+  if (!newMsg) return
+
+  // Lưu vào danh sách tin nhắn nếu chưa có
+  const exists = messages.value.some((m) => m.id === newMsg.id)
+  if (!exists) {
+    messages.value.push(newMsg)
+    seenMessageIds.add(newMsg.id)
+  }
+
+  // Nếu là tin từ đồng đội gửi đến
+  if (newMsg.actor !== userName.value) {
+    // Nếu dock đóng hoặc không ở tab chat: nổi bong bóng Messenger ngay lập tức!
+    if (!open.value || tab.value !== 'chat') {
+      showChatToast(newMsg)
+      playNotificationChime()
+      if (serverUnread.value !== null) {
+        serverUnread.value += 1
+      }
+    }
+  }
+
+  if (open.value && tab.value === 'chat') {
+    markChatRead()
+    void scrollChatBottom()
+  }
+})
+
+// Hub realtime: tin nhắn mới về là kéo chat NGAY (fetchChat tự phát hiện tin
+// chưa thấy và nổi bubble) — không đợi nhịp poll 12 giây lúc dock đóng. Kéo
+// luôn mốc seen để badge trên pill cập nhật tức thời, không chờ tick 12s.
+watch(lastLiveNotification, (payload) => {
+  if (!payload || payload.kind !== 'chat') return
+  if (payload.forUser !== userName.value) return
+  void fetchChat()
+  void fetchChatSeen()
+})
+
+// Đổi danh tính (đăng nhập / đổi tên / đăng xuất): lịch sử seen phải seed lại
+// theo người mới, bubble cũ còn treo cũng phải tắt.
+watch(userName, () => {
+  seenMessageIds.clear()
+  chatToastSeeded = false
+  dismissChatToast()
+})
 </script>
 
 <template>
@@ -424,6 +573,39 @@ watch(tab, (value) => {
       </div>
     </TransitionGroup>
 
+    <!-- Thông báo nổi tin nhắn mới (kiểu Messenger): nổi ngay trên pill chat,
+         avatar + tên + nội dung, bấm là mở thẳng tab chat. -->
+    <Transition name="chat-toast-pop">
+      <button
+        v-if="chatToast && !open"
+        type="button"
+        class="chat-toast"
+        @click="openChatFromToast()"
+      >
+        <span class="chat-toast-avatar" :style="renderAvatar(chatToast.actor).style">
+          <img
+            v-if="renderAvatar(chatToast.actor).imageUrl"
+            :src="renderAvatar(chatToast.actor).imageUrl"
+            alt=""
+            class="avatar-img"
+          />
+          <template v-else>{{ renderAvatar(chatToast.actor).initials }}</template>
+        </span>
+        <span class="chat-toast-main">
+          <span class="chat-toast-header">
+            <span class="chat-toast-name" :style="{ color: colorForName(chatToast.actor) }">{{ chatToast.actor }}</span>
+            <span class="chat-toast-badge">Mới</span>
+          </span>
+          <span class="chat-toast-body">{{ chatToast.body.length > 90 ? chatToast.body.slice(0, 90) + '…' : chatToast.body }}</span>
+        </span>
+        <span class="chat-toast-close" title="Đóng thông báo" @click.stop="dismissChatToast()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </span>
+      </button>
+    </Transition>
+
     <!-- Panel chính — v-if/v-else thuần, KHÔNG bọc Transition:
          Transition (nextFrame = requestAnimationFrame) kẹt vĩnh viễn khi tab
          không focus / bị throttle → với mode="out-in" panel không bao giờ
@@ -449,7 +631,7 @@ watch(tab, (value) => {
               <button
                 type="button"
                 class="tool"
-                :title="teamIdentity.displayName + ' · ' + (teamIdentity.role === 'admin' ? 'Quản trị' : 'Thành viên')"
+                :title="teamIdentity.displayName + ' · ' + (teamIdentity.role === 'admin' ? 'Quản trị' : 'Thành viên') + ' (Bấm để đổi ảnh)'"
                 @click="accountMenuOpen = !accountMenuOpen"
               >
                 <span class="tool-avatar" :style="renderAvatar(teamIdentity.displayName).style">
@@ -489,15 +671,8 @@ watch(tab, (value) => {
                   :disabled="avatarUploading"
                   @click="triggerAvatarUpload"
                 >
-                  {{ avatarUploading ? 'Đang cập nhật ảnh...' : 'Đổi ảnh đại diện' }}
+                  📷 {{ avatarUploading ? 'Đang cập nhật ảnh...' : 'Đổi ảnh đại diện' }}
                 </button>
-                <input
-                  ref="avatarFileInput"
-                  type="file"
-                  accept="image/*"
-                  style="display: none"
-                  @change="onAvatarSelected"
-                />
                 <button
                   v-if="teamIdentity.role === 'admin'"
                   type="button"
@@ -513,30 +688,78 @@ watch(tab, (value) => {
             </div>
           </template>
           <template v-else>
-            <button type="button" class="tool" title="Đổi tên hiển thị" @click="nameModalOpen = true">
-              <span
-                class="tool-avatar"
-                :style="userName ? renderAvatar(userName).style : { color: '#fff' }"
+            <div class="account-wrap">
+              <button
+                type="button"
+                class="tool"
+                :title="userName ? `${userName} (Bấm để đổi ảnh / tên)` : 'Chưa khai tên (Bấm để đặt tên)'"
+                @click="accountMenuOpen = !accountMenuOpen"
               >
-                <img
-                  v-if="userName && renderAvatar(userName).imageUrl"
-                  :src="renderAvatar(userName).imageUrl"
-                  alt=""
-                  class="avatar-img"
-                  loading="lazy"
-                />
-                <template v-else>{{ userName ? renderAvatar(userName).initials : '?' }}</template>
-              </span>
-            </button>
-            <button
-              type="button"
-              class="tool slim login-hint"
-              title="Đăng nhập bằng tài khoản nhóm"
-              @click="loginModalOpen = true"
-            >
-              Đăng nhập
-            </button>
+                <span
+                  class="tool-avatar"
+                  :style="userName ? renderAvatar(userName).style : { color: '#fff' }"
+                >
+                  <img
+                    v-if="userName && renderAvatar(userName).imageUrl"
+                    :src="renderAvatar(userName).imageUrl"
+                    alt=""
+                    class="avatar-img"
+                    loading="lazy"
+                  />
+                  <template v-else>{{ userName ? renderAvatar(userName).initials : '?' }}</template>
+                </span>
+              </button>
+              <div v-if="accountMenuOpen" class="account-menu">
+                <div class="account-head">
+                  <span class="avatar" :style="userName ? renderAvatar(userName).style : {}">
+                    <img
+                      v-if="userName && renderAvatar(userName).imageUrl"
+                      :src="renderAvatar(userName).imageUrl"
+                      alt=""
+                      class="avatar-img"
+                      loading="lazy"
+                    />
+                    <template v-else>{{ userName ? renderAvatar(userName).initials : '?' }}</template>
+                  </span>
+                  <div class="account-info">
+                    <span class="account-name">{{ userName || 'Chưa đặt tên' }}</span>
+                    <span class="account-user">Chế độ thành viên trực tiếp</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="account-item"
+                  :disabled="avatarUploading"
+                  @click="triggerAvatarUpload"
+                >
+                  📷 {{ avatarUploading ? 'Đang cập nhật ảnh...' : 'Đổi ảnh đại diện' }}
+                </button>
+                <button
+                  type="button"
+                  class="account-item"
+                  @click="accountMenuOpen = false; nameModalOpen = true"
+                >
+                  ✏️ Đổi tên hiển thị
+                </button>
+                <button
+                  type="button"
+                  class="account-item"
+                  @click="accountMenuOpen = false; loginModalOpen = true"
+                >
+                  🔑 Đăng nhập tài khoản
+                </button>
+              </div>
+            </div>
           </template>
+
+          <!-- Input chọn file ảnh đại diện dùng chung cho cả 2 chế độ -->
+          <input
+            ref="avatarFileInput"
+            type="file"
+            accept="image/*"
+            style="display: none"
+            @change="onAvatarSelected"
+          />
           <button type="button" class="tool slim" title="Thu gọn" @click="open = false">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
               <path d="M6 9l6 6 6-6" />
@@ -676,7 +899,13 @@ watch(tab, (value) => {
     </section>
 
     <!-- Pill thu gọn -->
-    <button v-else type="button" class="dock-pill" @click="toggleOpen()">
+    <button
+      v-else
+      type="button"
+      class="dock-pill"
+      :class="{ 'has-toast': !!chatToast, 'has-unread': unread > 0 }"
+      @click="toggleOpen()"
+    >
       <span v-if="onlineOthers.length > 0" class="pill-avatars">
         <span
           v-for="entry in onlineOthers.slice(0, 3)"
@@ -732,11 +961,166 @@ watch(tab, (value) => {
   cursor: pointer;
   box-shadow: var(--shadow);
   font-size: 13px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .dock-pill:hover {
   border-color: var(--brand);
   color: var(--brand-text);
+  transform: translateY(-1px);
+}
+
+.dock-pill.has-toast {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25), var(--shadow-lg);
+  animation: pill-pulse 1.6s ease infinite;
+}
+
+@keyframes pill-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+/* ===== Thông báo nổi tin nhắn mới (Messenger) ===== */
+.chat-toast {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 12px);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(320px, calc(100vw - 40px));
+  padding: 11px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text-soft);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  z-index: 70;
+}
+
+.chat-toast::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  right: 28px;
+  width: 10px;
+  height: 10px;
+  background: var(--surface);
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  transform: rotate(45deg);
+}
+
+.chat-toast:hover {
+  border-color: var(--brand);
+}
+
+.chat-toast-pop-enter-active {
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.chat-toast-pop-leave-active {
+  transition: all 0.18s ease-in;
+}
+
+.chat-toast-pop-enter-from {
+  opacity: 0;
+  transform: translateY(10px) scale(0.92);
+}
+
+.chat-toast-pop-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
+}
+
+.chat-toast-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.chat-toast-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.chat-toast-name {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-toast-badge {
+  display: inline-block;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  line-height: 1.2;
+  flex: none;
+}
+
+.chat-toast-body {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+  word-break: break-word;
+}
+
+.chat-toast-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px 0 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.chat-toast-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .pill-avatars {

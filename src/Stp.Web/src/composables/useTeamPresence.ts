@@ -4,6 +4,7 @@ import { getUserName, request } from '../api/client'
 import { teamIdentity } from './useTeamIdentity'
 import { avatarMap, fetchAvatarMap } from './useAvatarUpload'
 import type {
+  ChatMessageResponse,
   PresenceEntryResponse,
   PresencePingResponse,
   PresenceRowMarkResponse,
@@ -54,6 +55,9 @@ export interface LiveNotification {
 }
 
 export const lastLiveNotification = ref<LiveNotification | null>(null)
+
+/** Tin nhắn chat nhóm realtime qua hub — nổi bong bóng Messenger tức thì */
+export const lastLiveChatMessage = ref<ChatMessageResponse | null>(null)
 
 /** G3: người vừa bấm phím chat (hub đẩy về) — dock hiển thị "đang gõ…" 5s. */
 export const lastTypingActor = ref<{ actor: string; at: number } | null>(null)
@@ -351,6 +355,13 @@ async function startTeamHub(): Promise<void> {
         body: payload.body ?? '',
         link: payload.link ?? null,
         timestamp: payload.timestamp ?? new Date().toISOString(),
+      }
+    })
+
+    // G1: Tin nhắn chat nhóm mới — realtime tức thời cho toàn bộ người trong phòng
+    connection.on('chatMessage', (payload: ChatMessageResponse) => {
+      if (payload?.id && payload?.actor) {
+        lastLiveChatMessage.value = payload
       }
     })
 

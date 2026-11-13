@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Stp.Api.Hubs;
 using Stp.Contracts;
 using Stp.Core.Domain;
 using Stp.Infrastructure.Persistence;
@@ -29,17 +31,20 @@ public sealed class TeamController : ControllerBase
     private readonly TeamPresence _presence;
     private readonly TeamAudit _audit;
     private readonly NotificationService _notifications;
+    private readonly IHubContext<TeamHub> _hubContext;
 
     public TeamController(
         IDbContextFactory<StpDbContext> factory,
         TeamPresence presence,
         TeamAudit audit,
-        NotificationService notifications)
+        NotificationService notifications,
+        IHubContext<TeamHub> hubContext)
     {
         _factory = factory;
         _presence = presence;
         _audit = audit;
         _notifications = notifications;
+        _hubContext = hubContext;
     }
 
     /// <summary>
@@ -137,6 +142,17 @@ public sealed class TeamController : ControllerBase
         db.ChatMessages.Add(message);
         await db.SaveChangesAsync();
 
+        var chatResponse = new ChatMessageResponse(message.Id, message.Actor, message.Body, message.CreatedAt);
+
+        try
+        {
+            _ = _hubContext.Clients.All.SendAsync("chatMessage", chatResponse);
+        }
+        catch
+        {
+            // Fire-and-forget: broadcast qua hub không được chặn phản hồi API
+        }
+
         // G1: tin nhắn mới → thông báo kind "chat" cho mọi thành viên khác,
         // bấm bell là nhảy thẳng tới chat dock.
         _notifications.NotifyAllExcept(
@@ -146,8 +162,7 @@ public sealed class TeamController : ControllerBase
             message.Body,
             "/trich-yeu");
 
-        return Ok(new ChatMessagesResponse(
-            [new ChatMessageResponse(message.Id, message.Actor, message.Body, message.CreatedAt)]));
+        return Ok(new ChatMessagesResponse([chatResponse]));
     }
 
     /// <summary>

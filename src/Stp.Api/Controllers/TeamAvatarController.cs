@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Stp.Api.Hubs;
 using Stp.Api.Services;
+using Stp.Core.Domain;
 using Stp.Core.Storage;
 using Stp.Infrastructure.Persistence;
 
@@ -47,17 +48,12 @@ public sealed class TeamAvatarController : ControllerBase
     /// <summary>
     /// Danh sách thành viên CÓ ảnh đại diện — client dựng map theo tên hiển thị
     /// để renderAvatar biết chỗ nào dùng ảnh, chỗ nào giữ vòng chữ cái đầu.
+    /// Cho phép đọc công khai để mọi máy/khách đều thấy avatar.
     /// </summary>
     [HttpGet("avatars")]
     public async Task<ActionResult<IReadOnlyList<TeamAvatarEntryResponse>>> List(
         CancellationToken cancellationToken)
     {
-        var identity = await StpTeamIdentity.FromAsync(HttpContext);
-        if (identity is null)
-        {
-            return Unauthorized();
-        }
-
         await using var db = await _factory.CreateDbContextAsync(cancellationToken);
         var entries = await db.StpUsers
             .AsNoTracking()
@@ -72,19 +68,21 @@ public sealed class TeamAvatarController : ControllerBase
     }
 
     /// <summary>
-    /// Upload avatar của CHÍNH MÌNH (multipart form, field "file") — client đã
-    /// cắt 96×96 webp; server lưu data/avatars/{userId}.webp và tăng version.
+    /// Upload avatar (multipart form, field "file") — hỗ trợ cả người dùng đã đăng nhập
+    /// lẫn người dùng theo tên hiển thị (actor). Client đã cắt 96×96 webp.
     /// </summary>
     [HttpPost("avatar")]
     [RequestSizeLimit(MaxUploadBytes + 64 * 1024)]
     public async Task<ActionResult<TeamAvatarUploadResponse>> Upload(
         IFormFile file,
+        [FromForm] string? actor,
         CancellationToken cancellationToken)
     {
         var identity = await StpTeamIdentity.FromAsync(HttpContext);
-        if (identity is null)
+        var actorName = identity?.DisplayName ?? (actor ?? string.Empty).Trim();
+        if (identity is null && string.IsNullOrWhiteSpace(actorName))
         {
-            return Unauthorized(new { message = "Đăng nhập để đổi ảnh đại diện." });
+            return Unauthorized(new { message = "Vui lòng nhập tên hoặc đăng nhập để đổi ảnh đại diện." });
         }
 
         if (file is null || file.Length == 0)
@@ -103,49 +101,86 @@ public sealed class TeamAvatarController : ControllerBase
             return BadRequest(new { message = "Tệp không phải ảnh." });
         }
 
-        var directory = Path.Combine(_storage.RootPath, "avatars");
-        var path = Path.Combine(directory, $"{identity.Id:N}.webp");
-        if (!_storage.IsUnderRoot(path))
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError,
-                new { message = "Đường dẫn lưu ảnh không hợp lệ." });
-        }
-
-        Directory.CreateDirectory(directory);
-        try
-        {
-            await using (var stream = new FileStream(
-                             path,
-                             FileMode.Create,
-                             FileAccess.Write,
-                             FileShare.None,
-                             bufferSize: 81920,
-                             useAsync: true))
-            {
-                await file.CopyToAsync(stream, cancellationToken);
-            }
-        }
-        catch (Exception caught)
-        {
-            _logger.LogWarning(caught, "Không lưu được avatar cho {UserId}", identity.Id);
-            return StatusCode(StatusCodes.Status500InternalServerError,
-                new { message = "Không lưu được ảnh đại diện." });
-        }
-
         await using (var db = await _factory.CreateDbContextAsync(cancellationToken))
         {
-            var user = await db.StpUsers
-                .SingleOrDefaultAsync(candidate => candidate.Id == identity.Id, cancellationToken);
+            StpUser? user = null;
+            if (identity is not null)
+            {
+                user = await db.StpUsers.SingleOrDefaultAsync(candidate => candidate.Id == identity.Id, cancellationToken);
+            }
+            else
+            {
+                user = await db.StpUsers.FirstOrDefaultAsync(candidate => candidate.DisplayName == actorName || candidate.Username == actorName, cancellationToken);
+                if (user is null)
+                {
+                    var baseUsername = System.Text.RegularExpressions.Regex.Replace(actorName.ToLowerInvariant(), @"[^a-z0-9_]", "");
+                    if (string.IsNullOrWhiteSpace(baseUsername))
+                    {
+                        baseUsername = "user";
+                    }
+
+                    var candidateUsername = baseUsername;
+                    var counter = 1;
+                    while (await db.StpUsers.AnyAsync(candidate => candidate.Username == candidateUsername, cancellationToken))
+                    {
+                        candidateUsername = $"{baseUsername}{counter++}";
+                    }
+
+                    user = new StpUser
+                    {
+                        Id = Guid.NewGuid(),
+                        Username = candidateUsername,
+                        DisplayName = actorName,
+                        Role = "member",
+                        PasswordHash = string.Empty,
+                        IsActive = true,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        AvatarVersion = 0
+                    };
+                    db.StpUsers.Add(user);
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+            }
+
             if (user is null)
             {
                 return NotFound();
+            }
+
+            var directory = Path.Combine(_storage.RootPath, "avatars");
+            var path = Path.Combine(directory, $"{user.Id:N}.webp");
+            if (!_storage.IsUnderRoot(path))
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    new { message = "Đường dẫn lưu ảnh không hợp lệ." });
+            }
+
+            Directory.CreateDirectory(directory);
+            try
+            {
+                await using (var stream = new FileStream(
+                                 path,
+                                 FileMode.Create,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 bufferSize: 81920,
+                                 useAsync: true))
+                {
+                    await file.CopyToAsync(stream, cancellationToken);
+                }
+            }
+            catch (Exception caught)
+            {
+                _logger.LogWarning(caught, "Không lưu được avatar cho {UserId}", user.Id);
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    new { message = "Không lưu được ảnh đại diện." });
             }
 
             user.AvatarVersion += 1;
             await db.SaveChangesAsync(cancellationToken);
 
             _audit.Write(
-                identity.DisplayName,
+                user.DisplayName,
                 "team.avatar-upload",
                 "StpUser",
                 user.Id.ToString(),
@@ -169,17 +204,11 @@ public sealed class TeamAvatarController : ControllerBase
 
     /// <summary>
     /// Trả ảnh đại diện của một thành viên kèm ETag theo AvatarVersion:
-    /// trình duyệt cache 7 ngày, đổi ảnh → version tăng → URL ?v= mới → tải lại.
+    /// Cho phép đọc công khai để ảnh hiện trên mọi máy.
     /// </summary>
     [HttpGet("avatar/{userId:guid}")]
     public async Task<IActionResult> Get(Guid userId, CancellationToken cancellationToken)
     {
-        var identity = await StpTeamIdentity.FromAsync(HttpContext);
-        if (identity is null)
-        {
-            return Unauthorized();
-        }
-
         await using var db = await _factory.CreateDbContextAsync(cancellationToken);
         var version = await db.StpUsers
             .AsNoTracking()

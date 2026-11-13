@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -85,6 +86,16 @@ builder.Services
     });
 builder.Services.AddAuthorization();
 
+// DataProtection: cookie phiên "StpTeam" được mã hoá bằng key DataProtection.
+// Mặc định key sinh trong bộ nhớ — restart service là key mới, TOÀN BỘ cookie
+// thành viên chết và cả phòng rơi về trang đăng nhập dù hứa "phiên 24 giờ".
+// Persist key xuống đĩa + tên ứng dụng cố định → restart thoải mái, cookie sống.
+var dataProtectionKeysPath = Path.Combine(builder.Environment.ContentRootPath, "data", "runtime", "keys");
+Directory.CreateDirectory(dataProtectionKeysPath);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+    .SetApplicationName("StpArchive");
+
 // Khoá bắt buộc đăng nhập nhóm — chỉ bật sau khi đã tạo tài khoản cho từng
 // người (appsettings "StpTeam:RequireLogin"). Còn tắt thì ai không có tài
 // khoản vẫn dùng app như cũ (tự khai tên), không gián đoạn người đang nhập liệu.
@@ -164,7 +175,9 @@ if (requireTeamLogin)
         var bypass =
             path.StartsWithSegments("/api/auth")
             || path.StartsWithSegments("/api/health")
-            || path.StartsWithSegments("/api/dev");
+            || path.StartsWithSegments("/api/dev")
+            || path.StartsWithSegments("/api/team/avatar")
+            || path.StartsWithSegments("/api/team/avatars");
         var authenticated = context.User.Identity?.IsAuthenticated == true;
         if (!authenticated)
         {

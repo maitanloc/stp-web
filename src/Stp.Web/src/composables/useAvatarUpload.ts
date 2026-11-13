@@ -68,8 +68,8 @@ function cropToBlob(src: string, size = 96): Promise<Blob> {
   })
 }
 
-/** Upload ảnh đại diện: nhận File từ input → cắt → POST → trả về avatarVersion mới. */
-export async function uploadAvatar(file: File): Promise<number> {
+/** Upload ảnh đại diện: nhận File từ input → cắt → POST → trả về { userId, avatarVersion }. */
+export async function uploadAvatar(file: File, actor?: string): Promise<{ userId: string; avatarVersion: number }> {
   // Đọc file thành data URL để vẽ canvas
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
@@ -82,12 +82,15 @@ export async function uploadAvatar(file: File): Promise<number> {
 
   const form = new FormData()
   form.append('file', blob, 'avatar.webp')
+  if (actor) {
+    form.append('actor', actor)
+  }
 
   const result = await request<{ userId: string; avatarVersion: number }>('/api/team/avatar', {
     method: 'POST',
     form,
   })
 
-  return result.avatarVersion
+  return result
 }
 
