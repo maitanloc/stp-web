@@ -173,6 +173,10 @@ function rowAt(index: number): DossierSummaryResponse | undefined {
 
 async function fetchPage(page: number): Promise<void> {
   if (pageCache.value.has(page) || inFlight.has(page)) return
+  // Chụp token lúc gửi: bộ lọc đổi giữa chừng (tick dropdown → resetData) thì
+  // kết quả cũ về muộn phải bị BỎ — nếu không, tổng dòng của bộ lọc cũ ghi đè
+  // spacer của bộ lọc mới: khung kéo lên cao rồi cuộn trống/kẹt ("hết kéo được").
+  const token = reloadToken
   const task = (async () => {
     try {
       const query = queryString({
@@ -185,6 +189,7 @@ async function fetchPage(page: number): Promise<void> {
       const response = await request<{ items: DossierSummaryResponse[]; total: number }>(
         `/api/workbooks/${props.bookId}/dossiers${query}`,
       )
+      if (token !== reloadToken) return
       pageCache.value.set(page, response.items)
       if (totalRows.value === null) {
         totalRows.value = response.total
@@ -193,6 +198,7 @@ async function fetchPage(page: number): Promise<void> {
       listError.value = null
     } catch (caught) {
       // Lỗi 1 trang: hiển thị, các trang khác vẫn dùng được.
+      if (token !== reloadToken) return
       if (listError.value === null) {
         listError.value = caught instanceof Error ? caught.message : 'Không tải được hồ sơ'
       }
@@ -223,6 +229,9 @@ function onScroll(): void {
 }
 
 function resetData(): void {
+  // Vô hiệu hoá MỌI fetch đang bay của phiên cũ trước khi xoá cache — kết quả
+  // cũ về muộn không được đè tổng dòng/caches của phiên mới (bug cuộn trống).
+  reloadToken += 1
   pageCache.value = new Map()
   inFlight.clear()
   totalRows.value = null

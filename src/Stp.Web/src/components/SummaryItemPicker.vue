@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Check, ChevronDown, Plus, Search, X } from '@lucide/vue'
 
 const props = withDefaults(
@@ -249,14 +249,6 @@ function place(): void {
   }
 }
 
-// Chọn/bỏ chọn một mục làm chips lớn ra → layout dịch → panel fixed đứng yên
-// ở toạ độ cũ trông như "tách rời, để trống". Mồi lại vị trí theo trigger mới.
-watch(
-  () => props.modelValue.length,
-  () => {
-    if (open.value) nextTick(place)
-  },
-)
 
 function close(): void {
   open.value = false
