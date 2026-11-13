@@ -131,7 +131,26 @@ var spaIndex = Path.Combine(spaRoot, "index.html");
 if (File.Exists(spaIndex))
 {
     app.UseDefaultFiles();
-    app.UseStaticFiles();
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            var name = ctx.File.Name;
+            if (name.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+            {
+                // index.html PHẢI revalidate mỗi lần load: các lần deploy SPA chỉ
+                // đổi tên file hash, nếu trình duyệt giữ index cũ (cache heuristic)
+                // người dùng chạy bundle cũ hàng giờ dù server đã có bản mới —
+                // nguyên nhân "sửa rồi vẫn hỏng" qua tunnel.
+                ctx.Context.Response.Headers.CacheControl = "no-cache";
+            }
+            else if (ctx.Context.Request.Path.StartsWithSegments("/assets"))
+            {
+                // Tên file kèm hash nội dung — cache vĩnh viễn là an toàn.
+                ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+            }
+        },
+    });
 }
 
 app.UseCors("Spa");
@@ -191,12 +210,14 @@ app.MapGet("/api/health", async (StpDbContext db, CancellationToken cancellation
     });
 });
 
-app.MapGet("/", () =>
+app.MapGet("/", (HttpContext http) =>
 {
     // Có SPA build thì trả giao diện; chưa có thì redirect health như cũ.
     var spaIndex = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "index.html");
     if (File.Exists(spaIndex))
     {
+        // Giống UseStaticFiles bên trên: index.html luôn revalidate, không cache heuristic.
+        http.Response.Headers.CacheControl = "no-cache";
         return Results.File(spaIndex, "text/html");
     }
 
@@ -221,6 +242,8 @@ app.MapFallback(context =>
     }
 
     context.Response.ContentType = "text/html; charset=utf-8";
+    // Deep link cũng phải revalidate index — cùng lý do với UseStaticFiles.
+    context.Response.Headers.CacheControl = "no-cache";
     return context.Response.SendFileAsync(spaIndex);
 });
 

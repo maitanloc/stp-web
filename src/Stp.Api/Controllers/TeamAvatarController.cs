@@ -205,7 +205,10 @@ public sealed class TeamAvatarController : ControllerBase
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
-        await using var stream = System.IO.File.OpenRead(path);
+        // KHÔNG bọc `await using` ở đây: FileStreamResult tự dispose stream sau khi
+        // ghi xong body. Dispose trong controller làm stream đóng TRƯỚC khi result
+        // chạy → 500 "Cannot access a closed file" — avatar không bao giờ hiện được.
+        var stream = System.IO.File.OpenRead(path);
         Response.Headers["ETag"] = etag;
         Response.Headers["Cache-Control"] = "private, max-age=604800";
         return File(stream, "image/webp");
