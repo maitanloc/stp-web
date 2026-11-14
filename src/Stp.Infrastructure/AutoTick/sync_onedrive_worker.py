@@ -159,8 +159,6 @@ def run_sync(input_file, output_file):
         if not excel_frame:
             raise RuntimeError("Không tìm thấy khung làm việc Excel Online (iframe). Vui lòng kiểm tra liên kết OneDrive hoặc quyền chia sẻ.")
 
-        excel_frame.set_default_timeout(6000)
-
         # Grant clipboard permissions for all frame origins
         try:
             for f in page.frames:
