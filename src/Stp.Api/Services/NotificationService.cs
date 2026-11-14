@@ -48,6 +48,7 @@ public sealed class NotificationService
     {
         try
         {
+            var safeBody = (body?.Length ?? 0) > 380 ? body![..380] + "..." : (body ?? string.Empty);
             using var db = _factory.CreateDbContext();
             var recipients = db.StpUsers
                 .AsNoTracking()
@@ -65,7 +66,7 @@ public sealed class NotificationService
                     ForUser = recipient,
                     Kind = kind,
                     Title = title,
-                    Body = body,
+                    Body = safeBody,
                     Link = link,
                 }));
                 db.SaveChanges();
@@ -100,6 +101,7 @@ public sealed class NotificationService
     {
         try
         {
+            var safeBody = (body?.Length ?? 0) > 380 ? body![..380] + "..." : (body ?? string.Empty);
             using var db = _factory.CreateDbContext();
             var recipients = db.StpUsers
                 .AsNoTracking()
@@ -120,7 +122,7 @@ public sealed class NotificationService
                 ForUser = recipient,
                 Kind = kind,
                 Title = title,
-                Body = body,
+                Body = safeBody,
                 Link = link,
             }));
             db.SaveChanges();

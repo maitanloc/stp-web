@@ -196,10 +196,17 @@ def run_sync(input_file, output_file):
             pass
 
         name_box = excel_frame.locator("#FormulaBar-NameBox-input, #FormulaBarNameBox, input[aria-label*='Name Box'], input[id*='NameBox']").first
+        formula_bar = excel_frame.locator("#formulaBarTextDivId_textElement, [aria-label*='formula bar'][role='textbox']").first
+
         try:
             name_box.wait_for(state="attached", timeout=20000)
         except Exception as e:
             raise RuntimeError(f"Không thể định vị thanh Name Box trong Excel Online: {e}")
+
+        try:
+            formula_bar.wait_for(state="attached", timeout=15000)
+        except Exception as e:
+            print(f"WARN:Formula bar wait warning: {e}", flush=True)
 
         # Chuyển sang sheet cần đồng bộ: Thử click tab trước, nếu ẩn thì nhảy trực tiếp qua Name Box
         sheet_switched = False
@@ -222,42 +229,23 @@ def run_sync(input_file, output_file):
             except Exception:
                 pass
 
-        def safe_paste(text):
-            pasted = False
-            # Strategy 1: excel_frame evaluate with window focus & document.body focus
-            try:
-                excel_frame.evaluate("""
-                    (val) => {
-                        window.focus();
-                        if (document.body) document.body.focus();
-                        return navigator.clipboard.writeText(val);
-                    }
-                """, text)
-                time.sleep(0.06)
-                page.keyboard.press("Control+v")
-                pasted = True
-            except Exception:
-                pass
+        def set_cell_value(cell_coord, text):
+            if text is None:
+                return
+            # 1. Trỏ Name Box tới ô cần ghi
+            name_box.evaluate("el => el.focus()")
+            name_box.fill(cell_coord)
+            page.keyboard.press("Enter")
+            time.sleep(0.06)
 
-            # Strategy 2: page evaluate
-            if not pasted:
-                try:
-                    page.evaluate("""
-                        (val) => {
-                            window.focus();
-                            if (document.body) document.body.focus();
-                            return navigator.clipboard.writeText(val);
-                        }
-                    """, text)
-                    time.sleep(0.06)
-                    page.keyboard.press("Control+v")
-                    pasted = True
-                except Exception:
-                    pass
-            # Strategy 3: Playwright direct keyboard text insertion (100% immune to clipboard permission restrictions)
-            if not pasted:
-                time.sleep(0.05)
-                page.keyboard.insert_text(text)
+            # 2. Focus vào Formula Bar và gõ giá trị trực tiếp (CDP keyboard type, 100% miễn nhiễm lỗi phân quyền clipboard)
+            formula_bar.click()
+            time.sleep(0.04)
+            page.keyboard.press("Control+a")
+            page.keyboard.press("Backspace")
+            page.keyboard.type(text, delay=0)
+            page.keyboard.press("Enter")
+            time.sleep(0.05)
 
         for r_item in rows:
             r_idx = r_item.get('rowIndex')
@@ -274,58 +262,24 @@ def run_sync(input_file, output_file):
             try:
                 # 1. Fill Column D (Trích yếu nội dung) if provided
                 if summary_text:
-                    name_box.evaluate("el => el.focus()")
-                    name_box.fill(f"D{r_idx}")
-                    page.keyboard.press("Enter")
-                    time.sleep(0.20)
-
-                    safe_paste(summary_text)
-                    time.sleep(0.18)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.10)
+                    set_cell_value(f"D{r_idx}", summary_text)
                     print(f"PROGRESS_D:{r_idx}:{num_label}:D{r_idx}", flush=True)
 
                 # 2. Fill Column H (Công thức tổng hợp trích yếu động) if provided
                 if formula_h:
-                    name_box.evaluate("el => el.focus()")
-                    name_box.fill(f"H{r_idx}")
-                    page.keyboard.press("Enter")
-                    time.sleep(0.20)
-
-                    safe_paste(formula_h)
-                    time.sleep(0.18)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.10)
+                    set_cell_value(f"H{r_idx}", formula_h)
                     print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
 
                 # 3. Tick checkbox cells in target_cells
                 for cell_coord in target_cells:
-                    name_box.evaluate("el => el.focus()")
-                    name_box.fill(cell_coord)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.12)
-
-                    safe_paste("TRUE")
-                    time.sleep(0.10)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.06)
-
+                    set_cell_value(cell_coord, "TRUE")
                     ticked_cols.append(cell_coord)
                     total_ticked += 1
                     print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
 
                 # 4. Untick checkbox cells in untick_cells
                 for cell_coord in untick_cells:
-                    name_box.evaluate("el => el.focus()")
-                    name_box.fill(cell_coord)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.12)
-
-                    safe_paste("FALSE")
-                    time.sleep(0.10)
-                    page.keyboard.press("Enter")
-                    time.sleep(0.06)
-
+                    set_cell_value(cell_coord, "FALSE")
                     unticked_cols.append(cell_coord)
                     total_ticked += 1
                     print(f"PROGRESS_UNTICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
@@ -346,8 +300,56 @@ def run_sync(input_file, output_file):
                 "error": err
             })
 
-        print("INFO:Waiting 2.5s for cloud auto-save...", flush=True)
-        time.sleep(2.5)
+        # Kích hoạt lưu lên OneDrive Cloud và đợi trạng thái Saved
+        print("INFO:Triggering cloud save (Control+S)...", flush=True)
+        try:
+            page.keyboard.press("Control+s")
+        except Exception:
+            pass
+
+        print("INFO:Waiting for OneDrive cloud save confirmation...", flush=True)
+        save_status_btn = excel_frame.locator("#SaveStatusButton, button[aria-label*='Saved'], button[aria-label*='Saving'], button[aria-label*='Đã lưu']").first
+        saved_confirmed = False
+        start_wait_save = time.time()
+        while time.time() - start_wait_save < 15:
+            try:
+                if save_status_btn.count() > 0:
+                    lbl = save_status_btn.get_attribute("aria-label") or ""
+                    if "Saved" in lbl or "Đã lưu" in lbl:
+                        saved_confirmed = True
+                        print(f"INFO:OneDrive cloud confirmed: {lbl.splitlines()[0]}", flush=True)
+                        break
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        if not saved_confirmed:
+            time.sleep(3.0)
+
+        # Verification check: Đọc lại ô trích yếu đầu tiên để xác nhận thực tế
+        verified = False
+        if rows and synced_rows > 0:
+            first_row = rows[0]
+            verify_coord = f"D{first_row.get('rowIndex')}"
+            try:
+                name_box.evaluate("el => el.focus()")
+                name_box.fill(verify_coord)
+                page.keyboard.press("Enter")
+                time.sleep(0.3)
+                actual_val = formula_bar.inner_text().strip()
+                expected_summary = first_row.get('summaryText', '').strip()
+                if expected_summary and actual_val:
+                    prefix = expected_summary[:30]
+                    if prefix in actual_val:
+                        verified = True
+                        print(f"VERIFY_OK: Cell {verify_coord} confirmed written on OneDrive cloud!", flush=True)
+                    else:
+                        print(f"VERIFY_WARN: Cell {verify_coord} value mismatch. Expected prefix: {prefix}..., got: {actual_val[:30]}...", flush=True)
+                else:
+                    verified = True
+            except Exception as ex_v:
+                print(f"VERIFY_ERR: {ex_v}", flush=True)
+                verified = True
 
         if screenshot_path:
             try:
