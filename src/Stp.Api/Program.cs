@@ -264,26 +264,36 @@ app.MapFallback(context =>
 // đây KHÔNG tự chạy Database.Migrate: thêm bảng/cột mới mà quên áp tay thì API
 // chạy trên schema cũ và chỉ vỡ lúc runtime. Migration hỏng chỉ log lỗi, không
 // chặn service; health sẽ báo degraded cho đến khi khởi động lại thành công.
-try
+for (var attempt = 1; attempt <= 5; attempt++)
 {
-    using var migrateDb = app.Services.GetRequiredService<IDbContextFactory<StpDbContext>>().CreateDbContext();
-    var pendingMigrations = new List<string>(
-        await migrateDb.Database.GetPendingMigrationsAsync());
-    await migrateDb.Database.MigrateAsync();
-    if (pendingMigrations.Count > 0)
+    try
     {
-        app.Logger.LogInformation(
-            "Đã áp {Count} migration lúc khởi động: {Migrations}",
-            pendingMigrations.Count,
-            string.Join(", ", pendingMigrations));
+        using var migrateDb = app.Services.GetRequiredService<IDbContextFactory<StpDbContext>>().CreateDbContext();
+        var pendingMigrations = new List<string>(
+            await migrateDb.Database.GetPendingMigrationsAsync());
+        await migrateDb.Database.MigrateAsync();
+        if (pendingMigrations.Count > 0)
+        {
+            app.Logger.LogInformation(
+                "Đã áp {Count} migration lúc khởi động: {Migrations}",
+                pendingMigrations.Count,
+                string.Join(", ", pendingMigrations));
+        }
+        startupMigrationError = null;
+        break;
     }
-}
-catch (Exception migrateError)
-{
-    startupMigrationError = migrateError;
-    app.Logger.LogError(
-        migrateError,
-        "Áp migration thất bại lúc khởi động — API vẫn chạy nhưng bảng/cột mới có thể thiếu. Kiểm tra kết nối SQL Server rồi khởi động lại.");
+    catch (Exception migrateError) when (attempt < 5)
+    {
+        app.Logger.LogWarning("Chờ SQL Server sẵn sàng... thử lại lần {Attempt}/5 sau 2s", attempt);
+        await Task.Delay(2000);
+    }
+    catch (Exception migrateError)
+    {
+        startupMigrationError = migrateError;
+        app.Logger.LogError(
+            migrateError,
+            "Áp migration thất bại lúc khởi động — API vẫn chạy nhưng bảng/cột mới có thể thiếu. Kiểm tra kết nối SQL Server rồi khởi động lại.");
+    }
 }
 
 // Seed tài khoản quản trị đầu tiên khi bảng Users còn trống. Mật khẩu mặc định

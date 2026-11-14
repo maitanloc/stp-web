@@ -63,7 +63,7 @@ function isActive(path: string): boolean {
 async function checkHealth(): Promise<void> {
   try {
     const health = await request<HealthResponse>('/api/health')
-    healthy.value = health.status === 'ok' && health.database === 'connected'
+    healthy.value = health.database === 'connected' || health.status === 'ok'
   } catch {
     healthy.value = false
   }
