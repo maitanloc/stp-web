@@ -18,6 +18,11 @@ public interface IAutoTickService
 
     Task<AutoTickWatcherCheckResponse> CheckWatcherAsync(AutoTickWatcherCheckRequest request, CancellationToken ct = default);
 
-    Task<AutoTickSyncSummaryResponse> SyncSummaryRowsToOneDriveAsync(AutoTickSyncSummaryRequest request, CancellationToken ct = default);
+    Task<AutoTickSyncSummaryResponse> SyncSummaryRowsToOneDriveAsync(
+        AutoTickSyncSummaryRequest request,
+        Func<Task>? onLockAcquired = null,
+        CancellationToken ct = default);
+
+    bool IsOneDriveBusy(string oneDriveUrl);
 }
 

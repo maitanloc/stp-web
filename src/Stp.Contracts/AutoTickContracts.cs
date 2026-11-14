@@ -154,6 +154,7 @@ public sealed class AutoTickSyncSummaryRowResult
 public sealed class AutoTickSyncSummaryResponse
 {
     public bool Success { get; set; }
+    public bool IsQueued { get; set; }
     public int SyncedRowsCount { get; set; }
     public int TickedCellsCount { get; set; }
     public string Message { get; set; } = string.Empty;

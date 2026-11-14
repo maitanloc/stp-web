@@ -145,9 +145,11 @@ public sealed class AutoTickController : ControllerBase
             });
         }
 
+        bool isQueued = _autoTick.IsOneDriveBusy(request.OneDriveUrl);
+
         if (!background)
         {
-            var syncResult = await _autoTick.SyncSummaryRowsToOneDriveAsync(request, ct).ConfigureAwait(false);
+            var syncResult = await _autoTick.SyncSummaryRowsToOneDriveAsync(request, null, ct).ConfigureAwait(false);
             return Ok(syncResult);
         }
 
@@ -156,7 +158,22 @@ public sealed class AutoTickController : ControllerBase
         {
             try
             {
-                var result = await _autoTick.SyncSummaryRowsToOneDriveAsync(request, CancellationToken.None).ConfigureAwait(false);
+                var result = await _autoTick.SyncSummaryRowsToOneDriveAsync(
+                    request,
+                    onLockAcquired: async () =>
+                    {
+                        if (_hubContext is not null)
+                        {
+                            await _hubContext.Clients.All.SendAsync("oneDriveSyncQueueStarted", new
+                            {
+                                sheetName = request.SheetName,
+                                rowCount = request.Rows.Count,
+                                message = $"Robot đã rời hàng chờ và bắt đầu điền {request.Rows.Count} hồ sơ lên OneDrive!"
+                            });
+                        }
+                    },
+                    CancellationToken.None).ConfigureAwait(false);
+
                 if (result.Success)
                 {
                     _notificationService?.NotifyAll(
@@ -218,9 +235,12 @@ public sealed class AutoTickController : ControllerBase
         return Ok(new AutoTickSyncSummaryResponse
         {
             Success = true,
+            IsQueued = isQueued,
             SyncedRowsCount = request.Rows.Count,
             TickedCellsCount = 0,
-            Message = $"Robot đã bắt đầu chạy ngầm trên OneDrive Cloud ({request.Rows.Count} hồ sơ). Bạn có thể yên tâm đóng tab hoặc làm việc khác, hệ thống sẽ tự động gửi thông báo khi hoàn tất!"
+            Message = isQueued
+                ? $"File OneDrive này hiện đang có robot khác đang chạy đồng bộ. Tiến trình của bạn ({request.Rows.Count} hồ sơ) đã được đưa vào HÀNG ĐỢI và sẽ tự động bắt đầu ngay khi robot trước hoàn tất!"
+                : $"Robot đã bắt đầu chạy ngầm trên OneDrive Cloud ({request.Rows.Count} hồ sơ). Bạn có thể yên tâm đóng tab hoặc làm việc khác, hệ thống sẽ tự động gửi thông báo khi hoàn tất!"
         });
     }
 }

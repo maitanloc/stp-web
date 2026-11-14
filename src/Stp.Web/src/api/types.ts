@@ -851,6 +851,7 @@ export interface AutoTickSyncSummaryRowResult {
 
 export interface AutoTickSyncSummaryResponse {
   success: boolean
+  isQueued?: boolean
   syncedRowsCount: number
   tickedCellsCount: number
   message: string

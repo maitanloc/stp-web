@@ -84,6 +84,7 @@ import {
   lastSummaryBulkChanged,
   lastTeamSessionChanged,
   lastOneDriveSyncCompleted,
+  lastOneDriveSyncQueueStarted,
 } from '../composables/useTeamPresence'
 import { getUserName } from '../api/client'
 import { teamIdentity } from '../composables/useTeamIdentity'
@@ -347,10 +348,19 @@ const selectedSyncSheet = ref('1997')
 const oneDriveSyncScope = ref<'selected' | 'changes_only' | 'current_filter'>('selected')
 const ensureFormulaH = ref(true)
 const syncingInBackground = ref(false)
+const isQueuedForOneDrive = ref(false)
+
+watch(lastOneDriveSyncQueueStarted, (started) => {
+  if (!started) return
+  isQueuedForOneDrive.value = false
+  syncingInBackground.value = true
+  toast.info('Robot bắt đầu làm việc', started.message)
+})
 
 watch(lastOneDriveSyncCompleted, (completed) => {
   if (!completed) return
   syncingInBackground.value = false
+  isQueuedForOneDrive.value = false
   if (completed.success) {
     toast.success('Đồng bộ OneDrive thành công!', completed.message)
   } else {
@@ -2484,7 +2494,24 @@ function extractParensItems(text: string): string[] {
   return match[1].split(/[,;]/).map((s) => s.trim()).filter(Boolean)
 }
 
-function updateSyncSheetName(): void {
+interface SyncRowCandidate {
+  rowNumber: number
+  sourceRowNumber?: number
+  sheet?: string
+  summary: string
+  numberLabel?: string | null
+}
+
+function updateSyncSheetName(candidates?: SyncRowCandidate[]): void {
+  // 1. Nếu có hàng được chọn và hàng đó có tên sheet rõ ràng (phiên nhiều sheet), ưu tiên lấy đúng sheet đó
+  if (candidates && candidates.length > 0) {
+    const rowWithSheet = candidates.find((c) => c.sheet && c.sheet.trim())
+    if (rowWithSheet && rowWithSheet.sheet) {
+      selectedSyncSheet.value = rowWithSheet.sheet.trim()
+      return
+    }
+  }
+
   if (scopeRequest.value.year && scopeRequest.value.year >= 1996) {
     selectedSyncSheet.value = String(scopeRequest.value.year)
   } else if (session.value?.sheetName && session.value.sheetName !== 'file nhập') {
@@ -2498,7 +2525,7 @@ function updateSyncSheetName(): void {
   }
 }
 
-function prepareRowsForOneDriveSync(items: Array<{ rowNumber: number; summary: string; numberLabel?: string | null }>): AutoTickSyncSummaryItem[] {
+function prepareRowsForOneDriveSync(items: SyncRowCandidate[]): AutoTickSyncSummaryItem[] {
   return items.map((it) => {
     const change = allChanges.value.find((c) => c.rowNumber === it.rowNumber)
     const effectiveSummary = change?.summaryText || it.summary
@@ -2506,8 +2533,13 @@ function prepareRowsForOneDriveSync(items: Array<{ rowNumber: number; summary: s
       ? change.items
       : extractParensItems(effectiveSummary)
 
+    // Ưu tiên dòng thật Excel (>= 5), nếu không có mới lấy rowNumber
+    const actualRowIndex = (it.sourceRowNumber && it.sourceRowNumber >= 5)
+      ? it.sourceRowNumber
+      : it.rowNumber
+
     return {
-      rowIndex: it.rowNumber,
+      rowIndex: actualRowIndex,
       numberLabel: change?.numberLabel || it.numberLabel || '',
       summaryText: effectiveSummary,
       items: itemsList,
@@ -2528,7 +2560,6 @@ function startSyncToOneDriveFromPreview(): void {
   } else {
     oneDriveSyncScope.value = 'current_filter'
   }
-  updateSyncSheetName()
   updateSyncRowsPreview()
   oneDriveSyncResult.value = null
   oneDriveSyncError.value = null
@@ -2536,7 +2567,7 @@ function startSyncToOneDriveFromPreview(): void {
 }
 
 function updateSyncRowsPreview(): void {
-  let targetItems: Array<{ rowNumber: number; summary: string; numberLabel?: string | null }> = []
+  let targetItems: SyncRowCandidate[] = []
 
   if (oneDriveSyncScope.value === 'selected' && selected.value.size > 0) {
     // 1. Người dùng chọn: Chỉ các dòng đã tích chọn ở checkbox đầu dòng
@@ -2545,8 +2576,11 @@ function updateSyncRowsPreview(): void {
         .filter((r) => selected.value.has(r.rowNumber))
         .map((r) => {
           const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
+          const matchingRow = rows.value.find((x) => x.rowNumber === r.rowNumber)
           return {
             rowNumber: r.rowNumber,
+            sourceRowNumber: matchingRow?.sourceRowNumber,
+            sheet: matchingRow?.sheet,
             summary: change?.summaryText || r.summary,
             numberLabel: change?.numberLabel || r.numberLabel,
           }
@@ -2558,6 +2592,8 @@ function updateSyncRowsPreview(): void {
           const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
           return {
             rowNumber: r.rowNumber,
+            sourceRowNumber: r.sourceRowNumber,
+            sheet: r.sheet,
             summary: change?.summaryText || composeSummary(r, change?.items || r.items) || r.summary,
             numberLabel: change?.numberLabel || r.numberLabel,
           }
@@ -2567,6 +2603,8 @@ function updateSyncRowsPreview(): void {
       if (selected.value.has(ed.row.rowNumber) && !targetItems.some((t) => t.rowNumber === ed.row.rowNumber)) {
         targetItems.push({
           rowNumber: ed.row.rowNumber,
+          sourceRowNumber: ed.row.sourceRowNumber,
+          sheet: ed.row.sheet,
           summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
           numberLabel: ed.numberLabel || ed.row.numberLabel,
         })
@@ -2575,14 +2613,19 @@ function updateSyncRowsPreview(): void {
   } else if (oneDriveSyncScope.value === 'changes_only' && edits.value.size > 0) {
     targetItems = [...edits.value.values()].map((ed) => ({
       rowNumber: ed.row.rowNumber,
+      sourceRowNumber: ed.row.sourceRowNumber,
+      sheet: ed.row.sheet,
       summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
       numberLabel: ed.numberLabel || ed.row.numberLabel,
     }))
   } else if (previewOpen.value && previewRows.value.length > 0) {
     targetItems = previewRows.value.map((r) => {
       const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
+      const matchingRow = rows.value.find((x) => x.rowNumber === r.rowNumber)
       return {
         rowNumber: r.rowNumber,
+        sourceRowNumber: matchingRow?.sourceRowNumber,
+        sheet: matchingRow?.sheet,
         summary: change?.summaryText || r.summary,
         numberLabel: change?.numberLabel || r.numberLabel,
       }
@@ -2592,6 +2635,8 @@ function updateSyncRowsPreview(): void {
       const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
       return {
         rowNumber: r.rowNumber,
+        sourceRowNumber: r.sourceRowNumber,
+        sheet: r.sheet,
         summary: change?.summaryText || r.summary,
         numberLabel: change?.numberLabel || r.numberLabel,
       }
@@ -2600,6 +2645,8 @@ function updateSyncRowsPreview(): void {
       if (!targetItems.some((t) => t.rowNumber === ed.row.rowNumber)) {
         targetItems.push({
           rowNumber: ed.row.rowNumber,
+          sourceRowNumber: ed.row.sourceRowNumber,
+          sheet: ed.row.sheet,
           summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
           numberLabel: ed.numberLabel || ed.row.numberLabel,
         })
@@ -2608,11 +2655,14 @@ function updateSyncRowsPreview(): void {
   } else if (edits.value.size > 0) {
     targetItems = [...edits.value.values()].map((ed) => ({
       rowNumber: ed.row.rowNumber,
+      sourceRowNumber: ed.row.sourceRowNumber,
+      sheet: ed.row.sheet,
       summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
       numberLabel: ed.numberLabel || ed.row.numberLabel,
     }))
   }
 
+  updateSyncSheetName(targetItems)
   rowsToSyncPreview.value = prepareRowsForOneDriveSync(targetItems)
 }
 
@@ -2625,7 +2675,6 @@ function openOneDriveSyncFromToolbar(): void {
     oneDriveSyncScope.value = 'current_filter'
   }
 
-  updateSyncSheetName()
   updateSyncRowsPreview()
 
   if (rowsToSyncPreview.value.length === 0) {
@@ -2669,7 +2718,13 @@ async function executeOneDriveSync(): Promise<void> {
     // Đóng popup ngay lập tức để người dùng không phải chờ, chuyển sang chạy ngầm
     oneDriveSyncModalOpen.value = false
     syncingInBackground.value = true
-    toast.success('Đã bắt đầu chạy ngầm trên OneDrive!', res.message)
+    if (res.isQueued) {
+      isQueuedForOneDrive.value = true
+      toast.info('Đã vào hàng chờ đồng bộ', res.message)
+    } else {
+      isQueuedForOneDrive.value = false
+      toast.success('Đã bắt đầu chạy ngầm trên OneDrive!', res.message)
+    }
   } catch (err) {
     oneDriveSyncError.value = errorMessage(err)
     toast.error('Lỗi khởi động đồng bộ OneDrive', oneDriveSyncError.value)
@@ -3912,12 +3967,12 @@ onBeforeUnmount(() => {
               <button
                 class="btn btn-success btn-sm"
                 type="button"
-                title="Tự động điền trích yếu và đánh tick trực tiếp lên file Excel OneDrive (chạy ngầm tự động)"
+                :title="syncingInBackground ? (isQueuedForOneDrive ? 'Tiến trình đang trong hàng chờ do có robot khác đang chạy...' : 'Robot đang chạy ngầm trên OneDrive...') : 'Tự động điền trích yếu và đánh tick trực tiếp lên file Excel OneDrive (chạy ngầm tự động)'"
                 :disabled="!scopeReady || total === 0 || loadingRows || syncingOneDrive"
                 @click="openOneDriveSyncFromToolbar"
               >
-                <Cloud :size="14" :class="{ spin: syncingInBackground }" />
-                {{ syncingInBackground ? 'Đang chạy ngầm OneDrive...' : 'Đồng bộ OneDrive' }}
+                <Cloud :size="14" :class="{ spin: syncingInBackground && !isQueuedForOneDrive }" />
+                {{ syncingInBackground ? (isQueuedForOneDrive ? '⏳ Đang trong hàng chờ...' : '⚡ Đang chạy ngầm...') : 'Đồng bộ OneDrive' }}
               </button>
               <button
                 class="btn btn-primary btn-sm"

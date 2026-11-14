@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -395,7 +396,17 @@ public sealed partial class AutoTickService : IAutoTickService
         }
     }
 
-    public async Task<AutoTickSyncSummaryResponse> SyncSummaryRowsToOneDriveAsync(AutoTickSyncSummaryRequest request, CancellationToken ct = default)
+    public bool IsOneDriveBusy(string oneDriveUrl)
+    {
+        if (string.IsNullOrWhiteSpace(oneDriveUrl)) return false;
+        var key = NormalizeUrlKey(oneDriveUrl);
+        return _oneDriveUrlSemaphores.TryGetValue(key, out var sem) && sem.CurrentCount == 0;
+    }
+
+    public async Task<AutoTickSyncSummaryResponse> SyncSummaryRowsToOneDriveAsync(
+        AutoTickSyncSummaryRequest request,
+        Func<Task>? onLockAcquired = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.Rows.Count == 0)
@@ -423,27 +434,85 @@ public sealed partial class AutoTickService : IAutoTickService
             // 1. Download & inspect workbook to map headers and row coordinates
             var downloaded = await DownloadOneDriveFileAsync(url, ct).ConfigureAwait(false);
             using var workbook = new XLWorkbook(downloaded.FilePath);
-            var sheetName = string.IsNullOrWhiteSpace(request.SheetName) ? "1997" : request.SheetName;
-            if (!workbook.Worksheets.Contains(sheetName))
+
+            IXLWorksheet? targetSheet = null;
+
+            // 1.1 Thử tìm sheet theo đúng tên request.SheetName (bỏ qua hoa thường và khoảng trắng thừa)
+            if (!string.IsNullOrWhiteSpace(request.SheetName))
             {
-                sheetName = workbook.Worksheets.FirstOrDefault(w => w.Name.Equals("1997", StringComparison.OrdinalIgnoreCase))?.Name
-                    ?? workbook.Worksheets.First().Name;
+                var cleanReqSheet = request.SheetName.Trim();
+                targetSheet = workbook.Worksheets.FirstOrDefault(w =>
+                    string.Equals(w.Name.Trim(), cleanReqSheet, StringComparison.OrdinalIgnoreCase));
             }
 
-            var sheet = workbook.Worksheet(sheetName);
+            // 1.2 Tự động kiểm tra độ khớp: nếu targetSheet chưa thấy hoặc có 0 dòng khớp, quét toàn bộ workbook
+            if (targetSheet is null || CountMatchingRowsInSheet(targetSheet, request.Rows) == 0)
+            {
+                IXLWorksheet? bestSheet = null;
+                int maxMatches = 0;
+
+                foreach (var ws in workbook.Worksheets)
+                {
+                    var wsName = ws.Name.Trim();
+                    if (wsName.Equals("file dán", StringComparison.OrdinalIgnoreCase) ||
+                        wsName.Equals("form", StringComparison.OrdinalIgnoreCase) ||
+                        wsName.Equals("BANG_IN_HANG_LOAT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    int matches = CountMatchingRowsInSheet(ws, request.Rows);
+                    if (matches > maxMatches)
+                    {
+                        maxMatches = matches;
+                        bestSheet = ws;
+                    }
+                }
+
+                if (bestSheet is not null && maxMatches > 0)
+                {
+                    targetSheet = bestSheet;
+                    _logger.LogInformation("Tự động nhận diện sheet tối ưu: '{SheetName}' chứa {Matches}/{Total} hồ sơ cần đồng bộ",
+                        bestSheet.Name, maxMatches, request.Rows.Count);
+                }
+            }
+
+            targetSheet ??= workbook.Worksheets.FirstOrDefault(w => w.Name.Trim().Equals("1997", StringComparison.OrdinalIgnoreCase))
+                ?? workbook.Worksheets.FirstOrDefault(w => !w.Name.Trim().Equals("file dán", StringComparison.OrdinalIgnoreCase))
+                ?? workbook.Worksheets.First();
+
+            var sheet = targetSheet;
+            var sheetName = targetSheet.Name;
             var headers = ExtractHeaders(sheet);
             int lastColNumber = sheet.LastColumnUsed()?.ColumnNumber() ?? (headers.Count > 0 ? headers.Max(h => h.ColumnIndex) : 95);
             string lastColLetter = sheet.Column(lastColNumber).ColumnLetter();
 
             int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 500;
-            var rowNumberMap = new Dictionary<int, int>();
+            var numToRowMap = new Dictionary<int, int>();
+            var labelToRowMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var citizenNameToRowMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
             for (int r = 5; r <= lastRow; r++)
             {
-                var numStr = sheet.Cell(r, 2).GetString().Trim();
-                var m = Regex.Match(numStr, @"^\d+");
-                if (m.Success && int.TryParse(m.Value, out int n))
+                var numStr = GetCellText(sheet.Cell(r, 2));
+                if (!string.IsNullOrWhiteSpace(numStr))
                 {
-                    rowNumberMap.TryAdd(n, r);
+                    labelToRowMap.TryAdd(numStr.Trim(), r);
+                    var m = Regex.Match(numStr, @"^\d+");
+                    if (m.Success && int.TryParse(m.Value, out int n))
+                    {
+                        numToRowMap.TryAdd(n, r);
+                    }
+                }
+
+                var summaryInSheet = GetCellText(sheet.Cell(r, 4));
+                if (!string.IsNullOrWhiteSpace(summaryInSheet))
+                {
+                    var names = ExtractCitizenNames(summaryInSheet);
+                    if (!string.IsNullOrWhiteSpace(names))
+                    {
+                        citizenNameToRowMap.TryAdd(NormalizeText(names), r);
+                    }
                 }
             }
 
@@ -451,17 +520,51 @@ public sealed partial class AutoTickService : IAutoTickService
             foreach (var rItem in request.Rows)
             {
                 int rowIndex = 0;
-                var numMatch = Regex.Match(rItem.NumberLabel ?? "", @"^\d+");
-                if (numMatch.Success && int.TryParse(numMatch.Value, out int n) && rowNumberMap.TryGetValue(n, out int mappedRow))
+
+                // Tầng 1: Khớp theo nhãn chuỗi đầy đủ cột B (ví dụ "36A", "14")
+                if (!string.IsNullOrWhiteSpace(rItem.NumberLabel) && labelToRowMap.TryGetValue(rItem.NumberLabel.Trim(), out int mappedByLabel))
                 {
-                    rowIndex = mappedRow;
+                    rowIndex = mappedByLabel;
                 }
-                else if (rItem.RowIndex >= 5 && rItem.RowIndex <= lastRow)
+
+                // Tầng 2: Khớp theo số nguyên bắt đầu cột B (ví dụ 14, 36)
+                if (rowIndex == 0 && !string.IsNullOrWhiteSpace(rItem.NumberLabel))
+                {
+                    var numMatch = Regex.Match(rItem.NumberLabel, @"^\d+");
+                    if (numMatch.Success && int.TryParse(numMatch.Value, out int n) && numToRowMap.TryGetValue(n, out int mappedByNum))
+                    {
+                        rowIndex = mappedByNum;
+                    }
+                }
+
+                // Tầng 3: Khớp theo tên công dân trích xuất từ trích yếu (Cột D)
+                if (rowIndex == 0 && !string.IsNullOrWhiteSpace(rItem.SummaryText))
+                {
+                    var names = ExtractCitizenNames(rItem.SummaryText);
+                    if (!string.IsNullOrWhiteSpace(names) && citizenNameToRowMap.TryGetValue(NormalizeText(names), out int mappedByName))
+                    {
+                        rowIndex = mappedByName;
+                    }
+                }
+
+                // Tầng 4: Dùng trực tiếp RowIndex nếu nằm trong khoảng dòng hợp lệ (>= 5)
+                if (rowIndex == 0 && rItem.RowIndex >= 5 && rItem.RowIndex <= lastRow)
                 {
                     rowIndex = rItem.RowIndex;
                 }
 
-                if (rowIndex <= 0) continue;
+                // Tầng 5: Nếu RowIndex là 1-based (ví dụ 1..N) chuyển về dòng Excel (rItem.RowIndex + 4)
+                if (rowIndex == 0 && rItem.RowIndex >= 1 && (rItem.RowIndex + 4) <= lastRow)
+                {
+                    rowIndex = rItem.RowIndex + 4;
+                }
+
+                if (rowIndex <= 0)
+                {
+                    _logger.LogWarning("Không tìm thấy dòng tương ứng trên sheet {Sheet} cho hồ sơ {NumberLabel} (RowIndex: {RowIndex})",
+                        sheetName, rItem.NumberLabel, rItem.RowIndex);
+                    continue;
+                }
 
                 var targetCells = new List<string>();
                 var untickCells = new List<string>();
@@ -605,6 +708,11 @@ public sealed partial class AutoTickService : IAutoTickService
             ConfigurePlaywrightEnvironment(psi);
 
             var sem = _oneDriveUrlSemaphores.GetOrAdd(NormalizeUrlKey(url), _ => new SemaphoreSlim(1, 1));
+            bool isWaitingInQueue = sem.CurrentCount == 0;
+            if (isWaitingInQueue)
+            {
+                _logger.LogInformation("File {Url} đang có robot chạy, tiến trình mới xếp hàng chờ...", url);
+            }
             _logger.LogInformation("Chờ khóa hàng đợi đồng bộ OneDrive cho file {Url}...", url);
             var acquired = await sem.WaitAsync(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
             if (!acquired)
@@ -614,6 +722,18 @@ public sealed partial class AutoTickService : IAutoTickService
                     Success = false,
                     Message = "Robot hiện đang bận đồng bộ file này cho một đồng đội khác trong phòng. Vui lòng thử lại sau giây lát."
                 };
+            }
+
+            if (isWaitingInQueue && onLockAcquired is not null)
+            {
+                try
+                {
+                    await onLockAcquired().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Lỗi khi gọi onLockAcquired callback");
+                }
             }
 
             try
@@ -1372,6 +1492,80 @@ public sealed partial class AutoTickService : IAutoTickService
         }
 
         return "python";
+    }
+
+    private static string GetCellText(IXLCell cell)
+    {
+        try
+        {
+            if (cell.IsEmpty()) return string.Empty;
+            if (cell.DataType == XLDataType.DateTime)
+            {
+                return cell.GetDateTime().ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            }
+            if (cell.DataType == XLDataType.Number)
+            {
+                var number = cell.GetDouble();
+                return Math.Abs(number - Math.Truncate(number)) < 0.0000001
+                    ? ((long)number).ToString(CultureInfo.InvariantCulture)
+                    : number.ToString(CultureInfo.InvariantCulture);
+            }
+            var s = cell.GetString();
+            return !string.IsNullOrWhiteSpace(s) ? s.Trim() : (cell.Value.ToString()?.Trim() ?? string.Empty);
+        }
+        catch
+        {
+            try { return cell.Value.ToString()?.Trim() ?? string.Empty; } catch { return string.Empty; }
+        }
+    }
+
+    private static int CountMatchingRowsInSheet(IXLWorksheet ws, IReadOnlyList<AutoTickSyncSummaryItem> rows)
+    {
+        int lastRow = ws.LastRowUsed()?.RowNumber() ?? 4;
+        if (lastRow < 5) return 0;
+
+        var sheetNumbers = new HashSet<int>();
+        var sheetStrings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int r = 5; r <= Math.Min(lastRow, 3000); r++)
+        {
+            var cellText = GetCellText(ws.Cell(r, 2));
+            if (!string.IsNullOrWhiteSpace(cellText))
+            {
+                sheetStrings.Add(cellText.Trim());
+                var m = Regex.Match(cellText, @"^\d+");
+                if (m.Success && int.TryParse(m.Value, out int n))
+                {
+                    sheetNumbers.Add(n);
+                }
+            }
+        }
+
+        int count = 0;
+        foreach (var r in rows)
+        {
+            if (!string.IsNullOrWhiteSpace(r.NumberLabel))
+            {
+                var label = r.NumberLabel.Trim();
+                if (sheetStrings.Contains(label))
+                {
+                    count++;
+                    continue;
+                }
+                var m = Regex.Match(label, @"^\d+");
+                if (m.Success && int.TryParse(m.Value, out int n) && sheetNumbers.Contains(n))
+                {
+                    count++;
+                    continue;
+                }
+            }
+            if (r.RowIndex >= 5 && r.RowIndex <= lastRow)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 }
 
