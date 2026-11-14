@@ -6,6 +6,7 @@ using Stp.Api.Hubs;
 using Stp.Api.Services;
 using Stp.Contracts;
 using Stp.Core.Domain;
+using Stp.Core.Security;
 using Stp.Core.Storage;
 using Stp.Core.Summary;
 using Stp.Core.Sync;
@@ -58,6 +59,7 @@ public sealed class SummaryToolController : ControllerBase
     [RequestSizeLimit(UploadRequestLimit)]
     public async Task<ActionResult<SummaryInspectResponse>> Inspect(
         [FromForm] IFormFile file,
+        [FromQuery] bool? makeActive,
         CancellationToken cancellationToken)
     {
         if (file.Length == 0)
@@ -79,24 +81,53 @@ public sealed class SummaryToolController : ControllerBase
                 cancellationToken);
 
             var actor = await TeamAudit.ActorFromAsync(HttpContext);
-            _summary.SetActiveSession(session.SessionId, actor);
+            var identity = await StpTeamIdentity.FromAsync(HttpContext);
+            var isAdmin = identity?.Role == AccountRules.RoleAdmin;
 
-            _notifications.NotifyAllExcept(
-                actor,
-                "system",
-                "Phiên làm việc chung mới",
-                $"{actor} vừa tải lên file làm việc chung: {file.FileName} ({session.Rows.Count:N0} hồ sơ)",
-                "/trich-yeu");
+            var existingActive = _summary.GetActiveSession();
+            var shouldMakeActive = false;
 
-            _ = _hubContext.Clients.All.SendAsync("teamSessionChanged", new
+            if (makeActive == true)
             {
-                sessionId = session.SessionId,
-                fileName = session.FileName,
-                uploadedBy = actor,
-                uploadedAt = DateTimeOffset.UtcNow,
-                rowCount = session.Rows.Count,
-                editCount = 0
-            });
+                // Chỉ cho phép đặt làm active nếu chưa có file live, hoặc người này là uploader file cũ hoặc là admin
+                if (existingActive is null
+                    || isAdmin
+                    || string.Equals(existingActive.UploadedBy, actor, StringComparison.OrdinalIgnoreCase))
+                {
+                    shouldMakeActive = true;
+                }
+            }
+            else if (makeActive == null)
+            {
+                // Mặc định: nếu chưa có file active nào thì đặt làm active
+                // Nếu ĐÃ CÓ file active của người khác thì KHÔNG tự ý đè làm mất file live của họ!
+                if (existingActive is null)
+                {
+                    shouldMakeActive = true;
+                }
+            }
+
+            if (shouldMakeActive)
+            {
+                _summary.SetActiveSession(session.SessionId, actor);
+
+                _notifications.NotifyAllExcept(
+                    actor,
+                    "system",
+                    "Phiên làm việc chung mới",
+                    $"{actor} vừa tải lên file làm việc chung: {file.FileName} ({session.Rows.Count:N0} hồ sơ)",
+                    "/trich-yeu");
+
+                _ = _hubContext.Clients.All.SendAsync("teamSessionChanged", new
+                {
+                    sessionId = session.SessionId,
+                    fileName = session.FileName,
+                    uploadedBy = actor,
+                    uploadedAt = DateTimeOffset.UtcNow,
+                    rowCount = session.Rows.Count,
+                    editCount = 0
+                });
+            }
 
             return Ok(ToResponse(session));
         }
@@ -154,6 +185,22 @@ public sealed class SummaryToolController : ControllerBase
         }
 
         var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        var isAdmin = identity?.Role == AccountRules.RoleAdmin;
+
+        var existingActive = _summary.GetActiveSession();
+        if (existingActive is not null
+            && !isAdmin
+            && !string.Equals(existingActive.UploadedBy, actor, StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Title = "Phòng đang có file live khác",
+                Detail = $"Phòng đang mở file chung '{existingActive.FileName}' do {existingActive.UploadedBy} tải lên. Chỉ {existingActive.UploadedBy} hoặc Quản trị viên mới được thay thế.",
+                Status = StatusCodes.Status403Forbidden
+            });
+        }
+
         _summary.SetActiveSession(request.SessionId, actor);
 
         _notifications.NotifyAllExcept(
@@ -183,10 +230,31 @@ public sealed class SummaryToolController : ControllerBase
             EditCount: _summary.GetSessionEdits(session.SessionId).Count));
     }
 
-    /// <summary>Huỷ thiết lập phiên làm việc chung của phòng.</summary>
+    /// <summary>Huỷ thiết lập phiên làm việc chung của phòng (chỉ người tải lên hoặc quản trị viên mới được gỡ).</summary>
     [HttpDelete("active")]
-    public ActionResult ClearActive()
+    public async Task<ActionResult> ClearActive()
     {
+        var active = _summary.GetActiveSession();
+        if (active is null)
+        {
+            return NoContent();
+        }
+
+        var actor = await TeamAudit.ActorFromAsync(HttpContext);
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        var isAdmin = identity?.Role == AccountRules.RoleAdmin;
+        var isUploader = string.Equals(active.UploadedBy, actor, StringComparison.OrdinalIgnoreCase);
+
+        if (!isAdmin && !isUploader)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Title = "Không có quyền gỡ file",
+                Detail = $"Chỉ {active.UploadedBy} (người tải lên) hoặc Quản trị viên mới có quyền gỡ file làm việc chung này.",
+                Status = StatusCodes.Status403Forbidden
+            });
+        }
+
         _summary.ClearActiveSession();
         _ = _hubContext.Clients.All.SendAsync("teamSessionCleared");
         return NoContent();
@@ -847,8 +915,23 @@ public sealed class SummaryToolController : ControllerBase
 
     /// <summary>Kết thúc phiên làm việc và xoá file upload tạm.</summary>
     [HttpDelete("{sessionId:guid}")]
-    public IActionResult Delete(Guid sessionId)
+    public async Task<IActionResult> Delete(Guid sessionId)
     {
+        var active = _summary.GetActiveSession();
+        if (active?.SessionId == sessionId)
+        {
+            var actor = await TeamAudit.ActorFromAsync(HttpContext);
+            var identity = await StpTeamIdentity.FromAsync(HttpContext);
+            var isAdmin = identity?.Role == AccountRules.RoleAdmin;
+            var isUploader = string.Equals(active.UploadedBy, actor, StringComparison.OrdinalIgnoreCase);
+
+            if (!isAdmin && !isUploader)
+            {
+                // Bảo vệ phiên làm việc chung: thành viên thường đóng xem thì không được xóa file live của phòng
+                return Ok(new { message = "Phiên làm việc chung được bảo vệ và tiếp tục live." });
+            }
+        }
+
         return _summary.DeleteSession(sessionId)
             ? NoContent()
             : NotFoundProblem("Phiên làm việc không tồn tại hoặc đã hết hạn.");

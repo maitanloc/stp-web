@@ -4525,6 +4525,35 @@ pre,
    Multiplayer Realtime Google Sheets Experience (Bổ sung trích yếu)
    ========================================================================== */
 
+.active-live-room-banner {
+  border: 1.5px solid rgba(16, 185, 129, 0.4);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(37, 99, 235, 0.08) 100%);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.1);
+  margin-bottom: 8px;
+}
+
+.live-pulse-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+[data-theme='dark'] .live-pulse-badge {
+  background: rgba(16, 185, 129, 0.25);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
 .team-session-banner {
   display: flex;
   align-items: center;

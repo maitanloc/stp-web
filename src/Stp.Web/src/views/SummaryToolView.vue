@@ -16,6 +16,7 @@ import {
   FileText,
   FolderClock,
   Info,
+  LogOut,
   Mic,
   Radio,
   RefreshCw,
@@ -272,6 +273,21 @@ const roomCollaborators = computed(() => {
   return teamOnline.value.filter((user) => user.actor !== me && (user.where || '').includes('trích yếu'))
 })
 
+const isCurrentSessionActiveTeam = computed(() => {
+  return !!(
+    session.value &&
+    activeTeamSession.value?.hasActiveSession &&
+    activeTeamSession.value.sessionId === session.value.sessionId
+  )
+})
+
+const isLiveOwnerOrAdmin = computed(() => {
+  const me = (myActorName.value || '').trim().toLowerCase()
+  const uploader = (activeTeamSession.value?.uploadedBy || '').trim().toLowerCase()
+  const role = teamIdentity.value?.role
+  return (uploader && me && uploader === me) || role === 'admin' || isAdmin.value
+})
+
 function triggerRowFlash(rowNumber: number): void {
   flashingRows.value.add(rowNumber)
   window.setTimeout(() => {
@@ -438,6 +454,12 @@ function pushHistoryEntry(action: string, detail: string): void {
 }
 
 function loadResumeCandidates(): void {
+  void request<SummaryActiveSessionResponse>('/api/summary/active')
+    .then((act) => {
+      activeTeamSession.value = act && act.hasActiveSession ? act : null
+    })
+    .catch(() => {})
+
   request<SummarySessionInfoResponse[]>('/api/summary/sessions')
     .then((list) => {
       resumeCandidates.value = list
@@ -549,6 +571,24 @@ async function openResumeCandidate(candidate: SummarySessionInfoResponse): Promi
       toast.success('Đã mở lại phiên', candidate.fileName)
     } else {
       toast.error('Không mở lại được phiên', 'Phiên đã hết hạn hoặc file đã bị xoá.')
+    }
+  } finally {
+    resuming.value = false
+  }
+}
+
+async function joinActiveTeamSession(): Promise<void> {
+  if (!activeTeamSession.value?.sessionId) return
+  resuming.value = true
+  try {
+    const ok = await restoreFromServer(activeTeamSession.value.sessionId)
+    if (ok) {
+      toast.success(
+        'Đã vào file làm việc chung',
+        `File "${activeTeamSession.value.fileName}" do ${activeTeamSession.value.uploadedBy} chia sẻ.`
+      )
+    } else {
+      toast.error('Không thể mở file làm việc chung', 'Phiên có thể đã kết thúc hoặc bị gỡ.')
     }
   } finally {
     resuming.value = false
@@ -1119,27 +1159,50 @@ function onCellInput(row: SummaryRowResponse, col: string, event: Event): void {
   sendSummaryCellTyping(session.value.sessionId, row.rowNumber, col, val, myActorName.value ?? 'Quản trị')
 }
 
+async function removeActiveTeamSession(): Promise<void> {
+  if (!activeTeamSession.value?.hasActiveSession) return
+
+  const ok = await confirmDialog({
+    title: 'Gỡ file làm việc chung?',
+    message: `Bạn có chắc muốn GỠ file "${activeTeamSession.value.fileName}" khỏi chế độ làm việc chung của phòng không? Sau khi gỡ, các thành viên khác sẽ không còn thấy file này để làm việc chung nữa.`,
+    variant: 'danger',
+    confirmText: 'Gỡ file làm chung',
+    cancelText: 'Giữ lại',
+  })
+  if (!ok) return
+
+  settingActiveSession.value = true
+  try {
+    await request('/api/summary/active', { method: 'DELETE' })
+    activeTeamSession.value = null
+    toast.info('Đã gỡ file làm việc chung', 'File không còn chia sẻ trực tiếp cho cả phòng.')
+  } catch (caught) {
+    toast.error('Không thể gỡ file', errorMessage(caught))
+  } finally {
+    settingActiveSession.value = false
+  }
+}
+
 async function toggleActiveTeamSession(): Promise<void> {
   const active = session.value
   if (!active) return
 
+  if (activeTeamSession.value?.sessionId === active.sessionId) {
+    await removeActiveTeamSession()
+    return
+  }
+
   settingActiveSession.value = true
   try {
-    if (activeTeamSession.value?.sessionId === active.sessionId) {
-      await request('/api/summary/active', { method: 'DELETE' })
-      activeTeamSession.value = null
-      toast.info('Đã dừng chia sẻ file chung', 'File này không còn tự động nạp cho cả phòng.')
-    } else {
-      const res = await request<SummaryActiveSessionResponse>('/api/summary/active', {
-        method: 'POST',
-        body: { sessionId: active.sessionId },
-      })
-      activeTeamSession.value = res
-      toast.success(
-        'Đã đặt làm file làm việc chung',
-        'Tất cả thành viên trong phòng khi mở app sẽ tự động vào chung file này.',
-      )
-    }
+    const res = await request<SummaryActiveSessionResponse>('/api/summary/active', {
+      method: 'POST',
+      body: { sessionId: active.sessionId },
+    })
+    activeTeamSession.value = res
+    toast.success(
+      'Đã đặt làm file làm việc chung',
+      'Tất cả thành viên trong phòng khi mở app sẽ tự động vào chung file này.',
+    )
   } catch (caught) {
     toast.error('Thao tác thất bại', errorMessage(caught))
   } finally {
@@ -1879,6 +1942,26 @@ async function inspect(): Promise<void> {
     return
   }
 
+  let makeActiveParam: boolean | undefined = undefined
+
+  if (activeTeamSession.value?.hasActiveSession) {
+    if (isLiveOwnerOrAdmin.value) {
+      const replace = await confirmDialog({
+        title: 'Thay thế file đang LIVE?',
+        message: `Phòng đang có file live "${activeTeamSession.value.fileName}". Bạn có muốn ĐẶT FILE MỚI NÀY LÀM FILE CHUNG THAY THẾ cho cả phòng không? (Nếu chọn "Chỉ mở riêng trên máy tôi", file chung đang live vẫn được giữ nguyên)`,
+        variant: 'warning',
+        confirmText: 'Thay thế làm file chung',
+        cancelText: 'Chỉ mở riêng trên máy tôi',
+      })
+      makeActiveParam = replace
+    } else {
+      makeActiveParam = false
+      toast.info('Đang mở file riêng', 'File làm việc chung của phòng vẫn được giữ nguyên cho mọi người.')
+    }
+  } else {
+    makeActiveParam = true
+  }
+
   inspecting.value = true
   inspectError.value = null
   const previousSession = session.value?.sessionId
@@ -1886,12 +1969,16 @@ async function inspect(): Promise<void> {
   try {
     const form = new FormData()
     form.append('file', file)
-    const data = await request<SummaryInspectResponse>('/api/summary/inspect', {
+    const inspectUrl = makeActiveParam !== undefined
+      ? `/api/summary/inspect?makeActive=${makeActiveParam}`
+      : '/api/summary/inspect'
+
+    const data = await request<SummaryInspectResponse>(inspectUrl, {
       method: 'POST',
       form,
     })
 
-    if (previousSession) {
+    if (previousSession && previousSession !== activeTeamSession.value?.sessionId) {
       void deleteSessionSilent(previousSession)
     }
 
@@ -2160,23 +2247,27 @@ async function closeSession(): Promise<void> {
   const active = session.value
   if (!active) return
 
+  const isLive = isCurrentSessionActiveTeam.value
+
   if (changedCount.value > 0) {
     const ok = await confirmDialog({
-      title: 'Đóng workbook?',
-      message: 'Có thay đổi chưa xuất. Bạn có chắc muốn bỏ các thay đổi này và đóng workbook?',
+      title: isLive ? 'Rời phiên làm việc?' : 'Đóng workbook?',
+      message: isLive
+        ? 'Bạn có một số thay đổi chưa xuất. Bạn có chắc muốn rời màn hình xem? File vẫn tiếp tục LIVE trên hệ thống cho cả phòng và bạn có thể quay lại bất cứ lúc nào.'
+        : 'Có thay đổi chưa xuất. Bạn có chắc muốn bỏ các thay đổi này và đóng workbook?',
       variant: 'warning',
-      confirmText: 'Bỏ thay đổi và đóng',
+      confirmText: isLive ? 'Rời phiên' : 'Bỏ thay đổi và đóng',
     })
     if (!ok) return
   }
 
   leaveSummarySession(active.sessionId, myActorName.value ?? 'Quản trị')
-  if (isAdmin.value && activeTeamSession.value?.sessionId === active.sessionId) {
-    void request('/api/summary/active', { method: 'DELETE' }).catch(() => {})
-    activeTeamSession.value = null
+
+  // TUYỆT ĐỐI KHÔNG XÓA PHIÊN LIVE TRÊN SERVER KHI ĐÓNG XEM!
+  if (!isLive) {
+    void deleteSessionSilent(active.sessionId)
   }
 
-  void deleteSessionSilent(active.sessionId)
   clearDraft()
   forgetSession()
   historyEntries.value = []
@@ -2194,6 +2285,13 @@ async function closeSession(): Promise<void> {
   draftSavedAt.value = null
   draftStatus.value = 'idle'
   resetScopeFilters()
+
+  if (isLive) {
+    toast.info(
+      'Đã rời màn hình xem',
+      'File vẫn đang LIVE cho cả phòng. Bạn có thể bấm "Vào làm việc chung ngay" để quay lại.',
+    )
+  }
 }
 
 function goToPage(next: number): void {
@@ -3239,6 +3337,62 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <!-- Banner nổi bật nếu đang có file LIVE của cả phòng -->
+        <div
+          v-if="activeTeamSession && activeTeamSession.hasActiveSession"
+          class="card active-live-room-banner"
+        >
+          <div class="card-body stack" style="gap: 12px">
+            <div class="row-between wrap" style="gap: 12px">
+              <div class="row" style="gap: 12px; min-width: 0; align-items: center">
+                <span class="live-dot-pulse" />
+                <div style="min-width: 0">
+                  <div class="row wrap" style="gap: 8px; align-items: center">
+                    <span class="live-pulse-badge">Đang phát trực tiếp</span>
+                    <strong class="truncate" style="font-size: 15px; max-width: 450px">
+                      {{ activeTeamSession.fileName }}
+                    </strong>
+                  </div>
+                  <div class="hint" style="margin-top: 4px; font-size: 13px">
+                    Do <strong>{{ activeTeamSession.uploadedBy }}</strong> chia sẻ ·
+                    {{ formatNumber(activeTeamSession.rowCount) }} hồ sơ
+                    <template v-if="activeTeamSession.uploadedAt">
+                      · Tải lên {{ new Date(activeTeamSession.uploadedAt).toLocaleTimeString('vi-VN') }}
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <div class="row wrap" style="gap: 8px; align-items: center">
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  :disabled="resuming"
+                  @click="joinActiveTeamSession"
+                >
+                  <Users :size="16" />
+                  {{ resuming ? 'Đang vào...' : 'Vào làm việc chung ngay' }}
+                </button>
+                <button
+                  v-if="isLiveOwnerOrAdmin"
+                  class="btn btn-secondary btn-sm"
+                  style="color: var(--danger)"
+                  type="button"
+                  :disabled="settingActiveSession"
+                  title="Gỡ file này khỏi chế độ làm việc chung của phòng"
+                  @click="removeActiveTeamSession"
+                >
+                  <X :size="14" />
+                  Gỡ file chung
+                </button>
+              </div>
+            </div>
+            <div class="team-session-desc" style="font-size: 12px">
+              File làm việc chung trực tiếp của cả phòng vẫn luôn hoạt động trên máy chủ. Bạn và mọi người có thể vào làm tiếp bất cứ lúc nào!
+            </div>
+          </div>
+        </div>
+
         <FilePicker
           v-model="files"
           :multiple="false"
@@ -3374,14 +3528,16 @@ onBeforeUnmount(() => {
             Nạp thẳng vào Kho hồ sơ
           </button>
           <button
-            v-if="isAdmin"
-            class="btn btn-ghost btn-sm"
+            v-if="isLiveOwnerOrAdmin"
+            class="btn btn-secondary btn-sm"
+            style="color: var(--danger)"
             type="button"
             :disabled="settingActiveSession"
-            title="Dừng phiên làm việc chung cho cả phòng"
-            @click="toggleActiveTeamSession"
+            title="Gỡ file này khỏi chế độ làm việc chung của cả phòng"
+            @click="removeActiveTeamSession"
           >
-            Dừng chia sẻ file này
+            <X :size="14" />
+            Gỡ file làm việc chung
           </button>
         </div>
       </div>
@@ -3443,7 +3599,23 @@ onBeforeUnmount(() => {
               Các file gần đây
               <span v-if="resumeCandidates.length > 0" class="badge badge-neutral" style="margin-left: 4px">{{ resumeCandidates.length }}</span>
             </button>
-            <button class="btn btn-secondary btn-sm" type="button" @click="closeSession">
+            <button
+              v-if="isCurrentSessionActiveTeam"
+              class="btn btn-secondary btn-sm"
+              type="button"
+              title="Rời màn hình xem mà không tắt phiên chung của phòng"
+              @click="closeSession"
+            >
+              <LogOut :size="14" />
+              Rời phiên (File vẫn Live)
+            </button>
+            <button
+              v-else
+              class="btn btn-secondary btn-sm"
+              type="button"
+              title="Đóng workbook và dọn phiên"
+              @click="closeSession"
+            >
               <X :size="14" />
               Đóng workbook
             </button>

@@ -57,3 +57,4 @@ public sealed class ChatAndProfileTests
         Assert.Equal(2, stats.SummarySessionsCount);
     }
 }
+
