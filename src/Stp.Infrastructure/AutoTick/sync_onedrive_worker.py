@@ -51,6 +51,55 @@ def is_match(header_title, item):
         return True
     return False
 
+def launch_browser(p):
+    """
+    Khởi động trình duyệt tương thích Chromium với cơ chế fallback đa tầng:
+    1. Tự động phát hiện thư mục ms-playwright trong hồ sơ người dùng nếu đang chạy dưới dạng Windows Service (LocalSystem).
+    2. Thử Chromium mặc định với các tham số tương thích Service (--no-sandbox, --disable-gpu...).
+    3. Thử Microsoft Edge có sẵn trên mọi máy Windows (channel='msedge').
+    4. Thử Google Chrome hệ thống (channel='chrome').
+    """
+    if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ or "systemprofile" in os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""):
+        users_dir = r"C:\Users"
+        if os.path.isdir(users_dir):
+            try:
+                for u in os.listdir(users_dir):
+                    candidate = os.path.join(users_dir, u, "AppData", "Local", "ms-playwright")
+                    if os.path.isdir(candidate) and any(os.scandir(candidate)):
+                        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = candidate
+                        print(f"INFO:Found Playwright browsers at: {candidate}", flush=True)
+                        break
+            except Exception:
+                pass
+
+    chrome_args = [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+
+    attempts = [
+        ("chromium", lambda: p.chromium.launch(headless=True, args=chrome_args)),
+        ("msedge", lambda: p.chromium.launch(headless=True, channel="msedge", args=chrome_args)),
+        ("chrome", lambda: p.chromium.launch(headless=True, channel="chrome", args=chrome_args)),
+    ]
+
+    last_err = None
+    for name, launcher in attempts:
+        try:
+            print(f"INFO:Attempting to launch browser via {name}...", flush=True)
+            b = launcher()
+            print(f"INFO:Successfully launched browser ({name}, version {b.version})", flush=True)
+            return b
+        except Exception as e:
+            print(f"WARN:Failed to launch via {name}: {e}", flush=True)
+            last_err = e
+
+    raise RuntimeError(f"Could not launch any browser (Chromium, Edge, or Chrome). Last error: {last_err}")
+
 def run_sync(input_file, output_file):
     with open(input_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -65,7 +114,7 @@ def run_sync(input_file, output_file):
     synced_rows = 0
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = launch_browser(p)
         context = browser.new_context(
             viewport={"width": 1400, "height": 900},
             permissions=["clipboard-read", "clipboard-write"]

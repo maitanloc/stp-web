@@ -602,7 +602,7 @@ public sealed partial class AutoTickService : IAutoTickService
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = @"C:\ProgramData\ms-playwright";
+            ConfigurePlaywrightEnvironment(psi);
 
             using var proc = Process.Start(psi);
             if (proc is null)
@@ -896,7 +896,7 @@ public sealed partial class AutoTickService : IAutoTickService
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = @"C:\ProgramData\ms-playwright";
+        ConfigurePlaywrightEnvironment(psi);
 
         using var proc = Process.Start(psi);
         if (proc is null)
@@ -1200,6 +1200,54 @@ public sealed partial class AutoTickService : IAutoTickService
         Stp.Infrastructure.Storage.FileStorage.SanitizeExcelPackage(tempFile);
 
         return new OneDriveDownloadResult(tempFile, fileName, userCanWrite, etag);
+    }
+
+    private static void ConfigurePlaywrightEnvironment(ProcessStartInfo psi)
+    {
+        var existing = Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH");
+        if (!string.IsNullOrEmpty(existing) && Directory.Exists(existing))
+        {
+            psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = existing;
+            return;
+        }
+
+        var candidates = new List<string>
+        {
+            @"C:\ProgramData\ms-playwright",
+            @"C:\WINDOWS\system32\config\systemprofile\AppData\Local\ms-playwright"
+        };
+
+        try
+        {
+            const string usersDir = @"C:\Users";
+            if (Directory.Exists(usersDir))
+            {
+                foreach (var userDir in Directory.GetDirectories(usersDir))
+                {
+                    candidates.Add(Path.Combine(userDir, "AppData", "Local", "ms-playwright"));
+                }
+            }
+        }
+        catch
+        {
+            // Ignore access or IO exceptions when inspecting user directories
+        }
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                if (Directory.Exists(candidate) && Directory.EnumerateFileSystemEntries(candidate).Any())
+                {
+                    psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = candidate;
+                    break;
+                }
+            }
+            catch
+            {
+                // Ignore per-directory access errors
+            }
+        }
     }
 
     private sealed record OneDriveDownloadResult(string FilePath, string FileName, bool UserCanWrite, string? ETag);
