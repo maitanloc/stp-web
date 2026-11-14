@@ -3,6 +3,7 @@ import { Wrench } from '@lucide/vue'
 import { useLunchBreak } from '../composables/useLunchBreak'
 import LunchBreakPopup from './LunchBreakPopup.vue'
 import LunchBreakScreen from './LunchBreakScreen.vue'
+import PreLunchWarningBanner from './PreLunchWarningBanner.vue'
 
 const {
   isLunchBreakActive,
@@ -14,7 +15,10 @@ const {
 
 <template>
   <div class="lunch-gate-container">
-    <!-- Popup nhắc nhở nghỉ trưa ban đầu -->
+    <!-- Cảnh báo đóng server trước 10 phút (11:50) cho toàn cơ quan -->
+    <PreLunchWarningBanner />
+
+    <!-- Popup nhắc nhở nghỉ trưa ban đầu lúc 12:00 -->
     <LunchBreakPopup v-if="showWarningPopup" />
 
     <!-- Màn hình nghỉ trưa toàn diện nếu đang trong khung giờ hoặc preview -->

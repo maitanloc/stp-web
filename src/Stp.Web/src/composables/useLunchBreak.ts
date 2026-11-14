@@ -4,6 +4,7 @@ import { getDevToken } from '../api/client'
 
 const BYPASS_KEY = 'stp.lunch.bypass'
 const PREVIEW_KEY = 'stp.lunch.preview'
+const PREVIEW_WARN_KEY = 'stp.lunch.preview_warn'
 
 export interface LunchDish {
   id: string
@@ -27,21 +28,29 @@ export type FanSpeed = 0 | 1 | 2
 const now = ref(new Date())
 const isDevBypass = ref(sessionStorage.getItem(BYPASS_KEY) === 'true')
 const isPreview = ref(sessionStorage.getItem(PREVIEW_KEY) === 'true')
+const isPreviewWarning = ref(sessionStorage.getItem(PREVIEW_WARN_KEY) === 'true')
 const showWarningPopup = ref(false)
+const show10MinModal = ref(false)
+const is10MinBannerDismissed = ref(false)
 
 // Tương tác văn phòng
 const pokeCount = ref(0)
 const pokeQuote = ref('')
-const activeSpeaker = ref<'A' | 'B' | 'C' | 'D' | 'cat' | 'lizard' | ''>('')
+const activeSpeaker = ref<'A' | 'B' | 'C' | 'D' | 'cat' | 'dog' | 'lizard' | ''>('')
 const isLightsDimmed = ref(false)
 const fanSpeed = ref<FanSpeed>(1)
+
+// Thú cưng văn phòng
 const catPetCount = ref(0)
 const catPurrText = ref('')
+const dogPetCount = ref(0)
+const dogBarkText = ref('')
+
 const mosquitoCaught = ref(0)
 const isMosquitoAlive = ref(true)
 const lastSlapPos = ref<{ x: number; y: number } | null>(null)
 
-// Hiệu ứng tương tác tiểu cảnh mới
+// Hiệu ứng tương tác tiểu cảnh
 const waterBubbleClicks = ref(0)
 const plantRustleCount = ref(0)
 const stampCount = ref(0)
@@ -79,11 +88,11 @@ const dreamsList: LunchDream[] = [
     badge: 'Đại tiệc trưa',
   },
   {
-    id: 'cat-boss',
-    title: 'Làm Trợ lý cho Boss Mèo',
-    subtitle: 'Cả ngày chỉ việc vuốt ve boss và ăn pate miễn phí!',
-    icon: '🐱',
-    badge: 'Cuộc sống lý tưởng',
+    id: 'corgi-friend',
+    title: 'Đại tiệc nướng cùng Cún & Mèo',
+    subtitle: 'Cún Corgi và Boss Mèo cùng chia sẻ đĩa xúc xích khổng lồ!',
+    icon: '🐶',
+    badge: 'Hạnh phúc giản đơn',
   },
   {
     id: 'no-bug',
@@ -140,7 +149,7 @@ const POKE_QUOTES_B = [
   'Để yên cho em ngủ nốt giấc mộng trưa, 13h em dậy cày bù 200%! 💤',
   'Cơm sườn 35k no căng bụng rồi, mắt tự động sụp xuống... 🍱',
   '12h trưa là đặc quyền bất khả xâm phạm! 13h00 rồi tính tiếp! 🛌',
-  'Ai đá mất chiếc dép tổ ong của em ra tận góc nhà rồi... 🩴',
+  'Ai đá mất chiếc dép tổ ong của em ra tận góc sofa rồi... 🩴',
 ]
 
 const POKE_QUOTES_C = [
@@ -161,7 +170,14 @@ const CAT_PURRS = [
   'Meo~ Boss đang ngủ trên CPU cho ấm, cấm gõ phím! 🐾',
   'Grừ grừ... Xoa cằm thích ghê, thưởng cho 1 tim! ❤️',
   'Meo meo! Trưa nay nhớ phần boss nửa miếng sườn nhé! 🍱',
-  'Boss ngủ cạnh quạt mát quá, đừng đánh thức boss! 💤',
+  'Boss ngủ cạnh cún Corgi ấm quá, đừng chọt boss! 💤',
+]
+
+const DOG_BARKS = [
+  'Gâu gâu! Cún Corgi đang ngủ trưa, xin đừng dẫm vào đuôi! 🐾',
+  'Khò... khò... Cún đang mơ thấy khúc xương bò thơm phức! 🍖',
+  'Vẫy đuôi~ Chiều làm việc chăm chỉ mua xúc xích cho cún nha sếp! ❤️',
+  'Gâu! Cún canh giấc ngủ cho cả phòng, ai chọt nhân viên là cún sủa! 🐶',
 ]
 
 const LIZARD_QUOTES = [
@@ -187,11 +203,48 @@ function getAudioContext(): AudioContext | null {
 export function useLunchBreak() {
   function updateTime() {
     now.value = new Date()
+    const hours = now.value.getHours()
+    const minutes = now.value.getMinutes()
+
+    // 1. Cảnh báo trước 10 phút (11:50 - 11:59)
+    if (hours === 11 && minutes >= 50 && !sessionStorage.getItem('stp.lunch.10min_shown')) {
+      show10MinModal.value = true
+      sessionStorage.setItem('stp.lunch.10min_shown', 'true')
+      playWarningChime()
+    }
+
+    // 2. Vào đúng 12h: Bật Popup nghỉ trưa
     if (isLunchHour.value && !isDevBypass.value && !sessionStorage.getItem('stp.lunch.popup_shown')) {
       showWarningPopup.value = true
       sessionStorage.setItem('stp.lunch.popup_shown', 'true')
     }
   }
+
+  // Khung giờ cảnh báo trước 10 phút: 11:50:00 -> 11:59:59
+  const isPreLunchWarning = computed(() => {
+    const hours = now.value.getHours()
+    const minutes = now.value.getMinutes()
+    return ((hours === 11 && minutes >= 50) || isPreviewWarning.value) && !isLunchHour.value && !isDevBypass.value
+  })
+
+  // Đếm ngược đến 12:00:00 (thời điểm đóng server)
+  const timeToLunch = computed(() => {
+    if (!isPreLunchWarning.value) {
+      return { totalSeconds: 0, minutes: 0, seconds: 0, formatted: '00:00' }
+    }
+    const currentMinutes = now.value.getMinutes()
+    const currentSeconds = now.value.getSeconds()
+    const remainingSeconds = Math.max(0, (59 - currentMinutes) * 60 + (60 - currentSeconds))
+
+    const mm = Math.floor(remainingSeconds / 60)
+    const ss = remainingSeconds % 60
+    return {
+      totalSeconds: remainingSeconds,
+      minutes: mm,
+      seconds: ss,
+      formatted: `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`,
+    }
+  })
 
   const isLunchHour = computed(() => {
     return now.value.getHours() === 12
@@ -234,8 +287,26 @@ export function useLunchBreak() {
     }
   }
 
+  function togglePreviewWarning() {
+    isPreviewWarning.value = !isPreviewWarning.value
+    sessionStorage.setItem(PREVIEW_WARN_KEY, isPreviewWarning.value ? 'true' : 'false')
+    if (isPreviewWarning.value) {
+      show10MinModal.value = true
+      is10MinBannerDismissed.value = false
+      playWarningChime()
+    }
+  }
+
   function dismissWarningPopup() {
     showWarningPopup.value = false
+  }
+
+  function dismiss10MinModal() {
+    show10MinModal.value = false
+  }
+
+  function dismiss10MinBanner() {
+    is10MinBannerDismissed.value = true
   }
 
   function enableDevBypass(pin?: string): boolean {
@@ -247,6 +318,7 @@ export function useLunchBreak() {
       isDevBypass.value = true
       sessionStorage.setItem(BYPASS_KEY, 'true')
       showWarningPopup.value = false
+      show10MinModal.value = false
       stopAllAmbient()
       return true
     }
@@ -258,7 +330,7 @@ export function useLunchBreak() {
     sessionStorage.removeItem(BYPASS_KEY)
   }
 
-  // Tương tác theo từng nhân vật cụ thể
+  // Tương tác theo từng nhân vật
   function pokeWorker(character: 'A' | 'B' | 'C' | 'D') {
     pokeCount.value++
     activeSpeaker.value = character
@@ -283,20 +355,17 @@ export function useLunchBreak() {
     }
   }
 
-  // Chọt chung (khi click nút toolbar)
   function pokeStickman() {
     const chars: Array<'A' | 'B' | 'C' | 'D'> = ['A', 'B', 'C', 'D']
     const pick = chars[Math.floor(Math.random() * chars.length)]!
     pokeWorker(pick)
   }
 
-  // Tắt / Bật đèn
   function toggleLights() {
     isLightsDimmed.value = !isLightsDimmed.value
     playSwitchSound()
   }
 
-  // Bật / Đổi số quạt
   function cycleFan() {
     fanSpeed.value = ((fanSpeed.value + 1) % 3) as FanSpeed
     playClickSound()
@@ -318,7 +387,15 @@ export function useLunchBreak() {
     playCatMeow()
   }
 
-  // Thạch sùng trên tường
+  // Chú Cún Corgi văn phòng
+  function petDog() {
+    dogPetCount.value++
+    activeSpeaker.value = 'dog'
+    const idx = Math.floor(Math.random() * DOG_BARKS.length)
+    dogBarkText.value = DOG_BARKS[idx] ?? DOG_BARKS[0]!
+    playDogBark()
+  }
+
   function clickLizard() {
     activeSpeaker.value = 'lizard'
     const idx = Math.floor(Math.random() * LIZARD_QUOTES.length)
@@ -326,25 +403,21 @@ export function useLunchBreak() {
     playLizardChirp()
   }
 
-  // Bình nước 20L
   function clickWaterDispenser() {
     waterBubbleClicks.value++
     playBubbleSound()
   }
 
-  // Cây kim tiền
   function rustlePlant() {
     plantRustleCount.value++
     playLeafRustle()
   }
 
-  // Đổi giấc mơ
   function nextDream() {
     currentDreamIndex.value++
     playChimeUp()
   }
 
-  // Đập muỗi
   function slapMosquito(x?: number, y?: number) {
     if (!isMosquitoAlive.value) return
     isMosquitoAlive.value = false
@@ -360,7 +433,6 @@ export function useLunchBreak() {
     }, 3500)
   }
 
-  // Quay món ăn trưa
   function rollDish() {
     if (isRollingDish.value) return
     isRollingDish.value = true
@@ -523,7 +595,51 @@ export function useLunchBreak() {
     fanGain = null
   }
 
-  // Các hiệu ứng âm thanh sống động
+  // Tiếng sủa chú cún Corgi (Web Audio API)
+  function playDogBark() {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    try {
+      [0, 0.11].forEach((delay) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        const t = ctx.currentTime + delay
+        osc.type = 'triangle'
+        osc.frequency.setValueAtTime(420, t)
+        osc.frequency.exponentialRampToValueAtTime(750, t + 0.04)
+        osc.frequency.exponentialRampToValueAtTime(460, t + 0.09)
+        gain.gain.setValueAtTime(0.09, t)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(t)
+        osc.stop(t + 0.09)
+      })
+    } catch {}
+  }
+
+  // Chuông cảnh báo trước 10 phút (11:50)
+  function playWarningChime() {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    try {
+      const chords = [659.25, 830.61, 987.77] // E5 -> G#5 -> B5
+      chords.forEach((freq, idx) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        const t = ctx.currentTime + idx * 0.15
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(freq, t)
+        gain.gain.setValueAtTime(0.08, t)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(t)
+        osc.stop(t + 0.5)
+      })
+    } catch {}
+  }
+
   function playSnoozeChime() {
     const ctx = getAudioContext()
     if (!ctx) return
@@ -624,7 +740,6 @@ export function useLunchBreak() {
     try {
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
-      osc.type = 'triangle'
       const t = ctx.currentTime
       osc.frequency.setValueAtTime(140, t)
       osc.frequency.exponentialRampToValueAtTime(45, t + 0.1)
@@ -643,7 +758,6 @@ export function useLunchBreak() {
     try {
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
-      osc.type = 'sine'
       const t = ctx.currentTime
       osc.frequency.setValueAtTime(350, t)
       osc.frequency.exponentialRampToValueAtTime(800, t + 0.08)
@@ -765,10 +879,15 @@ export function useLunchBreak() {
   return {
     now,
     isLunchHour,
+    isPreLunchWarning,
+    timeToLunch,
+    show10MinModal,
+    is10MinBannerDismissed,
     isLunchBreakActive,
     timeRemaining,
     isDevBypass,
     isPreview,
+    isPreviewWarning,
     showWarningPopup,
     pokeCount,
     pokeQuote,
@@ -777,6 +896,8 @@ export function useLunchBreak() {
     fanSpeed,
     catPetCount,
     catPurrText,
+    dogPetCount,
+    dogBarkText,
     mosquitoCaught,
     isMosquitoAlive,
     lastSlapPos,
@@ -792,7 +913,10 @@ export function useLunchBreak() {
     isRollingDish,
     activeAmbientSound,
     togglePreview,
+    togglePreviewWarning,
     dismissWarningPopup,
+    dismiss10MinModal,
+    dismiss10MinBanner,
     enableDevBypass,
     disableDevBypass,
     pokeStickman,
@@ -800,6 +924,7 @@ export function useLunchBreak() {
     toggleLights,
     cycleFan,
     petCat,
+    petDog,
     clickLizard,
     clickWaterDispenser,
     rustlePlant,

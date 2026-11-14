@@ -274,9 +274,13 @@ app.MapGet("/api/system/time", () =>
 {
     var vnTime = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
     var isLunchHour = vnTime.Hour == 12;
+    var isWarningPeriod = vnTime.Hour == 11 && vnTime.Minute >= 50;
     var secondsRemaining = isLunchHour
         ? Math.Max(0, (59 - vnTime.Minute) * 60 + (60 - vnTime.Second))
         : 0;
+    var secondsToLunch = isWarningPeriod
+        ? Math.Max(0, (59 - vnTime.Minute) * 60 + (60 - vnTime.Second))
+        : (isLunchHour ? 0 : -1);
 
     return Results.Ok(new
     {
@@ -285,6 +289,8 @@ app.MapGet("/api/system/time", () =>
         minute = vnTime.Minute,
         second = vnTime.Second,
         isLunchBreak = isLunchHour,
+        isPreLunchWarning = isWarningPeriod,
+        secondsToLunch,
         secondsRemaining,
         resumeAt = "13:00:00"
     });

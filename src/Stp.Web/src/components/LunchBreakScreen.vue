@@ -29,6 +29,8 @@ const {
   fanSpeed,
   catPetCount,
   catPurrText,
+  dogPetCount,
+  dogBarkText,
   mosquitoCaught,
   isMosquitoAlive,
   lastSlapPos,
@@ -39,12 +41,14 @@ const {
   isRollingDish,
   activeAmbientSound,
   togglePreview,
+  togglePreviewWarning,
   enableDevBypass,
   pokeStickman,
   pokeWorker,
   toggleLights,
   cycleFan,
   petCat,
+  petDog,
   clickLizard,
   clickWaterDispenser,
   rustlePlant,
@@ -145,6 +149,17 @@ function submitDevPin() {
           <span>Quạt: {{ fanSpeedLabel }}</span>
         </button>
 
+        <!-- Nút Test cảnh báo 10 phút -->
+        <button
+          class="btn btn-secondary btn-sm header-tool-btn"
+          type="button"
+          title="Xem thử cảnh báo đóng server trước 10 phút (11:50)"
+          @click="togglePreviewWarning"
+        >
+          <Clock :size="14" />
+          <span>Test Báo 10p</span>
+        </button>
+
         <!-- Nút âm thanh ASMR nhanh -->
         <button
           class="btn btn-secondary btn-sm header-tool-btn"
@@ -229,6 +244,8 @@ function submitDevPin() {
           :fan-speed="fanSpeed"
           :cat-pet-count="catPetCount"
           :cat-purr-text="catPurrText"
+          :dog-pet-count="dogPetCount"
+          :dog-bark-text="dogBarkText"
           :current-dream="currentDream"
           :is-mosquito-alive="isMosquitoAlive"
           :last-slap-pos="lastSlapPos"
@@ -237,6 +254,7 @@ function submitDevPin() {
           @poke="handleGeneralPoke"
           @poke-worker="handleWorkerPoke"
           @pet-cat="petCat"
+          @pet-dog="petDog"
           @click-lizard="clickLizard"
           @click-water-dispenser="clickWaterDispenser"
           @rustle-plant="rustlePlant"
@@ -354,6 +372,10 @@ function submitDevPin() {
 
           <!-- Các tiểu cảnh phụ -->
           <div class="scenery-quick-bar">
+            <button class="scenery-btn" type="button" @click="petDog">
+              <span class="scenery-icon">🐶</span>
+              <span>Xoa cún Corgi ({{ dogPetCount }}🐾)</span>
+            </button>
             <button class="scenery-btn" type="button" @click="petCat">
               <span class="scenery-icon">🐱</span>
               <span>Xoa cằm Boss Mèo ({{ catPetCount }}❤️)</span>
