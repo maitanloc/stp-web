@@ -844,6 +844,7 @@ export interface AutoTickSyncSummaryRowResult {
   rowIndex: number
   numberLabel: string
   summaryFilled: boolean
+  formulaHFilled?: boolean
   tickedColumns: string[]
   error?: string | null
 }

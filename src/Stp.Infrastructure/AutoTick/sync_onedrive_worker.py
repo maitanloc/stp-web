@@ -120,12 +120,14 @@ def run_sync(input_file, output_file):
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(f"H{r_idx}")
                     page.keyboard.press("Enter")
-                    time.sleep(0.22)
+                    time.sleep(0.20)
 
                     excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(formula_h)})")
                     time.sleep(0.08)
+                    page.keyboard.press("Delete")
+                    time.sleep(0.08)
                     page.keyboard.press("Control+v")
-                    time.sleep(0.22)
+                    time.sleep(0.20)
                     page.keyboard.press("Enter")
                     time.sleep(0.12)
                     print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
@@ -165,6 +167,7 @@ def run_sync(input_file, output_file):
                 "rowIndex": r_idx,
                 "numberLabel": num_label,
                 "summaryFilled": bool(summary_text and not err),
+                "formulaHFilled": bool(formula_h and not err),
                 "tickedColumns": ticked_cols,
                 "untickedColumns": unticked_cols,
                 "error": err

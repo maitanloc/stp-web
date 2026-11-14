@@ -146,6 +146,7 @@ public sealed class AutoTickSyncSummaryRowResult
     public int RowIndex { get; set; }
     public string NumberLabel { get; set; } = string.Empty;
     public bool SummaryFilled { get; set; }
+    public bool FormulaHFilled { get; set; }
     public IReadOnlyList<string> TickedColumns { get; set; } = Array.Empty<string>();
     public string? Error { get; set; }
 }

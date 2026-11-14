@@ -2392,6 +2392,8 @@ function updateSyncSheetName(): void {
     selectedSyncSheet.value = session.value.sheetName
   } else if (scopeRequest.value.year) {
     selectedSyncSheet.value = String(scopeRequest.value.year)
+  } else if (session.value?.sheetName) {
+    selectedSyncSheet.value = session.value.sheetName
   } else {
     selectedSyncSheet.value = '1997'
   }

@@ -513,11 +513,11 @@ public sealed partial class AutoTickService : IAutoTickService
                 string? formulaH = null;
                 if (request.EnsureFormulaH)
                 {
-                    var cellH = sheet.Cell(rowIndex, 8);
-                    if (!cellH.HasFormula)
-                    {
-                        formulaH = $"=\"Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài của \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"của \"), \" và\")&\" và  \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"và \"), \".\")&\" (\" & TEXTJOIN(\", \", TRUE, REPT(I$4:{lastColLetter}$4, I{rowIndex}:{lastColLetter}{rowIndex}=TRUE)) & \")\"";
-                    }
+                    formulaH = $"=\"Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài của \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"của \"), \" và\")&\" và  \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"và \"), \".\")&\" (\" & TEXTJOIN(\", \", TRUE, REPT(I$4:{lastColLetter}$4, I{rowIndex}:{lastColLetter}{rowIndex}=TRUE)) & \")\"";
+                }
+                else if (!string.IsNullOrWhiteSpace(rItem.FormulaH))
+                {
+                    formulaH = rItem.FormulaH;
                 }
 
                 processedRows.Add(new
