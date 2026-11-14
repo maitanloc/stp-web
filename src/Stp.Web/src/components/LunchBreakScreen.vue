@@ -2,11 +2,18 @@
 import { computed, ref } from 'vue'
 import {
   Clock,
+  Dices,
   Hand,
+  Heart,
+  Moon,
   Music,
   Power,
   Sparkles,
+  Sun,
+  Utensils,
   Volume2,
+  VolumeX,
+  Wind,
   Wrench,
 } from '@lucide/vue'
 import { useLunchBreak } from '../composables/useLunchBreak'
@@ -18,17 +25,37 @@ const {
   isPreview,
   pokeCount,
   pokeQuote,
-  isLullabyPlaying,
+  isLightsDimmed,
+  fanSpeed,
+  catPetCount,
+  catPurrText,
+  mosquitoCaught,
+  isMosquitoAlive,
+  lastSlapPos,
+  currentDream,
+  selectedDish,
+  isRollingDish,
+  activeAmbientSound,
   togglePreview,
   enableDevBypass,
   pokeStickman,
-  toggleLullaby,
+  toggleLights,
+  cycleFan,
+  petCat,
+  nextDream,
+  slapMosquito,
+  rollDish,
+  setAmbientSound,
+  stopAllAmbient,
 } = useLunchBreak()
 
 const isDevPinModalOpen = ref(false)
 const devPinInput = ref('')
 const pinError = ref(false)
 const isPokedEffect = ref(false)
+
+type ActiveTab = 'food' | 'asmr' | 'mini-game'
+const activeTab = ref<ActiveTab>('food')
 
 const formattedCurrentTime = computed(() => {
   return now.value.toLocaleTimeString('vi-VN', {
@@ -38,12 +65,22 @@ const formattedCurrentTime = computed(() => {
   })
 })
 
+const fanSpeedLabel = computed(() => {
+  if (fanSpeed.value === 0) return 'Tắt quạt'
+  if (fanSpeed.value === 2) return 'Gió mạnh'
+  return 'Gió êm'
+})
+
 function handlePoke() {
   isPokedEffect.value = true
   pokeStickman()
   window.setTimeout(() => {
     isPokedEffect.value = false
   }, 600)
+}
+
+function handleSlap(pos: { x: number; y: number }) {
+  slapMosquito(pos.x, pos.y)
 }
 
 function submitDevPin() {
@@ -61,8 +98,8 @@ function submitDevPin() {
 </script>
 
 <template>
-  <div class="lunch-screen-root">
-    <!-- Header thanh trạng thái nhẹ nhàng -->
+  <div class="lunch-screen-root" :class="{ 'is-night-mode': isLightsDimmed }">
+    <!-- Header thanh trạng thái -->
     <header class="lunch-screen-header">
       <div class="lunch-logo-brand">
         <span class="brand-pill">STP ARCHIVE</span>
@@ -70,19 +107,43 @@ function submitDevPin() {
       </div>
 
       <div class="lunch-header-right">
-        <!-- Nút nhạc ru ngủ -->
+        <!-- Nút tắt / bật đèn văn phòng -->
         <button
-          class="btn btn-secondary btn-sm lullaby-btn"
-          :class="{ 'is-active': isLullabyPlaying }"
+          class="btn btn-secondary btn-sm header-tool-btn"
+          :class="{ 'is-active': isLightsDimmed }"
           type="button"
-          :title="isLullabyPlaying ? 'Tắt nhạc ru ngủ' : 'Bật nhạc ru ngủ thư giãn'"
-          @click="toggleLullaby"
+          :title="isLightsDimmed ? 'Bật đèn văn phòng' : 'Tắt đèn cho dễ ngủ'"
+          @click="toggleLights"
         >
-          <component :is="isLullabyPlaying ? Volume2 : Music" :size="14" />
-          <span>{{ isLullabyPlaying ? 'Đang phát nhạc ru…' : 'Bật nhạc ru ngủ' }}</span>
+          <component :is="isLightsDimmed ? Sun : Moon" :size="14" />
+          <span>{{ isLightsDimmed ? 'Bật đèn' : 'Tắt đèn' }}</span>
         </button>
 
-        <!-- Nếu đang Preview thì có nút tắt Preview -->
+        <!-- Nút quạt máy -->
+        <button
+          class="btn btn-secondary btn-sm header-tool-btn"
+          :class="{ 'is-active': fanSpeed > 0 }"
+          type="button"
+          :title="`Quạt máy: ${fanSpeedLabel} (Bấm để đổi số)`"
+          @click="cycleFan"
+        >
+          <Wind :size="14" />
+          <span>Quạt: {{ fanSpeedLabel }}</span>
+        </button>
+
+        <!-- Nút âm thanh ASMR nhanh -->
+        <button
+          class="btn btn-secondary btn-sm header-tool-btn"
+          :class="{ 'is-active': activeAmbientSound !== 'none' }"
+          type="button"
+          title="Bật/tắt âm thanh ru ngủ"
+          @click="activeAmbientSound === 'none' ? setAmbientSound('rain') : stopAllAmbient()"
+        >
+          <component :is="activeAmbientSound !== 'none' ? Volume2 : VolumeX" :size="14" />
+          <span>{{ activeAmbientSound !== 'none' ? 'ASMR đang bật' : 'Bật ASMR' }}</span>
+        </button>
+
+        <!-- Nếu đang Preview thì có nút thoát -->
         <button
           v-if="isPreview"
           class="btn btn-warning btn-sm"
@@ -90,10 +151,10 @@ function submitDevPin() {
           @click="togglePreview"
         >
           <Power :size="14" />
-          Thoát Preview
+          <span>Thoát Preview</span>
         </button>
 
-        <!-- Nút Kỹ thuật viên / Dev -->
+        <!-- Nút Dành cho Dev -->
         <button
           class="btn btn-ghost btn-sm dev-door-btn"
           type="button"
@@ -101,7 +162,7 @@ function submitDevPin() {
           @click="isDevPinModalOpen = true"
         >
           <Wrench :size="14" />
-          <span>Dành cho Dev</span>
+          <span>Dev Bypass</span>
         </button>
       </div>
     </header>
@@ -110,7 +171,7 @@ function submitDevPin() {
     <main class="lunch-screen-main">
       <div class="lunch-title-group">
         <div class="lunch-clock-badge">
-          <Clock :size="16" />
+          <Clock :size="15" />
           <span>BÂY GIỜ LÀ: <strong>{{ formattedCurrentTime }}</strong></span>
         </div>
 
@@ -118,12 +179,12 @@ function submitDevPin() {
           😴 VĂN PHÒNG ĐANG NGHỈ TRƯA (12:00 – 13:00)
         </h1>
         <p class="lunch-sub-heading">
-          Máy chủ tạm thời "ngủ đông" để đội ngũ kỹ thuật nâng cấp máy chủ & cấy thêm tính năng mới.
+          Máy chủ tạm "ngủ đông" để đội ngũ kỹ thuật vá lỗi & cấy tính năng mới.
           Mời bà con nghỉ ngơi, đúng <strong>13:00:00</strong> hệ thống sẽ tự động mở lại!
         </p>
       </div>
 
-      <!-- Khung đồng hồ đếm ngược phong cách điện tử -->
+      <!-- Đồng hồ đếm ngược điện tử -->
       <div class="lunch-timer-card">
         <span class="timer-label">HỆ THỐNG SẼ TỰ ĐỘNG MỞ LẠI SAU:</span>
         <div class="timer-digits-row">
@@ -144,30 +205,245 @@ function submitDevPin() {
         </div>
       </div>
 
-      <!-- Hoạt hoạ Stickman nhân viên ngủ trưa -->
+      <!-- Hoạt cảnh Stickman sống động với Boss Mèo, Quạt máy, Muỗi & Giấc mơ -->
       <div class="stickman-wrapper">
         <StickmanSleepers
           :poked="isPokedEffect"
           :quote="pokeQuote"
+          :is-lights-dimmed="isLightsDimmed"
+          :fan-speed="fanSpeed"
+          :cat-pet-count="catPetCount"
+          :cat-purr-text="catPurrText"
+          :current-dream="currentDream"
+          :is-mosquito-alive="isMosquitoAlive"
+          :last-slap-pos="lastSlapPos"
           @poke="handlePoke"
+          @pet-cat="petCat"
+          @cycle-fan="cycleFan"
+          @toggle-lights="toggleLights"
+          @next-dream="nextDream"
+          @slap-mosquito="handleSlap"
         />
       </div>
 
-      <!-- Các nút tương tác vui nhộn -->
-      <div class="lunch-interactive-bar">
-        <button class="btn btn-secondary btn-md poke-btn" type="button" @click="handlePoke">
-          <Hand :size="16" />
-          <span>Chọt nhân viên tỉnh dậy ({{ pokeCount }})</span>
-        </button>
+      <!-- ==================== KHU VỰC TIỆN ÍCH TRƯA NAY ==================== -->
+      <section class="lunch-feature-deck">
+        <!-- Thanh Tab chuyển đổi -->
+        <div class="feature-tabs-nav">
+          <button
+            class="tab-btn"
+            :class="{ 'is-active': activeTab === 'food' }"
+            type="button"
+            @click="activeTab = 'food'"
+          >
+            <Utensils :size="16" />
+            <span>🍱 Trưa Nay Ăn Gì?</span>
+          </button>
 
-        <div class="lunch-funny-tip">
-          <Sparkles :size="15" class="text-amber-400" />
-          <span>Tip: Chợp mắt 20 phút buổi trưa giúp tăng 34% sự tập trung buổi chiều!</span>
+          <button
+            class="tab-btn"
+            :class="{ 'is-active': activeTab === 'asmr' }"
+            type="button"
+            @click="activeTab = 'asmr'"
+          >
+            <Music :size="16" />
+            <span>🎧 Góc ASMR Ru Ngủ</span>
+            <span v-if="activeAmbientSound !== 'none'" class="active-dot"></span>
+          </button>
+
+          <button
+            class="tab-btn"
+            :class="{ 'is-active': activeTab === 'mini-game' }"
+            type="button"
+            @click="activeTab = 'mini-game'"
+          >
+            <Sparkles :size="16" />
+            <span>🎮 Canh Giấc Ngủ</span>
+            <span v-if="mosquitoCaught > 0 || catPetCount > 0" class="badge-count">
+              {{ mosquitoCaught + catPetCount }}
+            </span>
+          </button>
         </div>
-      </div>
+
+        <!-- TAB 1: CỖ MÁY ẨM THỰC "HÔM NAY ĂN GÌ?" -->
+        <div v-if="activeTab === 'food'" class="tab-panel food-panel">
+          <div class="food-intro">
+            <div>
+              <h3 class="panel-title">Cỗ máy ẩm thực công sở STP 🍜</h3>
+              <p class="panel-desc">
+                12h trưa không biết ăn gì? Bấm nút để vũ trụ quyết định món ăn trưa nay của bạn!
+              </p>
+            </div>
+            <button
+              class="btn btn-primary btn-md roll-dish-btn"
+              :disabled="isRollingDish"
+              type="button"
+              @click="rollDish"
+            >
+              <Dices :size="18" :class="{ 'is-spinning': isRollingDish }" />
+              <span>{{ isRollingDish ? 'Đang chọn món ngon…' : '🎲 Bấm Chọn Món Trưa!' }}</span>
+            </button>
+          </div>
+
+          <!-- Thẻ món ăn được chọn -->
+          <div v-if="selectedDish" class="dish-card-result">
+            <div class="dish-emoji">{{ selectedDish.emoji }}</div>
+            <div class="dish-info">
+              <div class="dish-header-line">
+                <h4 class="dish-name">{{ selectedDish.name }}</h4>
+                <span class="dish-tag">{{ selectedDish.tag }}</span>
+              </div>
+              <p class="dish-desc">{{ selectedDish.desc }}</p>
+            </div>
+          </div>
+          <div v-else class="dish-empty-state">
+            <span class="empty-icon">🍱</span>
+            <span>Bấm nút <strong>"Bấm Chọn Món Trưa!"</strong> để quay thực đơn hôm nay nào!</span>
+          </div>
+        </div>
+
+        <!-- TAB 2: GÓC ASMR RU NGỦ TỔNG HỢP -->
+        <div v-if="activeTab === 'asmr'" class="tab-panel asmr-panel">
+          <div class="asmr-header">
+            <h3 class="panel-title">Âm Thanh Trắng (ASMR) Thư Giãn Buổi Trưa 🌿</h3>
+            <p class="panel-desc">
+              Tổng hợp trực tiếp qua Web Audio API, không cần tải nhạc ngoài. Giúp bạn chợp mắt 20 phút cực êm!
+            </p>
+          </div>
+
+          <div class="asmr-presets-grid">
+            <!-- Hộp nhạc ru ngủ -->
+            <button
+              class="asmr-card"
+              :class="{ 'is-playing': activeAmbientSound === 'lullaby' }"
+              type="button"
+              @click="setAmbientSound('lullaby')"
+            >
+              <div class="asmr-card-icon">🎵</div>
+              <div class="asmr-card-info">
+                <strong>Hộp Nhạc Ru Ngủ</strong>
+                <span>Giai điệu chuông gió êm đềm</span>
+              </div>
+              <span class="asmr-status-badge">{{ activeAmbientSound === 'lullaby' ? 'Đang phát' : 'Phát' }}</span>
+            </button>
+
+            <!-- Tiếng mưa rơi -->
+            <button
+              class="asmr-card"
+              :class="{ 'is-playing': activeAmbientSound === 'rain' }"
+              type="button"
+              @click="setAmbientSound('rain')"
+            >
+              <div class="asmr-card-icon">🌧️</div>
+              <div class="asmr-card-info">
+                <strong>Mưa Rơi Rả Rích</strong>
+                <span>Tiếng mưa rơi mát rượi ngoài hiên</span>
+              </div>
+              <span class="asmr-status-badge">{{ activeAmbientSound === 'rain' ? 'Đang phát' : 'Phát' }}</span>
+            </button>
+
+            <!-- Tiếng quạt mát -->
+            <button
+              class="asmr-card"
+              :class="{ 'is-playing': activeAmbientSound === 'fan' }"
+              type="button"
+              @click="setAmbientSound('fan')"
+            >
+              <div class="asmr-card-icon">💨</div>
+              <div class="asmr-card-info">
+                <strong>Quạt Gió Vù Vù</strong>
+                <span>Tiếng gió quạt ngủ say sưa</span>
+              </div>
+              <span class="asmr-status-badge">{{ activeAmbientSound === 'fan' ? 'Đang phát' : 'Phát' }}</span>
+            </button>
+
+            <!-- Tắt âm -->
+            <button
+              class="asmr-card"
+              :class="{ 'is-playing': activeAmbientSound === 'none' }"
+              type="button"
+              @click="stopAllAmbient"
+            >
+              <div class="asmr-card-icon">🔇</div>
+              <div class="asmr-card-info">
+                <strong>Yên Lặng Tuyệt Đối</strong>
+                <span>Không phát âm thanh nào</span>
+              </div>
+              <span class="asmr-status-badge">{{ activeAmbientSound === 'none' ? 'Đang chọn' : 'Tắt' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 3: GÓC CANH GIẤC NGỦ & TƯƠNG TÁC HÀI HƯỚC -->
+        <div v-if="activeTab === 'mini-game'" class="tab-panel game-panel">
+          <div class="game-header">
+            <h3 class="panel-title">Nhiệm Vụ Bảo Vệ Giấc Ngủ Văn Phòng 🛡️</h3>
+            <p class="panel-desc">
+              Tương tác trực tiếp trên bức vẽ stickman hoặc bấm các nút bên dưới để giải trí!
+            </p>
+          </div>
+
+          <div class="game-actions-grid">
+            <!-- Chọt nhân viên -->
+            <div class="game-stat-card">
+              <div class="stat-top">
+                <span class="stat-icon">👆</span>
+                <span class="stat-num">{{ pokeCount }}</span>
+              </div>
+              <div class="stat-name">Lần chọt nhân viên</div>
+              <button class="btn btn-secondary btn-sm stat-btn" type="button" @click="handlePoke">
+                <Hand :size="14" />
+                <span>Chọt một cái!</span>
+              </button>
+            </div>
+
+            <!-- Vuốt Boss Mèo -->
+            <div class="game-stat-card">
+              <div class="stat-top">
+                <span class="stat-icon">🐱</span>
+                <span class="stat-num">{{ catPetCount }}</span>
+              </div>
+              <div class="stat-name">Lần cưng nựng Boss Mèo</div>
+              <button class="btn btn-secondary btn-sm stat-btn" type="button" @click="petCat">
+                <Heart :size="14" class="text-rose-400" />
+                <span>Xoa cằm Boss</span>
+              </button>
+            </div>
+
+            <!-- Diệt muỗi -->
+            <div class="game-stat-card">
+              <div class="stat-top">
+                <span class="stat-icon">🦟</span>
+                <span class="stat-num">{{ mosquitoCaught }}</span>
+              </div>
+              <div class="stat-name">Muỗi đã bị diệt</div>
+              <button
+                class="btn btn-secondary btn-sm stat-btn"
+                :disabled="!isMosquitoAlive"
+                type="button"
+                @click="slapMosquito(520, 220)"
+              >
+                <span>💥 {{ isMosquitoAlive ? 'Đập muỗi ngay!' : 'Muỗi đang hồi sinh…' }}</span>
+              </button>
+            </div>
+
+            <!-- Đổi giấc mơ -->
+            <div class="game-stat-card">
+              <div class="stat-top">
+                <span class="stat-icon">{{ currentDream.icon }}</span>
+                <span class="stat-badge">{{ currentDream.badge }}</span>
+              </div>
+              <div class="stat-name">{{ currentDream.title }}</div>
+              <button class="btn btn-secondary btn-sm stat-btn" type="button" @click="nextDream">
+                <span>💭 Đổi giấc mơ khác</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
-    <!-- Modal nhập PIN dành cho Dev -->
+    <!-- Modal PIN dành cho Dev -->
     <Teleport to="body">
       <div
         v-if="isDevPinModalOpen"
@@ -233,6 +509,11 @@ function submitDevPin() {
   flex-direction: column;
   position: relative;
   z-index: 9999;
+  transition: background 0.5s ease;
+}
+
+.lunch-screen-root.is-night-mode {
+  background: radial-gradient(circle at 50% 15%, #0f172a 0%, #050814 60%, #020308 100%);
 }
 
 .lunch-screen-header {
@@ -242,8 +523,11 @@ function submitDevPin() {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(10px);
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
 .lunch-logo-brand {
@@ -271,19 +555,25 @@ function submitDevPin() {
 .lunch-header-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
-.lullaby-btn {
+.header-tool-btn {
   background: rgba(255, 255, 255, 0.08);
-  color: #e2e8f0;
+  color: #cbd5e1;
   border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: all 0.2s ease;
 }
 
-.lullaby-btn.is-active {
-  background: rgba(99, 102, 241, 0.3);
-  border-color: #6366f1;
-  color: #a5b4fc;
+.header-tool-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.header-tool-btn.is-active {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+  color: #7dd3fc;
 }
 
 .dev-door-btn {
@@ -300,10 +590,10 @@ function submitDevPin() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 32px 20px 48px;
+  justify-content: flex-start;
+  padding: 28px 20px 48px;
   gap: 24px;
-  max-width: 980px;
+  max-width: 960px;
   margin: 0 auto;
   width: 100%;
 }
@@ -313,7 +603,7 @@ function submitDevPin() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .lunch-clock-badge {
@@ -339,7 +629,7 @@ function submitDevPin() {
 }
 
 .lunch-sub-heading {
-  font-size: 14px;
+  font-size: 13.5px;
   color: #94a3b8;
   margin: 0;
   max-width: 620px;
@@ -350,11 +640,11 @@ function submitDevPin() {
   background: rgba(30, 41, 59, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 18px;
-  padding: 14px 28px;
+  padding: 12px 26px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
 }
 
@@ -414,42 +704,332 @@ function submitDevPin() {
   width: 100%;
 }
 
-.lunch-interactive-bar {
+/* Feature Deck */
+.lunch-feature-deck {
+  width: 100%;
+  max-width: 900px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.4);
+}
+
+.feature-tabs-nav {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 14px 18px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 13.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.tab-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tab-btn.is-active {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.tab-btn.is-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #38bdf8;
+}
+
+.active-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.3); }
+}
+
+.badge-count {
+  font-size: 10px;
+  background: #ef4444;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-weight: bold;
+}
+
+.tab-panel {
+  padding: 20px 24px;
+}
+
+.panel-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.panel-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: #94a3b8;
+}
+
+/* Food Panel */
+.food-intro {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  max-width: 860px;
   gap: 16px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
-.poke-btn {
-  background: linear-gradient(135deg, #4f46e5, #4338ca);
-  border: 1px solid #6366f1;
+.roll-dish-btn {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border: none;
+  font-weight: 700;
   color: #ffffff;
-  font-weight: 600;
-  padding: 8px 18px;
-  border-radius: 12px;
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
-  transition: all 0.15s ease;
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.35);
 }
 
-.poke-btn:hover {
+.roll-dish-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.6);
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
 }
 
-.lunch-funny-tip {
+.is-spinning {
+  animation: spin 0.4s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.dish-card-result {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 14px;
+  padding: 16px 20px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.25);
+  animation: dish-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dish-pop {
+  0% { transform: scale(0.95); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.dish-emoji {
+  font-size: 42px;
+  line-height: 1;
+}
+
+.dish-info {
+  flex: 1;
+}
+
+.dish-header-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.dish-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fef08a;
+}
+
+.dish-tag {
+  font-size: 10px;
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.dish-desc {
+  margin: 0;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.dish-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.empty-icon {
+  font-size: 20px;
+}
+
+/* ASMR Panel */
+.asmr-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.asmr-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+  color: inherit;
+}
+
+.asmr-card:hover {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-2px);
+}
+
+.asmr-card.is-playing {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: #6366f1;
+}
+
+.asmr-card-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.asmr-card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.asmr-card-info strong {
+  font-size: 13px;
+  color: #ffffff;
+}
+
+.asmr-card-info span {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.asmr-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.asmr-card.is-playing .asmr-status-badge {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+/* Game Panel */
+.game-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.game-stat-card {
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.stat-top {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  color: #94a3b8;
-  background: rgba(15, 23, 42, 0.6);
-  padding: 8px 16px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.stat-icon {
+  font-size: 24px;
+}
+
+.stat-num {
+  font-size: 20px;
+  font-weight: 900;
+  color: #38bdf8;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.stat-badge {
+  font-size: 9px;
+  background: #3b82f6;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: bold;
+}
+
+.stat-name {
+  font-size: 12px;
+  color: #cbd5e1;
+  font-weight: 600;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stat-btn {
+  width: 100%;
+  font-size: 12px;
 }
 
 /* Modal Dev */

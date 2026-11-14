@@ -5,3 +5,4 @@ import LunchBreakScreen from '../components/LunchBreakScreen.vue'
 <template>
   <LunchBreakScreen />
 </template>
+
