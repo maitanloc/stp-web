@@ -513,7 +513,36 @@ public sealed partial class AutoTickService : IAutoTickService
                 string? formulaH = null;
                 if (request.EnsureFormulaH)
                 {
-                    formulaH = $"=\"Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài của \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"của \"), \" và\")&\" và  \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"và \"), \".\")&\" (\" & TEXTJOIN(\", \", TRUE, REPT(I$4:{lastColLetter}$4, I{rowIndex}:{lastColLetter}{rowIndex}=TRUE)) & \")\"";
+                    bool needsFormulaUpdate = false;
+                    var cellH = sheet.Cell(rowIndex, 8);
+                    if (!cellH.HasFormula)
+                    {
+                        needsFormulaUpdate = true;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            string existingFormula = cellH.FormulaA1;
+                            // Kiểm tra thông minh: chỉ điền lại nếu công thức bị thiếu cột cuối hoặc tham chiếu sai dòng
+                            if (string.IsNullOrWhiteSpace(existingFormula) ||
+                                !existingFormula.Contains(lastColLetter, StringComparison.OrdinalIgnoreCase) ||
+                                !existingFormula.Contains($"D{rowIndex}", StringComparison.OrdinalIgnoreCase))
+                            {
+                                needsFormulaUpdate = true;
+                            }
+                        }
+                        catch
+                        {
+                            // Nếu ClosedXML không đọc được formula phức tạp, an toàn là làm mới lại
+                            needsFormulaUpdate = true;
+                        }
+                    }
+
+                    if (needsFormulaUpdate)
+                    {
+                        formulaH = $"=\"Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài của \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"của \"), \" và\")&\" và  \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"và \"), \".\")&\" (\" & TEXTJOIN(\", \", TRUE, REPT(I$4:{lastColLetter}$4, I{rowIndex}:{lastColLetter}{rowIndex}=TRUE)) & \")\"";
+                    }
                 }
                 else if (!string.IsNullOrWhiteSpace(rItem.FormulaH))
                 {
