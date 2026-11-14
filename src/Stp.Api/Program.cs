@@ -227,7 +227,8 @@ app.Use(async (context, next) =>
 
             if (isLunchHour && !devBypass)
             {
-                var userRole = context.User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value;
+                var teamIdentity = await StpTeamIdentity.FromAsync(context);
+                var userRole = teamIdentity?.Role ?? context.User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value;
                 if (!string.Equals(userRole, "admin", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
@@ -355,7 +356,7 @@ for (var attempt = 1; attempt <= 5; attempt++)
         startupMigrationError = null;
         break;
     }
-    catch (Exception migrateError) when (attempt < 5)
+    catch (Exception) when (attempt < 5)
     {
         app.Logger.LogWarning("Chờ SQL Server sẵn sàng... thử lại lần {Attempt}/5 sau 2s", attempt);
         await Task.Delay(2000);

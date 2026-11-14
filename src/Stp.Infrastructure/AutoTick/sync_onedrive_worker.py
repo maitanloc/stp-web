@@ -125,13 +125,27 @@ def run_sync(input_file, output_file):
         time.sleep(3)
 
         excel_frame = None
-        for f in page.frames:
-            if "xlviewerinternal.aspx" in f.url:
-                excel_frame = f
+        start_wait = time.time()
+        while time.time() - start_wait < 25:
+            for f in page.frames:
+                if "xlviewer" in f.url.lower() or "wopiframe" in f.url.lower() or "doc.aspx" in f.url.lower():
+                    excel_frame = f
+                    break
+            if excel_frame:
                 break
+            for f in page.frames:
+                try:
+                    if f.locator("#FormulaBar-NameBox-input, #FormulaBarNameBox, input[aria-label*='Name Box']").count() > 0:
+                        excel_frame = f
+                        break
+                except Exception:
+                    pass
+            if excel_frame:
+                break
+            time.sleep(1)
 
         if not excel_frame:
-            raise RuntimeError("Excel frame not found on OneDrive page")
+            excel_frame = page.main_frame
 
         # Dismiss feedback dialog or prompts if present
         for selector in [
@@ -160,12 +174,30 @@ def run_sync(input_file, output_file):
             pass
 
         # Select sheet if tab button exists
-        tab = excel_frame.locator(f"[role='tab']:text-is('{sheet_name}'), button:text-is('{sheet_name}'), [role='tab']:has-text('{sheet_name}'), button:has-text('{sheet_name}')")
-        if tab.count() > 0:
-            tab.first.click()
-            time.sleep(1)
+        try:
+            tab = excel_frame.locator(f"[role='tab']:text-is('{sheet_name}'), button:text-is('{sheet_name}'), [role='tab']:has-text('{sheet_name}'), button:has-text('{sheet_name}')")
+            if tab.count() > 0:
+                tab.first.click()
+                time.sleep(1)
+        except Exception:
+            pass
 
         name_box = excel_frame.locator("#FormulaBar-NameBox-input, #FormulaBarNameBox, input[aria-label*='Name Box'], input[id*='NameBox']").first
+        try:
+            name_box.wait_for(state="attached", timeout=15000)
+        except Exception:
+            pass
+
+        def safe_paste(text):
+            try:
+                excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(text)})")
+            except Exception:
+                try:
+                    page.evaluate(f"() => navigator.clipboard.writeText({json.dumps(text)})")
+                except Exception:
+                    pass
+            time.sleep(0.08)
+            page.keyboard.press("Control+v")
 
         for r_item in rows:
             r_idx = r_item.get('rowIndex')
@@ -187,9 +219,7 @@ def run_sync(input_file, output_file):
                     page.keyboard.press("Enter")
                     time.sleep(0.22)
 
-                    excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(summary_text)})")
-                    time.sleep(0.08)
-                    page.keyboard.press("Control+v")
+                    safe_paste(summary_text)
                     time.sleep(0.22)
                     page.keyboard.press("Enter")
                     time.sleep(0.12)
@@ -202,9 +232,7 @@ def run_sync(input_file, output_file):
                     page.keyboard.press("Enter")
                     time.sleep(0.22)
 
-                    excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(formula_h)})")
-                    time.sleep(0.08)
-                    page.keyboard.press("Control+v")
+                    safe_paste(formula_h)
                     time.sleep(0.22)
                     page.keyboard.press("Enter")
                     time.sleep(0.12)

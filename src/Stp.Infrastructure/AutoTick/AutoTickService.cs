@@ -1317,18 +1317,54 @@ public sealed partial class AutoTickService : IAutoTickService
     private static string ResolvePythonExecutable()
     {
         string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string[] candidates =
+        var candidates = new List<string>
         {
             Path.Combine(userProfile, @".stp_python\Scripts\python.exe"),
             @"C:\Python314\python.exe",
             @"C:\Python313\python.exe",
             @"C:\Python312\python.exe",
             @"C:\Python311\python.exe",
+            @"C:\Python310\python.exe",
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python314\python.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python313\python.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python312\python.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python311\python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python310\python.exe"),
+            @"C:\Program Files\Python314\python.exe",
+            @"C:\Program Files\Python313\python.exe",
+            @"C:\Program Files\Python312\python.exe",
+            @"C:\Program Files\Python311\python.exe",
+            @"C:\Program Files\Python310\python.exe"
         };
+
+        try
+        {
+            const string usersDir = @"C:\Users";
+            if (Directory.Exists(usersDir))
+            {
+                foreach (var u in Directory.GetDirectories(usersDir))
+                {
+                    candidates.Add(Path.Combine(u, @".stp_python\Scripts\python.exe"));
+                    var programs = Path.Combine(u, @"AppData\Local\Programs\Python");
+                    if (Directory.Exists(programs))
+                    {
+                        foreach (var pyDir in Directory.GetDirectories(programs))
+                        {
+                            candidates.Add(Path.Combine(pyDir, "python.exe"));
+                        }
+                    }
+                    var windowsApps = Path.Combine(u, @"AppData\Local\Microsoft\WindowsApps");
+                    if (Directory.Exists(windowsApps))
+                    {
+                        foreach (var pyDir in Directory.GetDirectories(windowsApps, "PythonSoftwareFoundation.Python*"))
+                        {
+                            candidates.Add(Path.Combine(pyDir, "python.exe"));
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
 
         foreach (var c in candidates)
         {

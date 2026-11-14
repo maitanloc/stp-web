@@ -14,6 +14,7 @@
   <ItemGroup>
     <None Update="AutoTick\sync_onedrive_worker.py">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 
