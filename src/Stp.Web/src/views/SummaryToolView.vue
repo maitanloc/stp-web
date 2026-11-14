@@ -14,6 +14,7 @@ import {
   FilePenLine,
   FileSpreadsheet,
   FileText,
+  FolderClock,
   Info,
   Mic,
   Radio,
@@ -3052,6 +3053,87 @@ watch(lastSummaryBulkChanged, (evt) => {
   toast.info('Đồng đội cập nhật', `${evt.actor} vừa áp dụng thay đổi cho ${formatNumber(evt.count)} dòng.`)
 })
 
+// ===== Quản lý an toàn phiên làm việc nhóm & Switcher =====
+const incomingTeamSession = ref<SummaryActiveSessionResponse | null>(null)
+const incomingSessionModalOpen = ref(false)
+const showIncomingSessionBanner = ref(false)
+const sessionSwitcherOpen = ref(false)
+const pendingSwitchTarget = ref<SummarySessionInfoResponse | null>(null)
+const safetyConfirmModalOpen = ref(false)
+const switchingSession = ref(false)
+
+function openSessionSwitcher() {
+  loadResumeCandidates()
+  sessionSwitcherOpen.value = true
+}
+
+async function doSwitchToSession(targetSessionId: string, syncArchiveFirst = false) {
+  switchingSession.value = true
+  try {
+    if (session.value) {
+      // 1. Tự động lưu bản nháp của phiên hiện tại lên server
+      try {
+        saveDraft()
+        await syncServerDraft()
+      } catch {}
+
+      // 2. Nạp kho trước nếu người dùng yêu cầu
+      if (syncArchiveFirst) {
+        try {
+          await request(`/api/summary/${session.value.sessionId}/sync-to-archive`, { method: 'POST' })
+          toast.success('Đã nạp vào Kho hồ sơ', 'Dữ liệu phiên cũ đã được lưu trữ an toàn.')
+        } catch (e) {
+          toast.error('Nạp kho chưa hoàn tất', errorMessage(e))
+        }
+      }
+    }
+
+    sessionSwitcherOpen.value = false
+    incomingSessionModalOpen.value = false
+    showIncomingSessionBanner.value = false
+    safetyConfirmModalOpen.value = false
+    pendingSwitchTarget.value = null
+
+    const ok = await restoreFromServer(targetSessionId)
+    if (ok) {
+      toast.success('Đã chuyển phiên làm việc', 'Toàn bộ dữ liệu phiên mới đã sẵn sàng.')
+    }
+  } finally {
+    switchingSession.value = false
+  }
+}
+
+function requestSwitchToSession(target: SummarySessionInfoResponse) {
+  if (target.sessionId === session.value?.sessionId) return
+
+  // Nếu phiên hiện tại có thay đổi chưa nạp kho: hiện modal an toàn
+  if (session.value && changedCount.value > 0) {
+    pendingSwitchTarget.value = target
+    safetyConfirmModalOpen.value = true
+    return
+  }
+
+  void doSwitchToSession(target.sessionId, false)
+}
+
+function handleAcceptIncomingTeamSession() {
+  if (!incomingTeamSession.value?.sessionId) return
+  if (session.value && changedCount.value > 0) {
+    pendingSwitchTarget.value = {
+      sessionId: incomingTeamSession.value.sessionId,
+      fileName: incomingTeamSession.value.fileName ?? 'File làm chung',
+      fileSizeBytes: 0,
+      createdAt: incomingTeamSession.value.uploadedAt ?? new Date().toISOString(),
+      rowCount: incomingTeamSession.value.rowCount,
+    }
+    incomingSessionModalOpen.value = false
+    safetyConfirmModalOpen.value = true
+    return
+  }
+
+  void doSwitchToSession(incomingTeamSession.value.sessionId, false)
+}
+
 // Lắng nghe admin đổi/tải file làm việc chung
 watch(lastTeamSessionChanged, async (evt) => {
   if (!evt) return
@@ -3066,14 +3148,29 @@ watch(lastTeamSessionChanged, async (evt) => {
       editCount: evt.editCount,
     }
     if (session.value?.sessionId !== evt.sessionId) {
-      toast.info(
-        'File làm chung mới',
-        `${evt.uploadedBy} vừa mở file "${evt.fileName}" cho cả phòng cùng làm. Đang tự nạp...`,
-      )
-      await restoreFromServer(evt.sessionId)
+      if (!session.value) {
+        // Chưa mở file nào: tự động nạp luôn
+        toast.info(
+          'File làm chung mới',
+          `${evt.uploadedBy} vừa mở file "${evt.fileName}" cho cả phòng cùng làm. Đang tự nạp...`,
+        )
+        await restoreFromServer(evt.sessionId)
+      } else {
+        // Đang mở file khác: KHÔNG cưỡng bức chuyển, hiện banner & modal hỏi ý kiến
+        incomingTeamSession.value = activeTeamSession.value
+        incomingSessionModalOpen.value = true
+        showIncomingSessionBanner.value = true
+        toast.info(
+          'Có file chung mới',
+          `${evt.uploadedBy} vừa chia sẻ file "${evt.fileName}". Bạn có thể chọn chuyển hoặc tiếp tục làm file hiện tại.`,
+        )
+      }
     }
   } else {
     activeTeamSession.value = null
+    incomingTeamSession.value = null
+    incomingSessionModalOpen.value = false
+    showIncomingSessionBanner.value = false
   }
 })
 
@@ -3216,6 +3313,29 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else>
+      <!-- Banner thông báo khi có file làm chung mới từ đồng đội (không giật màn hình) -->
+      <div
+        v-if="showIncomingSessionBanner && incomingTeamSession && incomingTeamSession.sessionId !== session.sessionId"
+        class="alert alert-info row-between wrap"
+        style="margin-bottom: 12px; border-radius: 12px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); padding: 10px 14px"
+      >
+        <div class="row" style="gap: 10px; min-width: 0">
+          <Sparkles :size="18" class="text-amber-400" />
+          <div style="font-size: 13px">
+            <strong>{{ incomingTeamSession.uploadedBy }}</strong> vừa tải file làm chung mới:
+            <strong>{{ incomingTeamSession.fileName }}</strong> ({{ formatNumber(incomingTeamSession.rowCount) }} dòng).
+          </div>
+        </div>
+        <div class="row" style="gap: 8px">
+          <button class="btn btn-primary btn-sm" type="button" @click="handleAcceptIncomingTeamSession">
+            Chuyển sang file mới
+          </button>
+          <button class="btn btn-ghost btn-sm" type="button" title="Đóng thông báo này (bạn có thể chuyển sau qua Các file gần đây)" @click="showIncomingSessionBanner = false">
+            Để sau
+          </button>
+        </div>
+      </div>
+
       <!-- Banner phiên làm việc chung toàn phòng (Google Sheets multiplayer) -->
       <div v-if="activeTeamSession && activeTeamSession.sessionId === session.sessionId" class="team-session-banner">
         <div class="team-session-banner-main">
@@ -3313,6 +3433,16 @@ onBeforeUnmount(() => {
               <Clock :size="13" />
               Nháp {{ draftSavedAt.toLocaleTimeString('vi-VN') }}
             </span>
+            <button
+              class="btn btn-secondary btn-sm"
+              type="button"
+              title="Xem và chuyển đổi giữa các file đang xử lý gần đây"
+              @click="openSessionSwitcher"
+            >
+              <FolderClock :size="14" />
+              Các file gần đây
+              <span v-if="resumeCandidates.length > 0" class="badge badge-neutral" style="margin-left: 4px">{{ resumeCandidates.length }}</span>
+            </button>
             <button class="btn btn-secondary btn-sm" type="button" @click="closeSession">
               <X :size="14" />
               Đóng workbook
@@ -5169,6 +5299,173 @@ onBeforeUnmount(() => {
               <Zap :size="16" />
               {{ syncingOneDrive ? 'Đang thực thi robot...' : 'Bắt đầu Điền & Tick OneDrive' }}
             </button>
+          </div>
+        </div>
+      </div>
+      </Transition>
+
+      <!-- Modal 1: Nhắc nhở file làm chung mới từ đồng đội (Opt-in) -->
+      <Transition name="modal">
+      <div v-if="incomingSessionModalOpen && incomingTeamSession" class="modal-backdrop" @click.self="incomingSessionModalOpen = false">
+        <div class="modal" style="width: min(540px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title row" style="gap: 8px; align-items: center">
+                <Sparkles :size="16" class="text-amber-400" />
+                <span>File làm việc chung mới từ đồng đội</span>
+              </div>
+              <div class="card-subtitle">
+                Đồng đội vừa mở file cho cả phòng cùng làm việc trực tiếp.
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="incomingSessionModalOpen = false">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="modal-body stack" style="gap: 12px">
+            <div class="card" style="padding: 12px 14px; background: var(--surface)">
+              <div class="row-between">
+                <span class="muted">Người chia sẻ:</span>
+                <strong>{{ incomingTeamSession.uploadedBy }}</strong>
+              </div>
+              <div class="row-between" style="margin-top: 6px">
+                <span class="muted">File mới:</span>
+                <strong style="color: var(--brand)">{{ incomingTeamSession.fileName }}</strong>
+              </div>
+              <div class="row-between" style="margin-top: 6px">
+                <span class="muted">Tổng số hồ sơ:</span>
+                <span>{{ formatNumber(incomingTeamSession.rowCount) }} dòng</span>
+              </div>
+            </div>
+
+            <div v-if="session && changedCount > 0" class="alert alert-warning">
+              <TriangleExclamationPoint :size="18" />
+              <div class="grow">
+                <strong>Bạn đang có {{ formatNumber(changedCount) }} dòng đã sửa ở file hiện tại!</strong>
+                <div style="margin-top: 2px">
+                  Hệ thống sẽ tự động lưu bản nháp an toàn lên máy chủ trước khi chuyển. Bạn vẫn có thể quay lại làm tiếp bất cứ lúc nào qua mục "Các file gần đây".
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="alert alert-info">
+              <Info :size="16" />
+              <div class="grow">
+                Bạn có thể chọn chuyển sang làm chung ngay bây giờ, hoặc bấm "Để sau" để tiếp tục làm dở file hiện tại.
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" @click="incomingSessionModalOpen = false">
+              Tiếp tục làm file hiện tại
+            </button>
+            <button class="btn btn-primary" type="button" :disabled="switchingSession" @click="handleAcceptIncomingTeamSession">
+              {{ switchingSession ? 'Đang chuyển...' : 'Lưu nháp & Chuyển sang file mới' }}
+            </button>
+          </div>
+        </div>
+      </div>
+      </Transition>
+
+      <!-- Modal 2: Cảnh báo an toàn trước khi chuyển phiên (Safety Gate) -->
+      <Transition name="modal">
+      <div v-if="safetyConfirmModalOpen && pendingSwitchTarget" class="modal-backdrop" @click.self="safetyConfirmModalOpen = false">
+        <div class="modal" style="width: min(540px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title row" style="gap: 8px; align-items: center">
+                <TriangleExclamationPoint :size="18" class="text-amber-400" />
+                <span>Xác nhận chuyển phiên làm việc</span>
+              </div>
+              <div class="card-subtitle">
+                Bảo vệ tiến độ và dữ liệu trước khi chuyển sang file khác.
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="safetyConfirmModalOpen = false">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="modal-body stack" style="gap: 12px">
+            <div class="alert alert-warning">
+              <div class="grow">
+                Bạn đang có <strong>{{ formatNumber(changedCount) }}</strong> dòng đã chỉnh sửa ở file hiện tại <strong>{{ session?.fileName }}</strong> chưa được Nạp vào Kho hồ sơ (CSDL SQL Server).
+              </div>
+            </div>
+            <div class="hint">
+              Bạn muốn nạp toàn bộ các dòng này vào Kho hồ sơ trước khi chuyển, hay chỉ lưu bản nháp để lát nữa quay lại làm tiếp?
+            </div>
+          </div>
+          <div class="modal-footer wrap" style="gap: 8px">
+            <button class="btn btn-ghost" type="button" @click="safetyConfirmModalOpen = false">
+              Ở lại file này
+            </button>
+            <button class="btn btn-secondary" type="button" :disabled="switchingSession" @click="doSwitchToSession(pendingSwitchTarget.sessionId, false)">
+              Chỉ lưu nháp & Chuyển
+            </button>
+            <button class="btn btn-primary" type="button" :disabled="switchingSession" @click="doSwitchToSession(pendingSwitchTarget.sessionId, true)">
+              <Database :size="14" />
+              Nạp vào Kho & Chuyển
+            </button>
+          </div>
+        </div>
+      </div>
+      </Transition>
+
+      <!-- Modal 3: Danh sách các file làm việc gần đây (Session Switcher) -->
+      <Transition name="modal">
+      <div v-if="sessionSwitcherOpen" class="modal-backdrop" @click.self="sessionSwitcherOpen = false">
+        <div class="modal" style="width: min(640px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title row" style="gap: 8px; align-items: center">
+                <FolderClock :size="18" />
+                <span>Các file làm việc gần đây</span>
+              </div>
+              <div class="card-subtitle">
+                Danh sách các file đã nạp trên server. Bạn có thể tự do chuyển đổi qua lại giữa các file mà không sợ mất tiến độ.
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="Đóng" @click="sessionSwitcherOpen = false">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="modal-body stack" style="gap: 10px; max-height: 400px; overflow-y: auto">
+            <div v-if="resumeCandidates.length === 0" class="muted" style="padding: 24px; text-align: center">
+              Chưa có file nào khác được mở gần đây trên server.
+            </div>
+            <div
+              v-for="candidate in resumeCandidates"
+              :key="candidate.sessionId"
+              class="card row-between wrap"
+              style="padding: 10px 14px; gap: 10px"
+              :style="candidate.sessionId === session?.sessionId ? 'border-color: var(--brand); background: rgba(59, 130, 246, 0.05)' : ''"
+            >
+              <div style="min-width: 0; flex: 1">
+                <div class="row" style="gap: 8px; align-items: center">
+                  <strong class="truncate" style="max-width: 320px">{{ candidate.fileName }}</strong>
+                  <span v-if="candidate.sessionId === session?.sessionId" class="badge badge-brand">Đang mở</span>
+                  <span v-if="activeTeamSession && activeTeamSession.sessionId === candidate.sessionId" class="badge badge-success">File cả phòng</span>
+                </div>
+                <div class="hint" style="margin-top: 4px; font-size: 12px">
+                  {{ formatNumber(candidate.rowCount) }} hồ sơ · Nạp lúc {{ new Date(candidate.createdAt).toLocaleString('vi-VN') }}
+                </div>
+              </div>
+              <div>
+                <button
+                  v-if="candidate.sessionId !== session?.sessionId"
+                  class="btn btn-primary btn-sm"
+                  type="button"
+                  :disabled="switchingSession"
+                  @click="requestSwitchToSession(candidate)"
+                >
+                  Chuyển sang file này
+                </button>
+                <span v-else class="hint" style="font-size: 12px">Đang làm việc</span>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" @click="sessionSwitcherOpen = false">Đóng</button>
           </div>
         </div>
       </div>

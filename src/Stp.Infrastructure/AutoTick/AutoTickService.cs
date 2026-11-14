@@ -604,41 +604,60 @@ public sealed partial class AutoTickService : IAutoTickService
             };
             ConfigurePlaywrightEnvironment(psi);
 
-            using var proc = Process.Start(psi);
-            if (proc is null)
+            var sem = _oneDriveUrlSemaphores.GetOrAdd(NormalizeUrlKey(url), _ => new SemaphoreSlim(1, 1));
+            _logger.LogInformation("Chờ khóa hàng đợi đồng bộ OneDrive cho file {Url}...", url);
+            var acquired = await sem.WaitAsync(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
+            if (!acquired)
             {
                 return new AutoTickSyncSummaryResponse
                 {
                     Success = false,
-                    Message = "Không thể khởi động trình duyệt robot đồng bộ."
+                    Message = "Robot hiện đang bận đồng bộ file này cho một đồng đội khác trong phòng. Vui lòng thử lại sau giây lát."
                 };
             }
 
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-
-            if (File.Exists(outputPath))
+            try
             {
-                var json = await File.ReadAllTextAsync(outputPath, ct).ConfigureAwait(false);
-                var result = JsonSerializer.Deserialize<AutoTickSyncSummaryResponse>(json, new JsonSerializerOptions
+                using var proc = Process.Start(psi);
+                if (proc is null)
                 {
-                    PropertyNameCaseInsensitive = true
-                });
+                    return new AutoTickSyncSummaryResponse
+                    {
+                        Success = false,
+                        Message = "Không thể khởi động trình duyệt robot đồng bộ."
+                    };
+                }
 
-                try { File.Delete(inputPath); File.Delete(outputPath); } catch { }
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
 
-                return result ?? new AutoTickSyncSummaryResponse
+                if (File.Exists(outputPath))
+                {
+                    var json = await File.ReadAllTextAsync(outputPath, ct).ConfigureAwait(false);
+                    var result = JsonSerializer.Deserialize<AutoTickSyncSummaryResponse>(json, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+
+                    try { File.Delete(inputPath); File.Delete(outputPath); } catch { }
+
+                    return result ?? new AutoTickSyncSummaryResponse
+                    {
+                        Success = false,
+                        Message = "Không đọc được kết quả đồng bộ từ robot."
+                    };
+                }
+
+                var errText = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
+                return new AutoTickSyncSummaryResponse
                 {
                     Success = false,
-                    Message = "Không đọc được kết quả đồng bộ từ robot."
+                    Message = $"Robot gặp lỗi: {errText}"
                 };
             }
-
-            var errText = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
-            return new AutoTickSyncSummaryResponse
+            finally
             {
-                Success = false,
-                Message = $"Robot gặp lỗi: {errText}"
-            };
+                sem.Release();
+            }
         }
         catch (Exception ex)
         {
@@ -898,27 +917,50 @@ public sealed partial class AutoTickService : IAutoTickService
         };
         ConfigurePlaywrightEnvironment(psi);
 
-        using var proc = Process.Start(psi);
-        if (proc is null)
-        {
-            _logger.LogWarning("Không thể khởi động trình duyệt robot Playwright cho job {JobId}", jobId);
-            return;
-        }
-
+        var sem = _oneDriveUrlSemaphores.GetOrAdd(NormalizeUrlKey(oneDriveUrl), _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            int cloudDoneRows = 0;
-            while (await proc.StandardOutput.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+            using var proc = Process.Start(psi);
+            if (proc is null)
             {
-                if (line.StartsWith("PROGRESS_TICK:", StringComparison.Ordinal))
-                {
-                    var parts = line.Split(':');
-                    if (parts.Length >= 5)
-                    {
-                        var cellCoord = parts[3];
-                        var numLabel = parts[2];
-                        var matchRow = state.RecentRowResults.FirstOrDefault(r => r.NumberLabel == numLabel);
+                _logger.LogWarning("Không thể khởi động trình duyệt robot Playwright cho job {JobId}", jobId);
+                return;
+            }
 
+            try
+            {
+                int cloudDoneRows = 0;
+                while (await proc.StandardOutput.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+                {
+                    if (line.StartsWith("PROGRESS_TICK:", StringComparison.Ordinal))
+                    {
+                        var parts = line.Split(':');
+                        if (parts.Length >= 5)
+                        {
+                            var cellCoord = parts[3];
+                            var numLabel = parts[2];
+                            var matchRow = state.RecentRowResults.FirstOrDefault(r => r.NumberLabel == numLabel);
+
+                            int pct = Math.Min(98, 10 + (cloudDoneRows * 85 / Math.Max(1, cloudRows.Count)));
+                            await _eventPublisher.PublishProgressAsync(new AutoTickProgressEvent
+                            {
+                                JobId = jobId,
+                                SheetName = sheetName,
+                                ProcessedRows = cloudDoneRows,
+                                TotalRows = cloudRows.Count,
+                                NewlyTickedRowsCount = cloudDoneRows,
+                                NewlyTickedCellsCount = state.NewlyTickedCellsCount,
+                                SkippedRowsCount = state.SkippedRowsCount,
+                                Percent = pct,
+                                CurrentRow = matchRow,
+                                IsCompleted = false
+                            }).ConfigureAwait(false);
+                        }
+                    }
+                    else if (line.StartsWith("PROGRESS_ROW:", StringComparison.Ordinal))
+                    {
+                        cloudDoneRows++;
                         int pct = Math.Min(98, 10 + (cloudDoneRows * 85 / Math.Max(1, cloudRows.Count)));
                         await _eventPublisher.PublishProgressAsync(new AutoTickProgressEvent
                         {
@@ -930,40 +972,26 @@ public sealed partial class AutoTickService : IAutoTickService
                             NewlyTickedCellsCount = state.NewlyTickedCellsCount,
                             SkippedRowsCount = state.SkippedRowsCount,
                             Percent = pct,
-                            CurrentRow = matchRow,
                             IsCompleted = false
                         }).ConfigureAwait(false);
                     }
                 }
-                else if (line.StartsWith("PROGRESS_ROW:", StringComparison.Ordinal))
-                {
-                    cloudDoneRows++;
-                    int pct = Math.Min(98, 10 + (cloudDoneRows * 85 / Math.Max(1, cloudRows.Count)));
-                    await _eventPublisher.PublishProgressAsync(new AutoTickProgressEvent
-                    {
-                        JobId = jobId,
-                        SheetName = sheetName,
-                        ProcessedRows = cloudDoneRows,
-                        TotalRows = cloudRows.Count,
-                        NewlyTickedRowsCount = cloudDoneRows,
-                        NewlyTickedCellsCount = state.NewlyTickedCellsCount,
-                        SkippedRowsCount = state.SkippedRowsCount,
-                        Percent = pct,
-                        IsCompleted = false
-                    }).ConfigureAwait(false);
-                }
-            }
 
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Lỗi trong quá trình chạy Robot Playwright AutoTick");
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Lỗi trong quá trình chạy Robot Playwright AutoTick");
+            }
+            finally
+            {
+                try { if (File.Exists(inputPath)) File.Delete(inputPath); } catch { }
+                try { if (File.Exists(outputPath)) File.Delete(outputPath); } catch { }
+            }
         }
         finally
         {
-            try { if (File.Exists(inputPath)) File.Delete(inputPath); } catch { }
-            try { if (File.Exists(outputPath)) File.Delete(outputPath); } catch { }
+            sem.Release();
         }
     }
 
@@ -1200,6 +1228,21 @@ public sealed partial class AutoTickService : IAutoTickService
         Stp.Infrastructure.Storage.FileStorage.SanitizeExcelPackage(tempFile);
 
         return new OneDriveDownloadResult(tempFile, fileName, userCanWrite, etag);
+    }
+
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _oneDriveUrlSemaphores = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string NormalizeUrlKey(string url)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            return uri.GetLeftPart(UriPartial.Path).ToLowerInvariant();
+        }
+        catch
+        {
+            return url.Trim().ToLowerInvariant();
+        }
     }
 
     private static void ConfigurePlaywrightEnvironment(ProcessStartInfo psi)

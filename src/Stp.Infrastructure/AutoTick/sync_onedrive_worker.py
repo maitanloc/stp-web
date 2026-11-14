@@ -133,11 +133,29 @@ def run_sync(input_file, output_file):
         if not excel_frame:
             raise RuntimeError("Excel frame not found on OneDrive page")
 
-        # Dismiss feedback dialog if present
+        # Dismiss feedback dialog or prompts if present
+        for selector in [
+            "button[aria-label*='Close']",
+            "button[aria-label*='close']",
+            "button:has-text('✕')",
+            "button:has-text('Got it')",
+            "button:has-text('Dismiss')",
+            "button:has-text('Đóng')",
+            "button:has-text('Đã hiểu')",
+        ]:
+            try:
+                btn = page.locator(selector).first
+                if btn.count() > 0 and btn.is_visible():
+                    btn.click()
+            except Exception:
+                pass
+
+        # Chuyển sang Edit mode nếu Excel Online đang ở chế độ xem (View-only)
         try:
-            close_btn = page.locator("button[aria-label*='Close'], button[aria-label*='close'], button:has-text('✕')").first
-            if close_btn.count() > 0 and close_btn.is_visible():
-                close_btn.click()
+            edit_btn = page.locator("button:has-text('Edit Workbook'), button:has-text('Chỉnh sửa sổ làm việc'), button:has-text('Edit in Browser')").first
+            if edit_btn.count() > 0 and edit_btn.is_visible():
+                edit_btn.click()
+                time.sleep(2)
         except Exception:
             pass
 
