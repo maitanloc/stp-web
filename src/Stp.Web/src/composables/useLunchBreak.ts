@@ -220,22 +220,38 @@ export function useLunchBreak() {
     }
   }
 
-  // Khung giờ cảnh báo trước 10 phút: 11:50:00 -> 11:59:59 (Tạm thời tắt để test)
+  // Khung giờ cảnh báo trước 10 phút: 11:50:00 -> 11:59:59
   const isPreLunchWarning = computed(() => {
-    return false
+    const hours = now.value.getHours()
+    const minutes = now.value.getMinutes()
+    return ((hours === 11 && minutes >= 50) || isPreviewWarning.value) && !isLunchHour.value && !isDevBypass.value
   })
 
   // Đếm ngược đến 12:00:00 (thời điểm đóng server)
   const timeToLunch = computed(() => {
-    return { totalSeconds: 0, minutes: 0, seconds: 0, formatted: '00:00' }
+    if (!isPreLunchWarning.value) {
+      return { totalSeconds: 0, minutes: 0, seconds: 0, formatted: '00:00' }
+    }
+    const currentMinutes = now.value.getMinutes()
+    const currentSeconds = now.value.getSeconds()
+    const remainingSeconds = Math.max(0, (59 - currentMinutes) * 60 + (60 - currentSeconds))
+
+    const mm = Math.floor(remainingSeconds / 60)
+    const ss = remainingSeconds % 60
+    return {
+      totalSeconds: remainingSeconds,
+      minutes: mm,
+      seconds: ss,
+      formatted: `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`,
+    }
   })
 
   const isLunchHour = computed(() => {
-    return false
+    return now.value.getHours() === 12
   })
 
   const isLunchBreakActive = computed(() => {
-    return false
+    return (isLunchHour.value || isPreview.value) && !isDevBypass.value
   })
 
   const timeRemaining = computed(() => {
