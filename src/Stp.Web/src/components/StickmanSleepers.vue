@@ -6,6 +6,7 @@ const props = withDefaults(
   defineProps<{
     poked?: boolean
     quote?: string
+    activeSpeaker?: 'A' | 'B' | 'C' | 'D' | 'cat' | 'lizard' | ''
     isLightsDimmed?: boolean
     fanSpeed?: FanSpeed
     catPetCount?: number
@@ -13,10 +14,13 @@ const props = withDefaults(
     currentDream?: LunchDream
     isMosquitoAlive?: boolean
     lastSlapPos?: { x: number; y: number } | null
+    stampCount?: number
+    waterBubbleClicks?: number
   }>(),
   {
     poked: false,
     quote: '',
+    activeSpeaker: '',
     isLightsDimmed: false,
     fanSpeed: 1,
     catPetCount: 0,
@@ -24,12 +28,18 @@ const props = withDefaults(
     currentDream: undefined,
     isMosquitoAlive: true,
     lastSlapPos: null,
+    stampCount: 0,
+    waterBubbleClicks: 0,
   },
 )
 
 const emit = defineEmits<{
+  (e: 'pokeWorker', character: 'A' | 'B' | 'C' | 'D'): void
   (e: 'poke'): void
   (e: 'petCat'): void
+  (e: 'clickLizard'): void
+  (e: 'clickWaterDispenser'): void
+  (e: 'rustlePlant'): void
   (e: 'cycleFan'): void
   (e: 'toggleLights'): void
   (e: 'nextDream'): void
@@ -43,7 +53,6 @@ const fanSpeedClass = computed(() => {
 })
 
 function handleSvgClick() {
-  // If clicked directly on the stage background without child stopPropagation
   emit('poke')
 }
 
@@ -51,11 +60,11 @@ function onMosquitoClick(e: MouseEvent) {
   e.stopPropagation()
   const svg = (e.currentTarget as SVGElement).ownerSVGElement
   if (!svg) {
-    emit('slapMosquito', { x: 520, y: 220 })
+    emit('slapMosquito', { x: 620, y: 220 })
     return
   }
   const rect = svg.getBoundingClientRect()
-  const x = ((e.clientX - rect.left) / rect.width) * 900
+  const x = ((e.clientX - rect.left) / rect.width) * 1100
   const y = ((e.clientY - rect.top) / rect.height) * 480
   emit('slapMosquito', { x, y })
 }
@@ -68,11 +77,11 @@ function onMosquitoClick(e: MouseEvent) {
     @click="handleSvgClick"
   >
     <svg
-      viewBox="0 0 900 480"
+      viewBox="0 0 1100 480"
       class="stickman-svg"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
-      aria-label="Khung cảnh văn phòng STP giờ nghỉ trưa với nhân viên stickman"
+      aria-label="Toàn cảnh văn phòng STP giờ nghỉ trưa với 4 nhân viên ngủ đủ tư thế"
     >
       <defs>
         <!-- Gradients -->
@@ -91,23 +100,33 @@ function onMosquitoClick(e: MouseEvent) {
           <stop offset="100%" stop-color="#b45309" />
         </linearGradient>
 
+        <linearGradient id="archiveDeskGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#c2410c" />
+          <stop offset="100%" stop-color="#9a3412" />
+        </linearGradient>
+
         <linearGradient id="sofaGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#4f46e5" />
           <stop offset="100%" stop-color="#3730a3" />
         </linearGradient>
 
         <linearGradient id="screenGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.7" />
+          <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.75" />
           <stop offset="100%" stop-color="#0284c7" stop-opacity="0.3" />
         </linearGradient>
 
+        <linearGradient id="waterGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8" />
+          <stop offset="100%" stop-color="#0284c7" stop-opacity="0.6" />
+        </linearGradient>
+
         <linearGradient id="lampConeGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#fef08a" stop-opacity="0.6" />
+          <stop offset="0%" stop-color="#fef08a" stop-opacity="0.65" />
           <stop offset="100%" stop-color="#fef08a" stop-opacity="0" />
         </linearGradient>
 
         <linearGradient id="moonlightCone" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#bae6fd" stop-opacity="0.4" />
+          <stop offset="0%" stop-color="#bae6fd" stop-opacity="0.35" />
           <stop offset="100%" stop-color="#bae6fd" stop-opacity="0" />
         </linearGradient>
 
@@ -127,188 +146,435 @@ function onMosquitoClick(e: MouseEvent) {
         </filter>
       </defs>
 
-      <!-- Tường & Sàn phòng làm việc -->
-      <rect x="0" y="0" width="900" height="350" fill="url(#wallGrad)" />
-      <rect x="0" y="350" width="900" height="130" fill="url(#floorGrad)" />
-      <line x1="0" y1="350" x2="900" y2="350" stroke="#475569" stroke-width="2" />
+      <!-- Tường & Sàn phòng văn phòng hành chính -->
+      <rect x="0" y="0" width="1100" height="350" fill="url(#wallGrad)" />
+      <rect x="0" y="350" width="1100" height="130" fill="url(#floorGrad)" />
+      <line x1="0" y1="350" x2="1100" y2="350" stroke="#475569" stroke-width="2" />
 
-      <!-- Cửa sổ nhìn ra bầu trời trưa yên ả -->
+      <!-- Cửa sổ nhìn ra trời trưa yên ả -->
       <g id="window-group">
-        <rect x="375" y="35" width="150" height="115" rx="8" fill="#090d16" stroke="#475569" stroke-width="3" />
-        <path d="M450 35 L450 150 M375 92 L525 92" stroke="#334155" stroke-width="2" />
-        <!-- Trăng khuyết & sao ban trưa -->
-        <circle cx="490" cy="65" r="16" fill="#fbbf24" opacity="0.85" filter="url(#glow)" />
-        <circle cx="496" cy="62" r="15" fill="#090d16" />
-        <circle cx="405" cy="60" r="1.5" fill="#f8fafc" opacity="0.7" />
-        <circle cx="425" cy="75" r="2" fill="#f8fafc" opacity="0.8" />
-        <circle cx="465" cy="115" r="1.5" fill="#f8fafc" opacity="0.5" />
-        <circle cx="505" cy="125" r="2" fill="#f8fafc" opacity="0.6" />
+        <rect x="475" y="35" width="150" height="115" rx="8" fill="#090d16" stroke="#475569" stroke-width="3" />
+        <path d="M550 35 L550 150 M475 92 L625 92" stroke="#334155" stroke-width="2" />
+        <!-- Trăng khuyết ban trưa & sao -->
+        <circle cx="590" cy="65" r="16" fill="#fbbf24" opacity="0.85" filter="url(#glow)" />
+        <circle cx="596" cy="62" r="15" fill="#090d16" />
+        <circle cx="505" cy="60" r="1.5" fill="#f8fafc" opacity="0.7" />
+        <circle cx="525" cy="75" r="2" fill="#f8fafc" opacity="0.8" />
+        <circle cx="565" cy="115" r="1.5" fill="#f8fafc" opacity="0.5" />
         <!-- Rèm cửa hai bên -->
-        <path d="M375 35 Q395 90 382 150 L375 150 Z" fill="#64748b" opacity="0.7" />
-        <path d="M525 35 Q505 90 518 150 L525 150 Z" fill="#64748b" opacity="0.7" />
-        <!-- Ánh trăng hắt qua cửa sổ khi tắt đèn -->
-        <polygon v-if="isLightsDimmed" points="390,150 510,150 570,350 330,350" fill="url(#moonlightCone)" />
+        <path d="M475 35 Q495 90 482 150 L475 150 Z" fill="#64748b" opacity="0.7" />
+        <path d="M625 35 Q605 90 618 150 L625 150 Z" fill="#64748b" opacity="0.7" />
+        <!-- Luồng sáng trăng khi tắt đèn -->
+        <polygon v-if="isLightsDimmed" points="490,150 610,150 680,350 420,350" fill="url(#moonlightCone)" />
+      </g>
+
+      <!-- CHÚ THẠCH SÙNG TRÊN TƯỜNG (CLICK ĐỂ TẶC LƯỠI) -->
+      <g
+        id="wall-lizard"
+        class="interactive-element lizard-group"
+        transform="translate(650, 75)"
+        @click.stop="emit('clickLizard')"
+      >
+        <title>Chú thạch sùng văn phòng - Bấm để nghe tặc lưỡi chắt chắt!</title>
+        <!-- Thân thạch sùng -->
+        <ellipse cx="15" cy="10" rx="10" ry="4" fill="#94a3b8" />
+        <circle cx="26" cy="8" r="3.5" fill="#94a3b8" />
+        <!-- Mắt thạch sùng -->
+        <circle cx="27" cy="7" r="1" fill="#0f172a" />
+        <!-- 4 chân bám tường -->
+        <line x1="8" y1="6" x2="3" y2="2" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" />
+        <line x1="8" y1="14" x2="3" y2="18" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" />
+        <line x1="20" y1="6" x2="25" y2="2" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" />
+        <line x1="20" y1="14" x2="25" y2="18" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" />
+        <!-- Đuôi ngoe nguẩy -->
+        <path d="M5 10 Q-5 6 -12 12" stroke="#94a3b8" stroke-width="2" fill="none" stroke-linecap="round" class="lizard-tail" />
       </g>
 
       <!-- Giấy ghi chú trên tường -->
-      <g transform="translate(680, 45) rotate(4)">
-        <rect x="0" y="0" width="95" height="75" rx="3" fill="#fef08a" />
+      <g transform="translate(930, 45) rotate(4)">
+        <rect x="0" y="0" width="105" height="80" rx="3" fill="#fef08a" />
         <text x="8" y="20" font-size="10" font-weight="bold" fill="#854d0e">LƯU Ý 12H:</text>
-        <text x="8" y="36" font-size="9" fill="#a16207">✓ Cơm trưa 🍱</text>
-        <text x="8" y="50" font-size="9" fill="#a16207">✓ Chợp mắt 💤</text>
-        <text x="8" y="64" font-size="9" fill="#a16207">✓ Cấm gõ phím</text>
+        <text x="8" y="36" font-size="9" fill="#a16207">✓ Cơm sườn 🍱</text>
+        <text x="8" y="50" font-size="9" fill="#a16207">✓ Ngủ lăn lóc 💤</text>
+        <text x="8" y="64" font-size="9" fill="#a16207">✓ Cấm nhập liệu!</text>
       </g>
 
-      <g transform="translate(130, 45) rotate(-3)">
-        <rect x="0" y="0" width="95" height="75" rx="3" fill="#fed7aa" />
-        <text x="8" y="20" font-size="10" font-weight="bold" fill="#9a3412">DEV BẢO TRÌ:</text>
-        <text x="8" y="36" font-size="9" fill="#c2410c">Đang vá máy chủ 🛠️</text>
-        <text x="8" y="50" font-size="9" fill="#c2410c">Đúng 13:00</text>
-        <text x="8" y="64" font-size="9" fill="#c2410c">Mở lại làm tiếp!</text>
+      <g transform="translate(230, 45) rotate(-3)">
+        <rect x="0" y="0" width="105" height="80" rx="3" fill="#fed7aa" />
+        <text x="8" y="20" font-size="10" font-weight="bold" fill="#9a3412">HỒ SƠ STP:</text>
+        <text x="8" y="36" font-size="9" fill="#c2410c">Sổ Kết Hôn 1999 📑</text>
+        <text x="8" y="50" font-size="9" fill="#c2410c">Trích yếu 67k bản</text>
+        <text x="8" y="64" font-size="9" fill="#c2410c">13h dậy ký tiếp!</text>
       </g>
 
       <!-- Đồng hồ treo tường chỉ 12h -->
-      <g transform="translate(285, 75)">
+      <g transform="translate(390, 75)">
         <circle cx="0" cy="0" r="30" fill="#1e293b" stroke="#e2e8f0" stroke-width="3" />
         <circle cx="0" cy="0" r="26" fill="#0f172a" />
         <text x="-4" y="-17" font-size="8" font-weight="bold" fill="#94a3b8">12</text>
         <text x="16" y="3" font-size="8" font-weight="bold" fill="#94a3b8">3</text>
         <text x="-3" y="21" font-size="8" font-weight="bold" fill="#94a3b8">6</text>
         <text x="-22" y="3" font-size="8" font-weight="bold" fill="#94a3b8">9</text>
-        <!-- Kim giờ chỉ số 12 -->
         <line x1="0" y1="0" x2="0" y2="-15" stroke="#f8fafc" stroke-width="2.5" stroke-linecap="round" />
-        <!-- Kim phút quay chậm -->
         <line x1="0" y1="0" x2="6" y2="-17" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" class="clock-minute-hand" />
         <circle cx="0" cy="0" r="3" fill="#f8fafc" />
       </g>
 
-      <!-- ==================== GÓC BÀN LÀM VIỆC & STICKMAN 1 ==================== -->
-      <g id="stickman-desk-area" class="stickman-worker" :class="{ 'is-startled': poked }">
+      <!-- ==================== GÓC TRÁI: TỦ HỒ SƠ SẮT & BÌNH NƯỚC 20L ==================== -->
+      
+      <!-- Tủ hồ sơ sắt 4 ngăn hành chính -->
+      <g id="archive-cabinet" transform="translate(15, 140)">
+        <!-- Khung tủ sắt -->
+        <rect x="0" y="0" width="70" height="270" rx="3" fill="#475569" stroke="#334155" stroke-width="2" />
+        
+        <!-- Ngăn 1: 1990 - 1995 -->
+        <rect x="5" y="8" width="60" height="58" rx="2" fill="#64748b" stroke="#334155" stroke-width="1.5" />
+        <rect x="18" y="22" width="34" height="14" rx="2" fill="#ffffff" />
+        <text x="21" y="32" font-size="7" font-weight="bold" fill="#1e293b">1990-1995</text>
+        <circle cx="35" cy="46" r="3" fill="#334155" />
+
+        <!-- Ngăn 2: ĐK KẾT HÔN 1999 -->
+        <rect x="5" y="72" width="60" height="58" rx="2" fill="#64748b" stroke="#334155" stroke-width="1.5" />
+        <rect x="14" y="86" width="42" height="14" rx="2" fill="#fef08a" />
+        <text x="16" y="96" font-size="6.5" font-weight="bold" fill="#854d0e">KẾT HÔN 1999</text>
+        <circle cx="35" cy="110" r="3" fill="#334155" />
+
+        <!-- Ngăn 3: KHAI SINH 2000 -->
+        <rect x="5" y="136" width="60" height="58" rx="2" fill="#64748b" stroke="#334155" stroke-width="1.5" />
+        <rect x="15" y="150" width="40" height="14" rx="2" fill="#bae6fd" />
+        <text x="18" y="160" font-size="6.5" font-weight="bold" fill="#0369a1">KHAI SINH</text>
+        <circle cx="35" cy="174" r="3" fill="#334155" />
+
+        <!-- Ngăn 4: Ngăn kéo hé mở thò tài liệu -->
+        <rect x="5" y="200" width="60" height="58" rx="2" fill="#64748b" stroke="#334155" stroke-width="1.5" />
+        <polygon points="12,215 35,205 38,225 15,230" fill="#f8fafc" />
+        <polygon points="30,212 52,204 55,222 33,226" fill="#fef9c3" />
+        <rect x="22" y="235" width="26" height="4" rx="2" fill="#1e293b" />
+      </g>
+
+      <!-- Bình nước nóng lạnh 20L công sở -->
+      <g
+        id="water-dispenser"
+        class="interactive-element"
+        transform="translate(95, 245)"
+        @click.stop="emit('clickWaterDispenser')"
+      >
+        <title>Bình nước nóng lạnh văn phòng - Bấm để sủi bọt ục ục!</title>
+        <!-- Bình nước 20L xanh úp ngược -->
+        <ellipse cx="20" cy="5" rx="14" ry="4" fill="#38bdf8" />
+        <path d="M6 5 Q5 -30 20 -35 Q35 -30 34 5 Z" fill="url(#waterGrad)" stroke="#0284c7" stroke-width="1.2" />
+        <!-- Bọt khí sủi tăm trong bình nước -->
+        <circle cx="18" cy="-10" r="2.5" fill="#ffffff" opacity="0.8" class="water-bubble-1" />
+        <circle cx="23" cy="-20" r="2" fill="#ffffff" opacity="0.8" class="water-bubble-2" />
+        <circle cx="15" cy="-28" r="1.5" fill="#ffffff" opacity="0.7" class="water-bubble-3" />
+
+        <!-- Thân máy lọc nước màu trắng ngà -->
+        <rect x="4" y="5" width="32" height="100" rx="3" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+        <!-- Khay hứng nước -->
+        <rect x="8" y="45" width="24" height="22" rx="2" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1" />
+        <!-- 2 Vòi nước nóng (đỏ) & lạnh (xanh) -->
+        <rect x="12" y="42" width="4" height="6" fill="#ef4444" rx="1" />
+        <rect x="24" y="42" width="4" height="6" fill="#38bdf8" rx="1" />
+        <!-- Cốc giấy uống nước -->
+        <polygon points="17,56 23,56 22,64 18,64" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.8" />
+        <!-- Logo STP trên bình -->
+        <text x="20" y="85" font-size="6" font-weight="bold" fill="#64748b" text-anchor="middle">STP 20L</text>
+      </g>
+
+      <!-- ==================== GÓC SỔ SÁCH HỘ TỊCH: CHUYÊN VIÊN C ==================== -->
+      <g
+        id="stickman-archive-worker"
+        class="interactive-element"
+        @click.stop="emit('pokeWorker', 'C')"
+      >
+        <title>Chuyên viên C (Chiến thần sổ sách) - Gục ngã giữa đống hồ sơ 1999</title>
+        <!-- Bàn làm việc ngập tràn tài liệu -->
+        <g id="archive-desk">
+          <rect x="155" y="320" width="10" height="90" rx="3" fill="#94a3b8" />
+          <rect x="345" y="320" width="10" height="90" rx="3" fill="#94a3b8" />
+          <rect x="145" y="305" width="215" height="18" rx="4" fill="url(#archiveDeskGrad)" stroke="#7c2d12" stroke-width="1.5" />
+
+          <!-- Chồng hồ sơ bên trái (5 cuốn cao ngất) -->
+          <g transform="translate(150, 245)">
+            <rect x="0" y="50" width="40" height="10" rx="2" fill="#dc2626" stroke="#991b1b" stroke-width="1" />
+            <text x="3" y="57" font-size="5" font-weight="bold" fill="#ffffff">ĐK KẾT HÔN 1999</text>
+            <rect x="2" y="40" width="38" height="10" rx="2" fill="#2563eb" stroke="#1d4ed8" stroke-width="1" />
+            <text x="5" y="47" font-size="5" font-weight="bold" fill="#ffffff">KHAI SINH 2000</text>
+            <rect x="-1" y="30" width="41" height="10" rx="2" fill="#d97706" stroke="#b45309" stroke-width="1" />
+            <text x="3" y="37" font-size="5" font-weight="bold" fill="#ffffff">HỘ TỊCH TẬP 1</text>
+            <rect x="3" y="20" width="37" height="10" rx="2" fill="#16a34a" stroke="#15803d" stroke-width="1" />
+            <text x="6" y="27" font-size="5" font-weight="bold" fill="#ffffff">TRÍCH YẾU STP</text>
+            <rect x="1" y="10" width="39" height="10" rx="2" fill="#9333ea" stroke="#7e22ce" stroke-width="1" />
+            <text x="4" y="17" font-size="5" font-weight="bold" fill="#ffffff">CHỨNG THỰC 98</text>
+          </g>
+
+          <!-- Chồng hồ sơ bên phải (nghiêng nghiêng sắp đổ) -->
+          <g transform="translate(315, 235)">
+            <rect x="0" y="60" width="42" height="10" rx="2" fill="#0284c7" stroke="#0369a1" stroke-width="1" />
+            <rect x="2" y="50" width="40" height="10" rx="2" fill="#e11d48" stroke="#be123c" stroke-width="1" />
+            <rect x="-2" y="40" width="43" height="10" rx="2" fill="#ca8a04" stroke="#a16207" stroke-width="1" />
+            <rect x="4" y="30" width="38" height="10" rx="2" fill="#475569" stroke="#334155" stroke-width="1" />
+            <rect x="1" y="20" width="40" height="10" rx="2" fill="#059669" stroke="#047857" stroke-width="1" />
+            <!-- Cây bút bi cắm trên xấp tài liệu -->
+            <line x1="30" y1="12" x2="36" y2="22" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" />
+          </g>
+
+          <!-- Cuốn sổ cái hộ tịch dày cộp mở rộng giữa bàn làm gối kê đầu -->
+          <path d="M210 305 L245 298 L285 305 L285 308 L210 308 Z" fill="#fef08a" stroke="#ca8a04" stroke-width="1.2" />
+          <line x1="245" y1="298" x2="245" y2="308" stroke="#ca8a04" stroke-width="1.5" />
+
+          <!-- Vết mực đỏ đóng dấu "ĐÃ DUYỆT STP" trên bàn khi click -->
+          <g v-if="stampCount > 0" transform="translate(290, 298)">
+            <circle cx="0" cy="0" r="9" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="2 1" />
+            <text x="0" y="-1" font-size="5" font-weight="900" fill="#ef4444" text-anchor="middle">ĐÃ DUYỆT</text>
+            <text x="0" y="5" font-size="4" font-weight="bold" fill="#ef4444" text-anchor="middle">STP 1999</text>
+          </g>
+
+          <!-- Tờ giấy A4 rơi lả tả dưới chân bàn -->
+          <polygon points="190,385 205,375 215,390 200,400" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+          <polygon points="270,395 285,390 292,408 277,412" fill="#fef08a" stroke="#fde047" stroke-width="1" />
+        </g>
+
+        <!-- Thân Chuyên viên C gục má nghiêng lên cuốn sổ -->
+        <g class="archive-sleeper-body" :class="{ 'is-startled': poked && activeSpeaker === 'C' }">
+          <!-- Chân ngồi ghế -->
+          <line x1="250" y1="330" x2="240" y2="385" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" />
+          <line x1="240" y1="385" x2="255" y2="410" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" />
+
+          <!-- Lưng gập về phía trước -->
+          <path d="M250 330 Q235 285 225 295" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" fill="none" class="breathe-spine" />
+          
+          <!-- Tay trái vắt ngang cuốn sổ -->
+          <path d="M230 295 Q215 302 205 302" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
+          
+          <!-- Tay phải buông thõng cầm con dấu mộc tròn -->
+          <path d="M235 295 Q270 295 285 305" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
+          <!-- Con dấu đỏ trong tay -->
+          <rect x="282" y="298" width="8" height="12" rx="2" fill="#ef4444" stroke="#b91c1c" stroke-width="1" />
+          <circle cx="286" cy="296" r="3" fill="#b91c1c" />
+
+          <!-- Đầu người que áp má xuống mặt sổ -->
+          <circle cx="230" cy="276" r="16" fill="#f8fafc" stroke="#0f172a" stroke-width="2" />
+          
+          <!-- Cặp kính cận tròn trễ xuống sống mũi -->
+          <circle cx="223" cy="278" r="4.5" fill="none" stroke="#2563eb" stroke-width="1.5" />
+          <circle cx="232" cy="278" r="4.5" fill="none" stroke="#2563eb" stroke-width="1.5" />
+          <line x1="227.5" y1="278" x2="227.5" y2="278" stroke="#2563eb" stroke-width="1.5" />
+          
+          <!-- Mắt nhắm tịt mệt mỏi -->
+          <path d="M221 278 Q223 281 225 278" stroke="#0f172a" stroke-width="1.2" fill="none" />
+          <!-- Miệng mỉm cười nhẹ -->
+          <path d="M227 285 Q230 287 234 285" stroke="#0f172a" stroke-width="1.2" fill="none" />
+
+          <!-- Chữ Zzz bay lên từ đống sổ -->
+          <g class="archive-zzz">
+            <text x="210" y="250" font-size="13" font-weight="bold" fill="#f59e0b" class="zzz-item zzz-1">z</text>
+            <text x="198" y="230" font-size="17" font-weight="bold" fill="#fbbf24" class="zzz-item zzz-2">Z</text>
+            <text x="180" y="205" font-size="22" font-weight="bold" fill="#fde047" class="zzz-item zzz-3">Zzz</text>
+          </g>
+
+          <!-- Bảng tên -->
+          <g transform="translate(180, 175)">
+            <rect x="0" y="0" width="85" height="20" rx="4" fill="#1e293b" stroke="#f59e0b" stroke-width="1.2" />
+            <text x="6" y="13" font-size="8.5" font-weight="bold" fill="#fbbf24">Chuyên viên C (Sổ sách)</text>
+          </g>
+        </g>
+      </g>
+
+      <!-- ==================== GÓC GIỮA: CHUYÊN VIÊN A & GẦM BÀN CHUYÊN VIÊN D ==================== -->
+      <g id="stickman-desk-area">
         <!-- Đèn bàn làm việc -->
         <g id="desk-lamp" class="interactive-element" @click.stop="emit('toggleLights')">
-          <!-- Chân đèn trên bàn -->
-          <ellipse cx="65" cy="305" rx="10" ry="4" fill="#64748b" />
-          <path d="M65 305 Q55 240 75 220" stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round" />
-          <!-- Chao đèn -->
-          <path d="M65 220 L95 210 L85 230 Z" fill="#f59e0b" stroke="#d97706" stroke-width="1.5" />
-          <!-- Dây giật công tắc đèn -->
-          <line x1="80" y1="230" x2="80" y2="245" stroke="#cbd5e1" stroke-width="1.5" />
-          <circle cx="80" cy="246" r="2.5" fill="#f59e0b" />
-          <!-- Quầng sáng đèn bàn khi bật -->
-          <polygon points="75,225 180,310 65,310" fill="url(#lampConeGrad)" />
+          <ellipse cx="435" cy="305" rx="10" ry="4" fill="#64748b" />
+          <path d="M435 305 Q425 240 445 220" stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round" />
+          <path d="M435 220 L465 210 L455 230 Z" fill="#f59e0b" stroke="#d97706" stroke-width="1.5" />
+          <line x1="450" y1="230" x2="450" y2="245" stroke="#cbd5e1" stroke-width="1.5" />
+          <circle cx="450" cy="246" r="2.5" fill="#f59e0b" />
+          <polygon points="445,225 550,310 435,310" fill="url(#lampConeGrad)" />
         </g>
 
         <!-- Thùng máy CPU & Boss Mèo -->
         <g id="cpu-and-cat" class="interactive-element" @click.stop="emit('petCat')">
-          <!-- Thùng máy CPU -->
-          <rect x="25" y="325" width="30" height="65" rx="3" fill="#1e293b" stroke="#475569" stroke-width="1.5" />
-          <!-- Dải LED RGB thùng máy -->
-          <line x1="30" y1="335" x2="30" y2="380" stroke="#06b6d4" stroke-width="2" opacity="0.8" />
-          <circle cx="48" cy="335" r="2" fill="#22c55e" />
-          <circle cx="48" cy="342" r="1.5" fill="#ef4444" />
+          <rect x="395" y="325" width="30" height="65" rx="3" fill="#1e293b" stroke="#475569" stroke-width="1.5" />
+          <line x1="400" y1="335" x2="400" y2="380" stroke="#06b6d4" stroke-width="2" opacity="0.8" />
+          <circle cx="418" cy="335" r="2" fill="#22c55e" />
+          <circle cx="418" cy="342" r="1.5" fill="#ef4444" />
 
-          <!-- BOSS MÈO CÔNG SỞ NẰM NGỦ TRÊN CPU -->
+          <!-- BOSS MÈO CÔNG SỞ -->
           <g id="office-cat" class="cat-sleeper">
-            <!-- Thân mèo cuộn tròn -->
-            <ellipse cx="40" cy="320" rx="14" ry="10" fill="#f97316" stroke="#c2410c" stroke-width="1.2" class="cat-body" />
-            <!-- Đầu mèo -->
-            <circle cx="31" cy="317" r="7" fill="#f97316" stroke="#c2410c" stroke-width="1.2" />
-            <!-- Tai mèo -->
-            <polygon points="26,312 28,306 32,312" fill="#ea580c" />
-            <polygon points="31,312 34,306 37,312" fill="#ea580c" />
-            <!-- Mắt nhắm hí hí -->
-            <path d="M28 317 Q30 319 32 317" stroke="#7c2d12" stroke-width="1" fill="none" />
-            <!-- Mũi hồng -->
-            <circle cx="27" cy="319" r="1" fill="#fbcfe8" />
-            <!-- Đuôi mèo ngoe nguẩy -->
-            <path d="M53 322 Q58 316 57 328" stroke="#f97316" stroke-width="2.5" fill="none" stroke-linecap="round" class="cat-tail" />
-            <!-- Chữ zzz của mèo -->
-            <text x="24" y="303" font-size="8" font-weight="bold" fill="#fdba74" class="cat-zzz">z</text>
+            <ellipse cx="410" cy="320" rx="14" ry="10" fill="#f97316" stroke="#c2410c" stroke-width="1.2" class="cat-body" />
+            <circle cx="401" cy="317" r="7" fill="#f97316" stroke="#c2410c" stroke-width="1.2" />
+            <polygon points="396,312 398,306 402,312" fill="#ea580c" />
+            <polygon points="401,312 404,306 407,312" fill="#ea580c" />
+            <path d="M398 317 Q400 319 402 317" stroke="#7c2d12" stroke-width="1" fill="none" />
+            <circle cx="397" cy="319" r="1" fill="#fbcfe8" />
+            <path d="M423 322 Q428 316 427 328" stroke="#f97316" stroke-width="2.5" fill="none" stroke-linecap="round" class="cat-tail" />
+            <text x="394" y="303" font-size="8" font-weight="bold" fill="#fdba74" class="cat-zzz">z</text>
           </g>
 
-          <!-- Tim bay lên khi vuốt mèo -->
           <g v-if="catPetCount > 0" class="cat-heart-burst">
-            <text x="35" y="295" font-size="12" fill="#ef4444" class="cat-heart">❤️</text>
+            <text x="405" y="295" font-size="12" fill="#ef4444" class="cat-heart">❤️</text>
           </g>
         </g>
 
-        <!-- Bàn làm việc & Laptop -->
-        <g id="desk-furniture">
-          <rect x="75" y="320" width="10" height="90" rx="3" fill="#94a3b8" />
-          <rect x="250" y="320" width="10" height="90" rx="3" fill="#94a3b8" />
-          <rect x="60" y="305" width="220" height="18" rx="4" fill="url(#deskGrad)" stroke="#78350f" stroke-width="1.5" />
+        <!-- Bàn làm việc số 2 (Chuyên viên A) -->
+        <g id="desk-furniture-2">
+          <rect x="445" y="320" width="10" height="90" rx="3" fill="#94a3b8" />
+          <rect x="625" y="320" width="10" height="90" rx="3" fill="#94a3b8" />
+          <rect x="430" y="305" width="215" height="18" rx="4" fill="url(#deskGrad)" stroke="#78350f" stroke-width="1.5" />
           
           <!-- Laptop -->
-          <path d="M90 305 L135 305 L138 275 L93 275 Z" fill="#475569" />
-          <rect x="95" y="277" width="40" height="25" rx="2" fill="url(#screenGrad)" />
-          <line x1="100" y1="285" x2="125" y2="285" stroke="#bae6fd" stroke-width="1" opacity="0.6" />
-          <line x1="100" y1="290" x2="118" y2="290" stroke="#bae6fd" stroke-width="1" opacity="0.6" />
-          <path d="M85 305 L140 305 L143 308 L82 308 Z" fill="#64748b" />
+          <path d="M460 305 L505 305 L508 275 L463 275 Z" fill="#475569" />
+          <rect x="465" y="277" width="40" height="25" rx="2" fill="url(#screenGrad)" />
+          <line x1="470" y1="285" x2="495" y2="285" stroke="#bae6fd" stroke-width="1" opacity="0.6" />
+          <line x1="470" y1="290" x2="488" y2="290" stroke="#bae6fd" stroke-width="1" opacity="0.6" />
           
-          <!-- Cốc cà phê STP rỗng -->
-          <rect x="155" y="290" width="14" height="16" rx="2" fill="#f1f5f9" />
-          <path d="M169 294 Q175 298 169 302" stroke="#f1f5f9" stroke-width="2" fill="none" />
-          <text x="157" y="299" font-size="6" font-weight="bold" fill="#64748b">STP</text>
-
-          <!-- Ghế xoay văn phòng -->
-          <path d="M205 270 Q190 270 190 330 L235 330 Q235 270 205 270" fill="#334155" opacity="0.8" />
-          <rect x="208" y="330" width="8" height="60" fill="#64748b" />
-          <line x1="212" y1="390" x2="185" y2="405" stroke="#475569" stroke-width="4" stroke-linecap="round" />
-          <line x1="212" y1="390" x2="240" y2="405" stroke="#475569" stroke-width="4" stroke-linecap="round" />
+          <!-- Cốc cà phê STP -->
+          <rect x="525" y="290" width="14" height="16" rx="2" fill="#f1f5f9" />
+          <path d="M539 294 Q545 298 539 302" stroke="#f1f5f9" stroke-width="2" fill="none" />
+          <text x="527" y="299" font-size="6" font-weight="bold" fill="#64748b">STP</text>
         </g>
 
-        <!-- Stickman 1 (Gục trên bàn) -->
-        <g class="desk-sleeper-body">
-          <line x1="210" y1="330" x2="200" y2="385" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" />
-          <line x1="200" y1="385" x2="215" y2="410" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" />
-          <path d="M210 330 Q195 285 180 295" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" fill="none" class="breathe-spine" />
-          <path d="M185 292 Q175 305 160 305 L200 305" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
-          <circle cx="180" cy="278" r="16" fill="#f8fafc" stroke="#0f172a" stroke-width="2" class="desk-head" />
-          <path d="M172 277 Q176 281 180 277" stroke="#0f172a" stroke-width="2" fill="none" stroke-linecap="round" />
-          <path d="M174 285 Q178 288 183 285" stroke="#0f172a" stroke-width="1.8" fill="none" stroke-linecap="round" />
+        <!-- ==================== DƯỚI GẦM BÀN: CHUYÊN VIÊN D ==================== -->
+        <g
+          id="stickman-under-desk"
+          class="interactive-element under-desk-group"
+          @click.stop="emit('pokeWorker', 'D')"
+        >
+          <title>Chuyên viên D (Ẩn sĩ gầm bàn) - Trùm áo khoác kín mít, chân đi tất lệch màu</title>
+          <!-- Tấm chiếu hoa mini trải dưới gầm bàn -->
+          <rect x="465" y="395" width="150" height="22" rx="3" fill="#15803d" opacity="0.85" stroke="#166534" stroke-width="1" />
+          <line x1="475" y1="395" x2="475" y2="417" stroke="#fbbf24" stroke-width="1" stroke-dasharray="2 2" />
+          <line x1="535" y1="395" x2="535" y2="417" stroke="#fbbf24" stroke-width="1" stroke-dasharray="2 2" />
+          <line x1="595" y1="395" x2="595" y2="417" stroke="#fbbf24" stroke-width="1" stroke-dasharray="2 2" />
 
-          <!-- Bong bóng mũi phập phồng -->
-          <circle cx="171" cy="281" r="5" fill="#38bdf8" opacity="0.65" stroke="#0284c7" stroke-width="1" class="snot-bubble" />
+          <!-- Gối ba-lô màu xám kê đầu -->
+          <ellipse cx="485" cy="402" rx="14" ry="8" fill="#475569" stroke="#334155" stroke-width="1" />
 
-          <!-- Chữ ZZZ bay lên -->
-          <g class="desk-zzz-group">
-            <text x="160" y="255" font-size="14" font-weight="bold" fill="#38bdf8" class="zzz-item zzz-1">z</text>
-            <text x="150" y="235" font-size="18" font-weight="bold" fill="#60a5fa" class="zzz-item zzz-2">Z</text>
-            <text x="135" y="210" font-size="24" font-weight="bold" fill="#818cf8" class="zzz-item zzz-3">Zzz</text>
+          <!-- Chuyên viên D trùm kín mít áo gió xanh rêu như cái kén -->
+          <ellipse cx="525" cy="400" rx="32" ry="12" fill="#1e3a5f" stroke="#0f2744" stroke-width="1.5" class="cocoon-body" />
+          <!-- Nếp gấp áo gió -->
+          <path d="M510 392 Q525 396 540 392" stroke="#3b82f6" stroke-width="1.2" fill="none" />
+          <path d="M515 408 Q530 404 545 408" stroke="#3b82f6" stroke-width="1.2" fill="none" />
+
+          <!-- 2 BÀN CHÂN THÒ RA NGOÀI ĐI TẤT LỆCH MÀU (CỌC CẠCH) -->
+          <!-- Chân 1: Tất sọc xanh trắng -->
+          <g transform="translate(565, 395)" class="toes-wiggle">
+            <rect x="0" y="0" width="18" height="9" rx="4" fill="#0284c7" />
+            <line x1="5" y1="0" x2="5" y2="9" stroke="#ffffff" stroke-width="1.5" />
+            <line x1="11" y1="0" x2="11" y2="9" stroke="#ffffff" stroke-width="1.5" />
           </g>
 
+          <!-- Chân 2: Tất chấm bi hồng -->
+          <g transform="translate(568, 406)" class="toes-wiggle-alt">
+            <rect x="0" y="0" width="18" height="9" rx="4" fill="#f43f5e" />
+            <circle cx="5" cy="4.5" r="1.5" fill="#ffffff" />
+            <circle cx="12" cy="4.5" r="1.5" fill="#ffffff" />
+          </g>
+
+          <!-- Chữ Zzz bay lên từ gầm bàn -->
+          <text x="500" y="390" font-size="11" font-weight="bold" fill="#38bdf8" class="zzz-item zzz-1">z</text>
+          <text x="515" y="380" font-size="14" font-weight="bold" fill="#60a5fa" class="zzz-item zzz-2">Z</text>
+
           <!-- Bảng tên -->
-          <g transform="translate(195, 235)">
+          <g transform="translate(485, 420)">
+            <rect x="0" y="0" width="80" height="15" rx="3" fill="#0f172a" stroke="#38bdf8" stroke-width="1" />
+            <text x="5" y="11" font-size="7.5" font-weight="bold" fill="#38bdf8">Chuyên viên D (Gầm bàn)</text>
+          </g>
+        </g>
+
+        <!-- CHUYÊN VIÊN A (GỤC TRÊN BÀN) -->
+        <g
+          class="desk-sleeper-body interactive-element"
+          :class="{ 'is-startled': poked && activeSpeaker === 'A' }"
+          @click.stop="emit('pokeWorker', 'A')"
+        >
+          <title>Chuyên viên A (Chăm chỉ) - Gục ngủ trên laptop, bong bóng mũi phập phồng</title>
+          <!-- Ghế xoay -->
+          <path d="M575 270 Q560 270 560 330 L605 330 Q605 270 575 270" fill="#334155" opacity="0.8" />
+          <rect x="578" y="330" width="8" height="60" fill="#64748b" />
+          <line x1="582" y1="390" x2="555" y2="405" stroke="#475569" stroke-width="4" stroke-linecap="round" />
+          <line x1="582" y1="390" x2="610" y2="405" stroke="#475569" stroke-width="4" stroke-linecap="round" />
+
+          <!-- Thân người que A -->
+          <line x1="580" y1="330" x2="570" y2="385" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" />
+          <line x1="570" y1="385" x2="585" y2="410" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" />
+          <path d="M580 330 Q565 285 550 295" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" fill="none" class="breathe-spine" />
+          <path d="M555 292 Q545 305 530 305 L570 305" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
+          <circle cx="550" cy="278" r="16" fill="#f8fafc" stroke="#0f172a" stroke-width="2" class="desk-head" />
+          <path d="M542 277 Q546 281 550 277" stroke="#0f172a" stroke-width="2" fill="none" stroke-linecap="round" />
+          <path d="M544 285 Q548 288 553 285" stroke="#0f172a" stroke-width="1.8" fill="none" stroke-linecap="round" />
+
+          <!-- Bong bóng mũi phập phồng -->
+          <circle cx="541" cy="281" r="5" fill="#38bdf8" opacity="0.65" stroke="#0284c7" stroke-width="1" class="snot-bubble" />
+
+          <!-- Chữ ZZZ -->
+          <g class="desk-zzz-group">
+            <text x="530" y="255" font-size="14" font-weight="bold" fill="#38bdf8" class="zzz-item zzz-1">z</text>
+            <text x="520" y="235" font-size="18" font-weight="bold" fill="#60a5fa" class="zzz-item zzz-2">Z</text>
+            <text x="505" y="210" font-size="24" font-weight="bold" fill="#818cf8" class="zzz-item zzz-3">Zzz</text>
+          </g>
+
+          <g transform="translate(565, 235)">
             <rect x="0" y="0" width="80" height="22" rx="4" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2" />
             <text x="6" y="14" font-size="9" font-weight="bold" fill="#38bdf8">Chuyên viên A</text>
           </g>
         </g>
       </g>
 
-      <!-- ==================== KHU VỰC GIỮA: QUẠT MÁY & BONG BÓNG GIẤC MƠ ==================== -->
+      <!-- ==================== KHU VỰC CÂY CẢNH & QUẠT MÁY (x = 670..770) ==================== -->
       
+      <!-- CÂY KIM TIỀN PHONG THỦY CÔNG SỞ (CLICK ĐỂ RUNG RINH) -->
+      <g
+        id="money-plant"
+        class="interactive-element plant-group"
+        transform="translate(670, 290)"
+        @click.stop="emit('rustlePlant')"
+      >
+        <title>Chậu cây kim tiền văn phòng - Bấm để lá cây rung rinh may mắn!</title>
+        <!-- Chậu gốm men trắng -->
+        <polygon points="10,85 30,85 34,120 6,120" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" />
+        <ellipse cx="20" cy="85" rx="10" ry="3" fill="#78350f" />
+
+        <!-- 3 nhánh lá kim tiền đung đưa trong gió quạt -->
+        <path d="M20 85 Q12 60 5 45" stroke="#15803d" stroke-width="3" fill="none" class="leaf-stem-1" />
+        <ellipse cx="5" cy="45" rx="8" ry="5" fill="#22c55e" stroke="#16a34a" stroke-width="1" transform="rotate(-30 5 45)" />
+        <ellipse cx="10" cy="60" rx="7" ry="4" fill="#22c55e" stroke="#16a34a" stroke-width="1" transform="rotate(-25 10 60)" />
+
+        <path d="M20 85 Q20 50 20 35" stroke="#15803d" stroke-width="3" fill="none" class="leaf-stem-2" />
+        <ellipse cx="20" cy="35" rx="8" ry="5" fill="#4ade80" stroke="#22c55e" stroke-width="1" />
+        <ellipse cx="20" cy="55" rx="7" ry="4.5" fill="#4ade80" stroke="#22c55e" stroke-width="1" />
+
+        <path d="M20 85 Q28 60 35 48" stroke="#15803d" stroke-width="3" fill="none" class="leaf-stem-3" />
+        <ellipse cx="35" cy="48" rx="8" ry="5" fill="#16a34a" stroke="#15803d" stroke-width="1" transform="rotate(30 35 48)" />
+
+        <!-- Chú bọ rùa đỏ chấm bi đen bò trên lá -->
+        <g transform="translate(18, 42)">
+          <ellipse cx="0" cy="0" rx="3.5" ry="4" fill="#ef4444" />
+          <circle cx="0" cy="-3.5" r="2" fill="#0f172a" />
+          <line x1="0" y1="-2" x2="0" y2="4" stroke="#0f172a" stroke-width="0.8" />
+          <circle cx="-1.5" cy="0" r="0.7" fill="#0f172a" />
+          <circle cx="1.5" cy="0" r="0.7" fill="#0f172a" />
+        </g>
+      </g>
+
       <!-- CÂY QUẠT MÁY VĂN PHÒNG -->
       <g
         id="electric-fan"
         class="interactive-element"
-        transform="translate(340, 275)"
+        transform="translate(720, 275)"
         @click.stop="emit('cycleFan')"
       >
-        <!-- Chân đế quạt -->
         <ellipse cx="20" cy="115" rx="18" ry="7" fill="#475569" stroke="#334155" stroke-width="1.5" />
         <rect x="18" y="45" width="4" height="70" fill="#94a3b8" />
-        <!-- Bầu động cơ quạt -->
         <circle cx="20" cy="45" r="9" fill="#334155" stroke="#1e293b" stroke-width="1.5" />
         
-        <!-- Cụm đầu lồng quạt & cánh quạt (lắc lư qua lại) -->
         <g class="fan-head-oscillation" :class="fanSpeedClass">
-          <!-- Lồng quạt -->
           <circle cx="20" cy="45" r="28" fill="none" stroke="#64748b" stroke-width="2" />
           <circle cx="20" cy="45" r="24" fill="none" stroke="#94a3b8" stroke-width="0.8" stroke-dasharray="2 3" />
           <line x1="20" y1="17" x2="20" y2="73" stroke="#64748b" stroke-width="1.2" />
           <line x1="-8" y1="45" x2="48" y2="45" stroke="#64748b" stroke-width="1.2" />
 
-          <!-- Cánh quạt 3 cánh quay tròn -->
           <g class="fan-blades-group" :class="fanSpeedClass">
             <path d="M20 45 Q32 30 30 18 Q20 28 20 45 Z" fill="#38bdf8" opacity="0.85" />
             <path d="M20 45 Q35 55 45 60 Q32 60 20 45 Z" fill="#38bdf8" opacity="0.85" />
@@ -316,7 +582,6 @@ function onMosquitoClick(e: MouseEvent) {
             <circle cx="20" cy="45" r="4" fill="#0284c7" />
           </g>
 
-          <!-- Luồng gió quạt phà sang 2 bên -->
           <g v-if="fanSpeed > 0" class="fan-wind-streams" :class="{ 'wind-fast': fanSpeed === 2 }">
             <path d="M48 35 Q100 20 180 30" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="8 6" fill="none" class="wind-line wind-1" />
             <path d="M48 48 Q120 50 200 45" stroke="#38bdf8" stroke-width="1.8" stroke-dasharray="10 8" fill="none" class="wind-line wind-2" />
@@ -324,7 +589,6 @@ function onMosquitoClick(e: MouseEvent) {
           </g>
         </g>
 
-        <!-- Nút bấm tốc độ quạt -->
         <g transform="translate(11, 102)">
           <rect x="0" y="0" width="18" height="10" rx="2" fill="#1e293b" />
           <circle cx="5" cy="5" r="2.5" :fill="fanSpeed === 0 ? '#ef4444' : '#64748b'" />
@@ -333,22 +597,19 @@ function onMosquitoClick(e: MouseEvent) {
         </g>
       </g>
 
-      <!-- BONG BÓNG GIẤC MƠ TRƯA (DREAM BUBBLE) -->
+      <!-- ==================== BONG BÓNG GIẤC MƠ TRƯA (DREAM BUBBLE) ==================== -->
       <g
         v-if="currentDream"
         id="dream-bubble"
         class="interactive-element dream-cloud-group"
-        transform="translate(420, 160)"
+        transform="translate(560, 160)"
         @click.stop="emit('nextDream')"
       >
-        <!-- Chuỗi bong bóng nối từ chuyên viên A -->
-        <circle cx="-130" cy="80" r="4" fill="#dbeafe" opacity="0.7" />
-        <circle cx="-110" cy="55" r="6" fill="#dbeafe" opacity="0.8" />
-        <circle cx="-85" cy="30" r="9" fill="#dbeafe" opacity="0.9" />
+        <circle cx="-60" cy="80" r="4" fill="#dbeafe" opacity="0.7" />
+        <circle cx="-45" cy="55" r="6" fill="#dbeafe" opacity="0.8" />
+        <circle cx="-25" cy="30" r="9" fill="#dbeafe" opacity="0.9" />
 
-        <!-- Đám mây giấc mơ bồng bềnh -->
         <g class="dream-cloud-shape">
-          <!-- Đám mây viền mềm -->
           <path
             d="M-50 0 Q-70 -25 -40 -45 Q-15 -65 25 -50 Q65 -65 95 -40 Q130 -30 125 5 Q135 40 95 45 Q65 60 20 50 Q-25 60 -50 35 Q-75 25 -50 0 Z"
             fill="url(#dreamGrad)"
@@ -356,7 +617,6 @@ function onMosquitoClick(e: MouseEvent) {
             stroke-width="2"
             filter="url(#glow)"
           />
-          <!-- Nội dung giấc mơ -->
           <text x="35" y="-12" font-size="28" text-anchor="middle">{{ currentDream.icon }}</text>
           <text x="35" y="14" font-size="11" font-weight="bold" fill="#1e3a8a" text-anchor="middle">
             {{ currentDream.title }}
@@ -364,7 +624,6 @@ function onMosquitoClick(e: MouseEvent) {
           <text x="35" y="30" font-size="8.5" fill="#3b82f6" text-anchor="middle">
             {{ currentDream.subtitle.length > 28 ? currentDream.subtitle.slice(0, 27) + '…' : currentDream.subtitle }}
           </text>
-          <!-- Badge nhỏ -->
           <g transform="translate(75, -45)">
             <rect x="0" y="0" width="55" height="15" rx="7" fill="#3b82f6" />
             <text x="27" y="11" font-size="7.5" font-weight="bold" fill="#ffffff" text-anchor="middle">
@@ -374,7 +633,7 @@ function onMosquitoClick(e: MouseEvent) {
         </g>
       </g>
 
-      <!-- CON MUỖI CÔNG SỞ BAY VO VE (CLICK ĐỂ ĐẬP) -->
+      <!-- ==================== CON MUỖI CÔNG SỞ & VẾT ĐẬP ==================== -->
       <g
         v-if="isMosquitoAlive"
         id="flying-mosquito"
@@ -382,28 +641,21 @@ function onMosquitoClick(e: MouseEvent) {
         @click="onMosquitoClick"
       >
         <title>Con muỗi vo ve - Bấm để đập bảo vệ giấc ngủ!</title>
-        <!-- Vòng hào quang nhỏ để dễ bấm -->
         <circle cx="0" cy="0" r="16" fill="transparent" />
-        <!-- Cánh muỗi đập lia lịa -->
         <ellipse cx="-4" cy="-5" rx="2" ry="5" fill="#e2e8f0" opacity="0.7" class="mosquito-wing-l" />
         <ellipse cx="4" cy="-5" rx="2" ry="5" fill="#e2e8f0" opacity="0.7" class="mosquito-wing-r" />
-        <!-- Thân muỗi -->
         <ellipse cx="0" cy="0" rx="3" ry="5" fill="#0f172a" />
         <circle cx="0" cy="-4" r="2.5" fill="#ef4444" />
-        <!-- Vòi hút máu -->
         <line x1="0" y1="-5" x2="0" y2="-10" stroke="#0f172a" stroke-width="1.2" />
-        <!-- Chân muỗi -->
         <line x1="-2" y1="2" x2="-6" y2="7" stroke="#0f172a" stroke-width="1" />
         <line x1="2" y1="2" x2="6" y2="7" stroke="#0f172a" stroke-width="1" />
       </g>
 
-      <!-- VẾT ĐẬP MUỖI (BỐP!) KHI VỪA ĐẬP TRÚNG -->
       <g
         v-if="lastSlapPos"
         class="slap-splash"
         :transform="`translate(${lastSlapPos.x}, ${lastSlapPos.y})`"
       >
-        <!-- Sao tóe lửa comic -->
         <polygon
           points="0,-22 6,-8 22,-8 9,2 14,18 0,7 -14,18 -9,2 -22,-8 -6,-8"
           fill="#ef4444"
@@ -415,63 +667,67 @@ function onMosquitoClick(e: MouseEvent) {
         <text x="0" y="24" font-size="9" font-weight="bold" fill="#22c55e" text-anchor="middle">+1 GIẤC NGỦ</text>
       </g>
 
-      <!-- ==================== NHÂN VIÊN 2: NẰM NGỦ LĂN LÓC TRÊN SOFA ==================== -->
-      <g id="stickman-sofa-area" class="stickman-worker" :class="{ 'is-startled': poked }">
+      <!-- ==================== GÓC PHẢI: CHUYÊN VIÊN B (NGỦ LĂN LÓC SOFA) ==================== -->
+      <g
+        id="stickman-sofa-area"
+        class="interactive-element"
+        @click.stop="emit('pokeWorker', 'B')"
+      >
+        <title>Chuyên viên B (Say như điếu đổ) - Nằm ngủ lăn lóc, chân gác ngược, dép văng</title>
         <g id="sofa-furniture">
-          <rect x="530" y="260" width="310" height="60" rx="10" fill="url(#sofaGrad)" stroke="#312e81" stroke-width="2" />
-          <rect x="515" y="270" width="28" height="65" rx="8" fill="#4338ca" stroke="#312e81" stroke-width="2" />
-          <rect x="525" y="305" width="320" height="35" rx="8" fill="#4f46e5" stroke="#312e81" stroke-width="2" />
-          <rect x="830" y="270" width="28" height="65" rx="8" fill="#4338ca" stroke="#312e81" stroke-width="2" />
-          <rect x="540" y="340" width="12" height="30" rx="3" fill="#1e293b" />
-          <rect x="815" y="340" width="12" height="30" rx="3" fill="#1e293b" />
-          <ellipse cx="555" cy="295" rx="20" ry="14" fill="#fbbf24" stroke="#d97706" stroke-width="1.5" />
+          <rect x="790" y="260" width="290" height="60" rx="10" fill="url(#sofaGrad)" stroke="#312e81" stroke-width="2" />
+          <rect x="775" y="270" width="28" height="65" rx="8" fill="#4338ca" stroke="#312e81" stroke-width="2" />
+          <rect x="785" y="305" width="300" height="35" rx="8" fill="#4f46e5" stroke="#312e81" stroke-width="2" />
+          <rect x="1070" y="270" width="24" height="65" rx="8" fill="#4338ca" stroke="#312e81" stroke-width="2" />
+          <rect x="800" y="340" width="12" height="30" rx="3" fill="#1e293b" />
+          <rect x="1055" y="340" width="12" height="30" rx="3" fill="#1e293b" />
+          <ellipse cx="815" cy="295" rx="20" ry="14" fill="#fbbf24" stroke="#d97706" stroke-width="1.5" />
         </g>
 
-        <!-- Thân Stickman 2 -->
-        <g class="sofa-sleeper-body">
-          <line x1="565" y1="298" x2="685" y2="305" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" class="breathe-torso" />
-          <line x1="685" y1="305" x2="770" y2="308" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" />
-          <line x1="770" y1="308" x2="820" y2="302" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" />
+        <!-- Thân Chuyên viên B -->
+        <g class="sofa-sleeper-body" :class="{ 'is-startled': poked && activeSpeaker === 'B' }">
+          <line x1="825" y1="298" x2="945" y2="305" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" class="breathe-torso" />
+          <line x1="945" y1="305" x2="1030" y2="308" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" />
+          <line x1="1030" y1="308" x2="1075" y2="302" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" />
           
-          <!-- Chân gác ngược lên thành ghế sofa (lăn lóc) -->
-          <line x1="685" y1="305" x2="715" y2="265" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" />
-          <line x1="715" y1="265" x2="755" y2="245" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" class="leg-twitched" />
-          <circle cx="757" cy="243" r="4" fill="#f8fafc" />
+          <!-- Chân co gác ngược lên tựa lưng sofa (lăn lóc) -->
+          <line x1="945" y1="305" x2="975" y2="265" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" />
+          <line x1="975" y1="265" x2="1015" y2="245" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" class="leg-twitched" />
+          <circle cx="1017" cy="243" r="4" fill="#f8fafc" />
 
-          <!-- Tay chạm sàn -->
-          <path d="M605 300 Q620 330 610 365" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
-          <!-- Tay vắt ngang trán -->
-          <path d="M595 298 Q580 275 560 282" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
+          <!-- Tay buông thõng chạm đất -->
+          <path d="M865 300 Q880 330 870 365" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
+          <!-- Tay vắt trán -->
+          <path d="M855 298 Q840 275 820 282" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" fill="none" />
 
           <!-- Chăn mỏng xộc xệch -->
-          <path d="M635 298 Q665 290 695 300 L690 320 Q660 325 630 318 Z" fill="#ec4899" opacity="0.85" stroke="#be185d" stroke-width="1.5" class="breathe-blanket" />
+          <path d="M895 298 Q925 290 955 300 L950 320 Q920 325 890 318 Z" fill="#ec4899" opacity="0.85" stroke="#be185d" stroke-width="1.5" class="breathe-blanket" />
 
           <!-- Đầu người que -->
-          <circle cx="560" cy="286" r="17" fill="#f8fafc" stroke="#0f172a" stroke-width="2" class="sofa-head" />
-          <ellipse cx="568" cy="292" rx="4" ry="6" fill="#0f172a" />
-          <circle cx="571" cy="301" r="2" fill="#38bdf8" class="drool-drop" />
-          <path d="M552 280 L558 286 M558 280 L552 286" stroke="#0f172a" stroke-width="1.8" stroke-linecap="round" />
+          <circle cx="820" cy="286" r="17" fill="#f8fafc" stroke="#0f172a" stroke-width="2" class="sofa-head" />
+          <ellipse cx="828" cy="292" rx="4" ry="6" fill="#0f172a" />
+          <circle cx="831" cy="301" r="2" fill="#38bdf8" class="drool-drop" />
+          <path d="M812 280 L818 286 M818 280 L812 286" stroke="#0f172a" stroke-width="1.8" stroke-linecap="round" />
 
           <!-- DÉP TỔ ONG VĂNG DƯỚI SÀN -->
-          <g transform="translate(640, 395) rotate(25)" class="interactive-element" title="Dép tổ ong huyền thoại">
+          <g transform="translate(900, 395) rotate(25)" class="interactive-element" title="Dép tổ ong vàng">
             <ellipse cx="0" cy="0" rx="14" ry="7" fill="#facc15" stroke="#ca8a04" stroke-width="1.5" />
             <path d="M-6 -4 L6 -4" stroke="#ca8a04" stroke-width="1" />
             <path d="M-6 0 L6 0" stroke="#ca8a04" stroke-width="1" />
             <path d="M-6 4 L6 4" stroke="#ca8a04" stroke-width="1" />
           </g>
-          <g transform="translate(730, 385) rotate(-15)">
+          <g transform="translate(980, 385) rotate(-15)">
             <ellipse cx="0" cy="0" rx="14" ry="7" fill="#facc15" stroke="#ca8a04" stroke-width="1.5" />
           </g>
 
           <!-- Chữ Zzz bay lên từ sofa -->
           <g class="sofa-zzz-group">
-            <text x="580" y="260" font-size="16" font-weight="bold" fill="#f43f5e" class="zzz-item zzz-sofa-1">z</text>
-            <text x="595" y="235" font-size="22" font-weight="bold" fill="#fb7185" class="zzz-item zzz-sofa-2">Z</text>
-            <text x="615" y="200" font-size="30" font-weight="bold" fill="#fda4af" class="zzz-item zzz-sofa-3">Zzz!</text>
+            <text x="840" y="260" font-size="16" font-weight="bold" fill="#f43f5e" class="zzz-item zzz-sofa-1">z</text>
+            <text x="855" y="235" font-size="22" font-weight="bold" fill="#fb7185" class="zzz-item zzz-sofa-2">Z</text>
+            <text x="875" y="200" font-size="30" font-weight="bold" fill="#fda4af" class="zzz-item zzz-sofa-3">Zzz!</text>
           </g>
 
-          <!-- Bảng tên -->
-          <g transform="translate(680, 205)">
+          <g transform="translate(930, 205)">
             <rect x="0" y="0" width="80" height="22" rx="4" fill="#1e293b" stroke="#f43f5e" stroke-width="1.2" />
             <text x="6" y="14" font-size="9" font-weight="bold" fill="#fb7185">Chuyên viên B</text>
           </g>
@@ -479,17 +735,17 @@ function onMosquitoClick(e: MouseEvent) {
       </g>
 
       <!-- CẢNH BÁO BỊ CHỌT GIẬT MÌNH -->
-      <g v-if="poked" class="startle-alert" transform="translate(420, 140)">
+      <g v-if="poked" class="startle-alert" transform="translate(540, 140)">
         <circle cx="20" cy="20" r="24" fill="#ef4444" stroke="#ffffff" stroke-width="2" />
         <text x="14" y="28" font-size="24" font-weight="bold" fill="#ffffff">!</text>
       </g>
 
-      <!-- LỚP PHỦ TẮT ĐÈN NGHỈ TRƯA (DIMMED NIGHT OVERLAY) -->
+      <!-- LỚP PHỦ TẮT ĐÈN NGHỈ TRƯA -->
       <rect
         v-if="isLightsDimmed"
         x="0"
         y="0"
-        width="900"
+        width="1100"
         height="480"
         fill="#050814"
         opacity="0.65"
@@ -497,31 +753,33 @@ function onMosquitoClick(e: MouseEvent) {
       />
     </svg>
 
-    <!-- Hộp thoại bóng nói của Boss Mèo khi vuốt -->
+    <!-- Hộp thoại bóng nói của Boss Mèo -->
     <Transition name="speech-pop">
-      <div v-if="catPurrText" class="cat-speech-bubble">
+      <div v-if="catPurrText && activeSpeaker === 'cat'" class="cat-speech-bubble">
         <span>{{ catPurrText }}</span>
       </div>
     </Transition>
 
-    <!-- Hộp thoại bóng nói hài hước khi chọt người que -->
+    <!-- Hộp thoại bóng nói chung cho các nhân vật khi được bấm -->
     <Transition name="speech-pop">
       <div v-if="quote" class="stickman-speech-bubble">
         <span class="speech-quote">{{ quote }}</span>
       </div>
     </Transition>
 
-    <!-- Thanh gợi ý tương tác thông minh -->
+    <!-- Thanh hướng dẫn tương tác -->
     <div class="stickman-hint">
-      <span class="hint-item"><span class="hint-icon">👆</span> Chọt nhân viên</span>
+      <span class="hint-item"><span class="hint-icon">👆</span> Bấm vào từng nhân viên (A, B, C, D)</span>
       <span class="hint-sep">•</span>
-      <span class="hint-item">🐱 Vuốt Boss Mèo</span>
+      <span class="hint-item">📑 Chuyên viên C đóng dấu</span>
       <span class="hint-sep">•</span>
-      <span class="hint-item">💨 Bấm quạt đổi số</span>
+      <span class="hint-item">🧦 Xem tất cọc cạch gầm bàn</span>
       <span class="hint-sep">•</span>
-      <span class="hint-item">💭 Đổi giấc mơ</span>
+      <span class="hint-item">🚰 Bình nước 20L</span>
       <span class="hint-sep">•</span>
-      <span class="hint-item">🦟 Đập muỗi</span>
+      <span class="hint-item">🌿 Cây kim tiền</span>
+      <span class="hint-sep">•</span>
+      <span class="hint-item">🦎 Thạch sùng</span>
     </div>
   </div>
 </template>
@@ -530,7 +788,7 @@ function onMosquitoClick(e: MouseEvent) {
 .stickman-stage {
   position: relative;
   width: 100%;
-  max-width: 900px;
+  max-width: 1040px;
   margin: 0 auto;
   border-radius: 20px;
   overflow: hidden;
@@ -565,7 +823,7 @@ function onMosquitoClick(e: MouseEvent) {
 /* Nhịp thở bàn làm việc */
 .breathe-spine {
   animation: spine-breathe 3.5s ease-in-out infinite;
-  transform-origin: 210px 330px;
+  transform-origin: center bottom;
 }
 
 @keyframes spine-breathe {
@@ -575,7 +833,7 @@ function onMosquitoClick(e: MouseEvent) {
 
 .desk-head {
   animation: head-nod 3.5s ease-in-out infinite;
-  transform-origin: 180px 278px;
+  transform-origin: center;
 }
 
 @keyframes head-nod {
@@ -586,7 +844,7 @@ function onMosquitoClick(e: MouseEvent) {
 /* Bong bóng mũi phập phồng */
 .snot-bubble {
   animation: snot-pulse 3.5s ease-in-out infinite;
-  transform-origin: 171px 281px;
+  transform-origin: center;
 }
 
 @keyframes snot-pulse {
@@ -598,7 +856,7 @@ function onMosquitoClick(e: MouseEvent) {
 /* Nhịp thở sofa */
 .breathe-torso, .breathe-blanket {
   animation: torso-breathe 4s ease-in-out infinite;
-  transform-origin: 625px 305px;
+  transform-origin: center;
 }
 
 @keyframes torso-breathe {
@@ -609,7 +867,7 @@ function onMosquitoClick(e: MouseEvent) {
 /* Chân sofa thi thoảng co giật */
 .leg-twitched {
   animation: leg-twitch 6s ease-in-out infinite;
-  transform-origin: 685px 305px;
+  transform-origin: center;
 }
 
 @keyframes leg-twitch {
@@ -628,6 +886,82 @@ function onMosquitoClick(e: MouseEvent) {
   30% { opacity: 0.8; transform: translateY(2px) scale(1); }
   70% { opacity: 0.8; transform: translateY(12px) scale(0.8); }
   100% { opacity: 0; transform: translateY(18px) scale(0.2); }
+}
+
+/* Gầm bàn Chuyên viên D */
+.cocoon-body {
+  animation: cocoon-breathe 3.8s ease-in-out infinite;
+  transform-origin: 525px 400px;
+}
+
+@keyframes cocoon-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05) translateY(-1px); }
+}
+
+.toes-wiggle {
+  animation: toes-wiggle-anim 4s ease-in-out infinite;
+  transform-origin: 565px 400px;
+}
+
+.toes-wiggle-alt {
+  animation: toes-wiggle-anim 4s ease-in-out infinite 0.6s;
+  transform-origin: 568px 410px;
+}
+
+@keyframes toes-wiggle-anim {
+  0%, 70%, 100% { transform: rotate(0deg); }
+  75% { transform: rotate(8deg); }
+  80% { transform: rotate(-6deg); }
+  85% { transform: rotate(4deg); }
+}
+
+/* Bọt khí bình nước 20L */
+.water-bubble-1 {
+  animation: bubble-rise 2.5s ease-in infinite;
+}
+.water-bubble-2 {
+  animation: bubble-rise 2.5s ease-in infinite 0.8s;
+}
+.water-bubble-3 {
+  animation: bubble-rise 2.5s ease-in infinite 1.6s;
+}
+
+@keyframes bubble-rise {
+  0% { transform: translateY(15px); opacity: 0; }
+  20% { opacity: 0.8; }
+  80% { opacity: 0.8; }
+  100% { transform: translateY(-15px); opacity: 0; }
+}
+
+/* Đuôi thạch sùng */
+.lizard-tail {
+  animation: lizard-tail-wag 3s ease-in-out infinite;
+  transform-origin: 5px 10px;
+}
+
+@keyframes lizard-tail-wag {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(15deg); }
+}
+
+/* Lá cây kim tiền đung đưa trong gió quạt */
+.leaf-stem-1 {
+  animation: leaf-sway 3.2s ease-in-out infinite alternate;
+  transform-origin: 20px 85px;
+}
+.leaf-stem-2 {
+  animation: leaf-sway 3.8s ease-in-out infinite alternate 0.5s;
+  transform-origin: 20px 85px;
+}
+.leaf-stem-3 {
+  animation: leaf-sway 2.8s ease-in-out infinite alternate 1s;
+  transform-origin: 20px 85px;
+}
+
+@keyframes leaf-sway {
+  0% { transform: rotate(-3deg); }
+  100% { transform: rotate(4deg); }
 }
 
 /* Chữ Zzz bay bổng */
@@ -658,7 +992,7 @@ function onMosquitoClick(e: MouseEvent) {
   100% { opacity: 0; transform: translateY(-45px) scale(1.4) rotate(-10deg); }
 }
 
-/* Đồng hồ quay kim phút nhẹ */
+/* Đồng hồ quay */
 .clock-minute-hand {
   animation: clock-tick 60s linear infinite;
   transform-origin: 0 0;
@@ -672,7 +1006,7 @@ function onMosquitoClick(e: MouseEvent) {
 /* Boss Mèo văn phòng */
 .cat-tail {
   animation: cat-tail-swish 3s ease-in-out infinite;
-  transform-origin: 53px 322px;
+  transform-origin: 423px 322px;
 }
 
 @keyframes cat-tail-swish {
@@ -682,7 +1016,7 @@ function onMosquitoClick(e: MouseEvent) {
 
 .cat-body {
   animation: cat-breathe 2.8s ease-in-out infinite;
-  transform-origin: 40px 320px;
+  transform-origin: 410px 320px;
 }
 
 @keyframes cat-breathe {
@@ -731,7 +1065,6 @@ function onMosquitoClick(e: MouseEvent) {
   to { transform: rotate(360deg); }
 }
 
-/* Luồng gió */
 .wind-line {
   animation: wind-flow 1.5s linear infinite;
 }
@@ -760,19 +1093,19 @@ function onMosquitoClick(e: MouseEvent) {
   100% { transform: translateY(-6px) rotate(1.5deg); }
 }
 
-/* Con muỗi bay vòng vòng */
+/* Con muỗi */
 .mosquito-character {
   animation: mosquito-fly 7s ease-in-out infinite;
   cursor: crosshair;
 }
 
 @keyframes mosquito-fly {
-  0% { transform: translate(520px, 220px); }
-  20% { transform: translate(560px, 180px); }
-  40% { transform: translate(490px, 200px); }
-  60% { transform: translate(620px, 240px); }
-  80% { transform: translate(540px, 260px); }
-  100% { transform: translate(520px, 220px); }
+  0% { transform: translate(620px, 220px); }
+  20% { transform: translate(680px, 180px); }
+  40% { transform: translate(570px, 200px); }
+  60% { transform: translate(720px, 240px); }
+  80% { transform: translate(630px, 260px); }
+  100% { transform: translate(620px, 220px); }
 }
 
 .mosquito-wing-l, .mosquito-wing-r {
@@ -812,8 +1145,8 @@ function onMosquitoClick(e: MouseEvent) {
 }
 
 @keyframes startle-pop {
-  0% { opacity: 0; transform: translate(420px, 160px) scale(0.2); }
-  100% { opacity: 1; transform: translate(420px, 140px) scale(1); }
+  0% { opacity: 0; transform: translate(540px, 160px) scale(0.2); }
+  100% { opacity: 1; transform: translate(540px, 140px) scale(1); }
 }
 
 /* Hộp thoại nói chuyện khi bị chọt */
@@ -846,11 +1179,10 @@ function onMosquitoClick(e: MouseEvent) {
   border-color: #ffffff transparent;
 }
 
-/* Hộp thoại Boss Mèo */
 .cat-speech-bubble {
   position: absolute;
   bottom: 80px;
-  left: 30px;
+  left: 360px;
   background: #fff7ed;
   color: #9a3412;
   padding: 8px 14px;
@@ -874,15 +1206,15 @@ function onMosquitoClick(e: MouseEvent) {
 
 .stickman-hint {
   position: absolute;
-  bottom: 10px;
+  bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.85);
+  background: rgba(15, 23, 42, 0.88);
   backdrop-filter: blur(6px);
   padding: 6px 16px;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 11.5px;
+  font-size: 11px;
   color: #cbd5e1;
   display: flex;
   align-items: center;

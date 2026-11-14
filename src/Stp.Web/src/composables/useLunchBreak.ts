@@ -32,6 +32,7 @@ const showWarningPopup = ref(false)
 // Tương tác văn phòng
 const pokeCount = ref(0)
 const pokeQuote = ref('')
+const activeSpeaker = ref<'A' | 'B' | 'C' | 'D' | 'cat' | 'lizard' | ''>('')
 const isLightsDimmed = ref(false)
 const fanSpeed = ref<FanSpeed>(1)
 const catPetCount = ref(0)
@@ -39,6 +40,12 @@ const catPurrText = ref('')
 const mosquitoCaught = ref(0)
 const isMosquitoAlive = ref(true)
 const lastSlapPos = ref<{ x: number; y: number } | null>(null)
+
+// Hiệu ứng tương tác tiểu cảnh mới
+const waterBubbleClicks = ref(0)
+const plantRustleCount = ref(0)
+const stampCount = ref(0)
+const lastStampPos = ref<{ x: number; y: number } | null>(null)
 
 // Giấc mơ trưa
 const currentDreamIndex = ref(0)
@@ -60,7 +67,7 @@ const dreamsList: LunchDream[] = [
   {
     id: 'auto-dossier',
     title: 'Hồ sơ tự động trích yếu',
-    subtitle: '10.000 hồ sơ tự động scan xong trong 1 cái chớp mắt!',
+    subtitle: '67.000 hồ sơ tồn đọng tự động khớp 100% không sót 1 dòng!',
     icon: '⚡',
     badge: 'Ước mơ công sở',
   },
@@ -94,7 +101,7 @@ const dreamsList: LunchDream[] = [
   },
 ]
 
-// Thực đơn trưa "Hôm nay ăn gì?"
+// Thực đơn trưa
 const dishesList: LunchDish[] = [
   { id: 'com-tam', name: 'Cơm tấm sườn bì chả ốp la', emoji: '🍛', desc: 'Sườn nướng thơm ngậy, nước mắm kẹo sền sệt, ăn xong no căng rốn!', tag: 'No lâu' },
   { id: 'bun-bo', name: 'Bún bò Huế thêm chả cua', emoji: '🍜', desc: 'Nước dùng cay nồng ngập sả ớt, xì xụp ấm bụng tỉnh cả người!', tag: 'Đậm đà' },
@@ -122,23 +129,45 @@ let rainGain: GainNode | null = null
 let fanSource: AudioBufferSourceNode | null = null
 let fanGain: GainNode | null = null
 
-const POKE_QUOTES = [
+const POKE_QUOTES_A = [
   'Ối sếp ơi! Em thề em chỉ chợp mắt 2 phút thôi mừ... 😴',
-  'Để yên cho em ngủ nốt giấc mộng trưa, 13h em dậy cày bù 200%! 💤',
-  'Cơm sườn 35k no căng bụng rồi, mắt tự động sụp xuống sếp ơi... 🍱',
-  'Dev đang hì hục sửa máy chủ ngoài kia kìa, sếp qua chọt Dev đi! 🛠️',
-  'Nhân viên chăm chỉ cũng cần sạc pin mà sếp... zZz...',
-  '12h trưa là đặc quyền bất khả xâm phạm! 13h00 rồi tính tiếp! 🛌',
+  'Laptop nóng ran rồi, cho máy với em cùng nghỉ trưa tí sếp ơi... 💻',
+  'Dev đang vá máy chủ ngoài kia kìa, sếp qua chọt Dev đi! 🛠️',
   'Ngủ một tí cho da dẻ hồng hào, chiều nhập hồ sơ không bị lú! ✨',
-  'Ai đó gọi một ly trà sữa full topping đánh thức em đi... 🧋',
+]
+
+const POKE_QUOTES_B = [
+  'Để yên cho em ngủ nốt giấc mộng trưa, 13h em dậy cày bù 200%! 💤',
+  'Cơm sườn 35k no căng bụng rồi, mắt tự động sụp xuống... 🍱',
+  '12h trưa là đặc quyền bất khả xâm phạm! 13h00 rồi tính tiếp! 🛌',
+  'Ai đá mất chiếc dép tổ ong của em ra tận góc nhà rồi... 🩴',
+]
+
+const POKE_QUOTES_C = [
+  'Ai gọi hồ sơ đấy? Đang nhập dở cuốn Đăng Ký Kết Hôn 1999 trang thứ 300... 📑',
+  'Chồng hồ sơ dày quá, gối đầu lên êm như đệm Kymdan sếp ơi! 📚',
+  'Đã đóng dấu duyệt 500 bản, tay mỏi nhừ rồi, cho em ngủ... 🔴',
+  'Ai cho em mượn cây bút xóa với... vừa mơ thấy viết nhầm tên cô dâu...',
+]
+
+const POKE_QUOTES_D = [
+  'Gầm bàn vừa tối vừa mát, phát minh vĩ đại nhất của văn phòng! ⛺',
+  'Đừng nhìn chân em! Sáng nay vội quá xỏ nhầm 2 chiếc tất cọc cạch... 🧦',
+  'Đúng 12h55 nhớ đá nhẹ vào chân gọi em dậy rửa mặt nha đồng chí! ⏰',
+  'Chăn ấm chiếu êm, gầm bàn là nhà, đồng nghiệp là anh em! 🛌',
 ]
 
 const CAT_PURRS = [
-  'Meo~ Boss đang ngủ, cấm bấm bàn phím! 🐾',
+  'Meo~ Boss đang ngủ trên CPU cho ấm, cấm gõ phím! 🐾',
   'Grừ grừ... Xoa cằm thích ghê, thưởng cho 1 tim! ❤️',
   'Meo meo! Trưa nay nhớ phần boss nửa miếng sườn nhé! 🍱',
-  'Boss ngủ cạnh CPU cho ấm, ấm như lò sưởi ấy... 💤',
-  'Ngoan lắm sen, chiều làm tiếp kiếm tiền mua hạt cho boss! ✨',
+  'Boss ngủ cạnh quạt mát quá, đừng đánh thức boss! 💤',
+]
+
+const LIZARD_QUOTES = [
+  'Chắt... chắt... 12h rồi mà sen vẫn chưa chịu ngủ à? 🦎',
+  'Tui canh muỗi trên tường từ sáng tới giờ mỏi hết cả mắt! 👀',
+  'Chắt chắt! Tắt đèn đi ngủ đi cho phòng nó lãng mạn! 💡',
 ]
 
 function getAudioContext(): AudioContext | null {
@@ -229,21 +258,45 @@ export function useLunchBreak() {
     sessionStorage.removeItem(BYPASS_KEY)
   }
 
-  // Tương tác văn phòng: Chọt nhân viên
-  function pokeStickman() {
+  // Tương tác theo từng nhân vật cụ thể
+  function pokeWorker(character: 'A' | 'B' | 'C' | 'D') {
     pokeCount.value++
-    const idx = Math.floor(Math.random() * POKE_QUOTES.length)
-    pokeQuote.value = POKE_QUOTES[idx] ?? POKE_QUOTES[0]!
-    playSnoozeChime()
+    activeSpeaker.value = character
+
+    if (character === 'A') {
+      const idx = Math.floor(Math.random() * POKE_QUOTES_A.length)
+      pokeQuote.value = POKE_QUOTES_A[idx]!
+      playSnoozeChime()
+    } else if (character === 'B') {
+      const idx = Math.floor(Math.random() * POKE_QUOTES_B.length)
+      pokeQuote.value = POKE_QUOTES_B[idx]!
+      playSnoozeChime()
+    } else if (character === 'C') {
+      const idx = Math.floor(Math.random() * POKE_QUOTES_C.length)
+      pokeQuote.value = POKE_QUOTES_C[idx]!
+      stampCount.value++
+      playStampSound()
+    } else if (character === 'D') {
+      const idx = Math.floor(Math.random() * POKE_QUOTES_D.length)
+      pokeQuote.value = POKE_QUOTES_D[idx]!
+      playChimeUp()
+    }
   }
 
-  // Tương tác văn phòng: Tắt / Bật đèn
+  // Chọt chung (khi click nút toolbar)
+  function pokeStickman() {
+    const chars: Array<'A' | 'B' | 'C' | 'D'> = ['A', 'B', 'C', 'D']
+    const pick = chars[Math.floor(Math.random() * chars.length)]!
+    pokeWorker(pick)
+  }
+
+  // Tắt / Bật đèn
   function toggleLights() {
     isLightsDimmed.value = !isLightsDimmed.value
     playSwitchSound()
   }
 
-  // Tương tác văn phòng: Bật / Chỉnh quạt máy
+  // Bật / Đổi số quạt
   function cycleFan() {
     fanSpeed.value = ((fanSpeed.value + 1) % 3) as FanSpeed
     playClickSound()
@@ -256,21 +309,42 @@ export function useLunchBreak() {
     }
   }
 
-  // Tương tác văn phòng: Boss mèo
+  // Boss Mèo
   function petCat() {
     catPetCount.value++
+    activeSpeaker.value = 'cat'
     const idx = Math.floor(Math.random() * CAT_PURRS.length)
     catPurrText.value = CAT_PURRS[idx] ?? CAT_PURRS[0]!
     playCatMeow()
   }
 
-  // Tương tác: Đổi giấc mơ
+  // Thạch sùng trên tường
+  function clickLizard() {
+    activeSpeaker.value = 'lizard'
+    const idx = Math.floor(Math.random() * LIZARD_QUOTES.length)
+    pokeQuote.value = LIZARD_QUOTES[idx]!
+    playLizardChirp()
+  }
+
+  // Bình nước 20L
+  function clickWaterDispenser() {
+    waterBubbleClicks.value++
+    playBubbleSound()
+  }
+
+  // Cây kim tiền
+  function rustlePlant() {
+    plantRustleCount.value++
+    playLeafRustle()
+  }
+
+  // Đổi giấc mơ
   function nextDream() {
     currentDreamIndex.value++
     playChimeUp()
   }
 
-  // Tương tác: Đập muỗi
+  // Đập muỗi
   function slapMosquito(x?: number, y?: number) {
     if (!isMosquitoAlive.value) return
     isMosquitoAlive.value = false
@@ -280,14 +354,13 @@ export function useLunchBreak() {
     }
     playSlapSound()
 
-    // Hồi sinh muỗi sau 3.5 giây để tiếp tục chơi
     window.setTimeout(() => {
       isMosquitoAlive.value = true
       lastSlapPos.value = null
     }, 3500)
   }
 
-  // Tiện ích: Hôm nay ăn gì?
+  // Quay món ăn trưa
   function rollDish() {
     if (isRollingDish.value) return
     isRollingDish.value = true
@@ -306,7 +379,7 @@ export function useLunchBreak() {
     }, 90)
   }
 
-  // ==================== HỆ THỐNG ÂM THANH ASMR BẰNG WEB AUDIO API ====================
+  // ==================== HỆ THỐNG ÂM THANH BẰNG WEB AUDIO API ====================
 
   function setAmbientSound(type: AmbientSoundType) {
     if (activeAmbientSound.value === type) {
@@ -333,7 +406,6 @@ export function useLunchBreak() {
     stopFanNoise()
   }
 
-  // 1. Hộp nhạc ru ngủ
   function startLullaby() {
     const ctx = getAudioContext()
     if (!ctx) return
@@ -365,7 +437,6 @@ export function useLunchBreak() {
     }
   }
 
-  // 2. Tiếng mưa rơi ASMR
   function startRainNoise() {
     const ctx = getAudioContext()
     if (!ctx) return
@@ -397,9 +468,7 @@ export function useLunchBreak() {
       filter.connect(rainGain)
       rainGain.connect(ctx.destination)
       rainSource.start()
-    } catch {
-      // Audio not supported
-    }
+    } catch {}
   }
 
   function stopRainNoise() {
@@ -413,7 +482,6 @@ export function useLunchBreak() {
     rainGain = null
   }
 
-  // 3. Tiếng quạt gió ASMR
   function startFanNoise() {
     const ctx = getAudioContext()
     if (!ctx) return
@@ -441,9 +509,7 @@ export function useLunchBreak() {
       filter.connect(fanGain)
       fanGain.connect(ctx.destination)
       fanSource.start()
-    } catch {
-      // Audio not supported
-    }
+    } catch {}
   }
 
   function stopFanNoise() {
@@ -457,7 +523,7 @@ export function useLunchBreak() {
     fanGain = null
   }
 
-  // Sound effects
+  // Các hiệu ứng âm thanh sống động
   function playSnoozeChime() {
     const ctx = getAudioContext()
     if (!ctx) return
@@ -552,6 +618,84 @@ export function useLunchBreak() {
     } catch {}
   }
 
+  function playStampSound() {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    try {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'triangle'
+      const t = ctx.currentTime
+      osc.frequency.setValueAtTime(140, t)
+      osc.frequency.exponentialRampToValueAtTime(45, t + 0.1)
+      gain.gain.setValueAtTime(0.2, t)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(t + 0.12)
+    } catch {}
+  }
+
+  function playBubbleSound() {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    try {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      const t = ctx.currentTime
+      osc.frequency.setValueAtTime(350, t)
+      osc.frequency.exponentialRampToValueAtTime(800, t + 0.08)
+      gain.gain.setValueAtTime(0.08, t)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(t + 0.1)
+    } catch {}
+  }
+
+  function playLizardChirp() {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    try {
+      [0, 0.07, 0.14].forEach((delay) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        const t = ctx.currentTime + delay
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(2400, t)
+        osc.frequency.exponentialRampToValueAtTime(3200, t + 0.03)
+        gain.gain.setValueAtTime(0.04, t)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(t)
+        osc.stop(t + 0.04)
+      })
+    } catch {}
+  }
+
+  function playLeafRustle() {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    try {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      const t = ctx.currentTime
+      osc.type = 'triangle'
+      osc.frequency.setValueAtTime(400, t)
+      osc.frequency.exponentialRampToValueAtTime(600, t + 0.08)
+      gain.gain.setValueAtTime(0.03, t)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(t + 0.1)
+    } catch {}
+  }
+
   function playTickSound() {
     const ctx = getAudioContext()
     if (!ctx) return
@@ -628,6 +772,7 @@ export function useLunchBreak() {
     showWarningPopup,
     pokeCount,
     pokeQuote,
+    activeSpeaker,
     isLightsDimmed,
     fanSpeed,
     catPetCount,
@@ -635,6 +780,10 @@ export function useLunchBreak() {
     mosquitoCaught,
     isMosquitoAlive,
     lastSlapPos,
+    waterBubbleClicks,
+    plantRustleCount,
+    stampCount,
+    lastStampPos,
     currentDream,
     currentDreamIndex,
     dreamsList,
@@ -647,9 +796,13 @@ export function useLunchBreak() {
     enableDevBypass,
     disableDevBypass,
     pokeStickman,
+    pokeWorker,
     toggleLights,
     cycleFan,
     petCat,
+    clickLizard,
+    clickWaterDispenser,
+    rustlePlant,
     nextDream,
     slapMosquito,
     rollDish,

@@ -4,7 +4,6 @@ import {
   Clock,
   Dices,
   Hand,
-  Heart,
   Moon,
   Music,
   Power,
@@ -25,6 +24,7 @@ const {
   isPreview,
   pokeCount,
   pokeQuote,
+  activeSpeaker,
   isLightsDimmed,
   fanSpeed,
   catPetCount,
@@ -32,6 +32,8 @@ const {
   mosquitoCaught,
   isMosquitoAlive,
   lastSlapPos,
+  stampCount,
+  waterBubbleClicks,
   currentDream,
   selectedDish,
   isRollingDish,
@@ -39,9 +41,13 @@ const {
   togglePreview,
   enableDevBypass,
   pokeStickman,
+  pokeWorker,
   toggleLights,
   cycleFan,
   petCat,
+  clickLizard,
+  clickWaterDispenser,
+  rustlePlant,
   nextDream,
   slapMosquito,
   rollDish,
@@ -55,7 +61,7 @@ const pinError = ref(false)
 const isPokedEffect = ref(false)
 
 type ActiveTab = 'food' | 'asmr' | 'mini-game'
-const activeTab = ref<ActiveTab>('food')
+const activeTab = ref<ActiveTab>('mini-game')
 
 const formattedCurrentTime = computed(() => {
   return now.value.toLocaleTimeString('vi-VN', {
@@ -71,9 +77,17 @@ const fanSpeedLabel = computed(() => {
   return 'Gió êm'
 })
 
-function handlePoke() {
+function handleGeneralPoke() {
   isPokedEffect.value = true
   pokeStickman()
+  window.setTimeout(() => {
+    isPokedEffect.value = false
+  }, 600)
+}
+
+function handleWorkerPoke(character: 'A' | 'B' | 'C' | 'D') {
+  isPokedEffect.value = true
+  pokeWorker(character)
   window.setTimeout(() => {
     isPokedEffect.value = false
   }, 600)
@@ -103,11 +117,11 @@ function submitDevPin() {
     <header class="lunch-screen-header">
       <div class="lunch-logo-brand">
         <span class="brand-pill">STP ARCHIVE</span>
-        <span class="brand-mode">CHẾ ĐỘ NGHỈ TRƯA & BẢO TRÌ</span>
+        <span class="brand-mode">GIỜ NGHỈ TRƯA VĂN PHÒNG & BẢO TRÌ</span>
       </div>
 
       <div class="lunch-header-right">
-        <!-- Nút tắt / bật đèn văn phòng -->
+        <!-- Nút tắt / bật đèn -->
         <button
           class="btn btn-secondary btn-sm header-tool-btn"
           :class="{ 'is-active': isLightsDimmed }"
@@ -179,8 +193,8 @@ function submitDevPin() {
           😴 VĂN PHÒNG ĐANG NGHỈ TRƯA (12:00 – 13:00)
         </h1>
         <p class="lunch-sub-heading">
-          Máy chủ tạm "ngủ đông" để đội ngũ kỹ thuật vá lỗi & cấy tính năng mới.
-          Mời bà con nghỉ ngơi, đúng <strong>13:00:00</strong> hệ thống sẽ tự động mở lại!
+          Góc lưu trữ sổ sách hộ tịch và máy chủ tạm "ngủ đông" để đội ngũ kỹ thuật nâng cấp hệ thống.
+          Mời các đồng chí nghỉ ngơi, đúng <strong>13:00:00</strong> hệ thống sẽ tự động mở lại!
         </p>
       </div>
 
@@ -205,11 +219,12 @@ function submitDevPin() {
         </div>
       </div>
 
-      <!-- Hoạt cảnh Stickman sống động với Boss Mèo, Quạt máy, Muỗi & Giấc mơ -->
+      <!-- Toàn cảnh phòng làm việc Stickman sống động -->
       <div class="stickman-wrapper">
         <StickmanSleepers
           :poked="isPokedEffect"
           :quote="pokeQuote"
+          :active-speaker="activeSpeaker"
           :is-lights-dimmed="isLightsDimmed"
           :fan-speed="fanSpeed"
           :cat-pet-count="catPetCount"
@@ -217,8 +232,14 @@ function submitDevPin() {
           :current-dream="currentDream"
           :is-mosquito-alive="isMosquitoAlive"
           :last-slap-pos="lastSlapPos"
-          @poke="handlePoke"
+          :stamp-count="stampCount"
+          :water-bubble-clicks="waterBubbleClicks"
+          @poke="handleGeneralPoke"
+          @poke-worker="handleWorkerPoke"
           @pet-cat="petCat"
+          @click-lizard="clickLizard"
+          @click-water-dispenser="clickWaterDispenser"
+          @rustle-plant="rustlePlant"
           @cycle-fan="cycleFan"
           @toggle-lights="toggleLights"
           @next-dream="nextDream"
@@ -230,6 +251,17 @@ function submitDevPin() {
       <section class="lunch-feature-deck">
         <!-- Thanh Tab chuyển đổi -->
         <div class="feature-tabs-nav">
+          <button
+            class="tab-btn"
+            :class="{ 'is-active': activeTab === 'mini-game' }"
+            type="button"
+            @click="activeTab = 'mini-game'"
+          >
+            <Sparkles :size="16" />
+            <span>👥 4 Nhân Viên & Tiểu Cảnh</span>
+            <span v-if="pokeCount > 0" class="badge-count">{{ pokeCount }}</span>
+          </button>
+
           <button
             class="tab-btn"
             :class="{ 'is-active': activeTab === 'food' }"
@@ -250,22 +282,106 @@ function submitDevPin() {
             <span>🎧 Góc ASMR Ru Ngủ</span>
             <span v-if="activeAmbientSound !== 'none'" class="active-dot"></span>
           </button>
-
-          <button
-            class="tab-btn"
-            :class="{ 'is-active': activeTab === 'mini-game' }"
-            type="button"
-            @click="activeTab = 'mini-game'"
-          >
-            <Sparkles :size="16" />
-            <span>🎮 Canh Giấc Ngủ</span>
-            <span v-if="mosquitoCaught > 0 || catPetCount > 0" class="badge-count">
-              {{ mosquitoCaught + catPetCount }}
-            </span>
-          </button>
         </div>
 
-        <!-- TAB 1: CỖ MÁY ẨM THỰC "HÔM NAY ĂN GÌ?" -->
+        <!-- TAB 1: 4 NHÂN VIÊN & TIỂU CẢNH VĂN PHÒNG -->
+        <div v-if="activeTab === 'mini-game'" class="tab-panel game-panel">
+          <div class="game-header">
+            <h3 class="panel-title">Hệ Sinh Thái Nhân Viên Công Sở Buổi Trưa 🏛️</h3>
+            <p class="panel-desc">
+              Bấm vào từng nhân vật hoặc tiểu cảnh để kích hoạt các tình huống hài hước:
+            </p>
+          </div>
+
+          <div class="characters-grid">
+            <!-- Chuyên viên C: Sổ sách 1999 -->
+            <div class="char-card">
+              <div class="char-header">
+                <span class="char-icon">📑</span>
+                <div>
+                  <h4 class="char-name">Chuyên viên C (Sổ Sách)</h4>
+                  <span class="char-desc">Chìm trong đống hồ sơ 1999, kính cận trễ mũi</span>
+                </div>
+              </div>
+              <button class="btn btn-secondary btn-sm w-full" type="button" @click="handleWorkerPoke('C')">
+                <span>🔴 Đóng dấu cộp cộp ({{ stampCount }})</span>
+              </button>
+            </div>
+
+            <!-- Chuyên viên D: Ngủ gầm bàn -->
+            <div class="char-card">
+              <div class="char-header">
+                <span class="char-icon">⛺</span>
+                <div>
+                  <h4 class="char-name">Chuyên viên D (Gầm Bàn)</h4>
+                  <span class="char-desc">Trùm kén áo gió, tất cọc cạch sọc xanh chấm bi</span>
+                </div>
+              </div>
+              <button class="btn btn-secondary btn-sm w-full" type="button" @click="handleWorkerPoke('D')">
+                <span>🧦 Xem ngón chân ngúng nguẩy</span>
+              </button>
+            </div>
+
+            <!-- Chuyên viên A: Chăm chỉ gục bàn -->
+            <div class="char-card">
+              <div class="char-header">
+                <span class="char-icon">💻</span>
+                <div>
+                  <h4 class="char-name">Chuyên viên A (Chăm Chỉ)</h4>
+                  <span class="char-desc">Gục đầu bên laptop STP, bong bóng mũi phồng to</span>
+                </div>
+              </div>
+              <button class="btn btn-secondary btn-sm w-full" type="button" @click="handleWorkerPoke('A')">
+                <Hand :size="14" />
+                <span>Chọt snot-bubble nổ</span>
+              </button>
+            </div>
+
+            <!-- Chuyên viên B: Ngủ lăn lóc sofa -->
+            <div class="char-card">
+              <div class="char-header">
+                <span class="char-icon">🩴</span>
+                <div>
+                  <h4 class="char-name">Chuyên viên B (Lăn Lóc)</h4>
+                  <span class="char-desc">Chân gác thành ghế, dép tổ ong rơi, chảy nước miếng</span>
+                </div>
+              </div>
+              <button class="btn btn-secondary btn-sm w-full" type="button" @click="handleWorkerPoke('B')">
+                <span>💤 Chọt chân gác trời</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Các tiểu cảnh phụ -->
+          <div class="scenery-quick-bar">
+            <button class="scenery-btn" type="button" @click="petCat">
+              <span class="scenery-icon">🐱</span>
+              <span>Xoa cằm Boss Mèo ({{ catPetCount }}❤️)</span>
+            </button>
+            <button class="scenery-btn" type="button" @click="clickWaterDispenser">
+              <span class="scenery-icon">🚰</span>
+              <span>Bình nước sủi bọt ({{ waterBubbleClicks }}🫧)</span>
+            </button>
+            <button class="scenery-btn" type="button" @click="clickLizard">
+              <span class="scenery-icon">🦎</span>
+              <span>Thạch sùng tặc lưỡi</span>
+            </button>
+            <button class="scenery-btn" type="button" @click="rustlePlant">
+              <span class="scenery-icon">🌿</span>
+              <span>Cây kim tiền may mắn</span>
+            </button>
+            <button class="scenery-btn" type="button" @click="nextDream">
+              <span class="scenery-icon">{{ currentDream.icon }}</span>
+              <span>Đổi giấc mơ trưa</span>
+            </button>
+            <button class="scenery-btn" type="button" :disabled="!isMosquitoAlive" @click="slapMosquito(620, 220)">
+              <span class="scenery-icon">🦟</span>
+              <span>Đập muỗi ({{ mosquitoCaught }}💥)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 2: CỖ MÁY ẨM THỰC "HÔM NAY ĂN GÌ?" -->
         <div v-if="activeTab === 'food'" class="tab-panel food-panel">
           <div class="food-intro">
             <div>
@@ -285,7 +401,6 @@ function submitDevPin() {
             </button>
           </div>
 
-          <!-- Thẻ món ăn được chọn -->
           <div v-if="selectedDish" class="dish-card-result">
             <div class="dish-emoji">{{ selectedDish.emoji }}</div>
             <div class="dish-info">
@@ -302,7 +417,7 @@ function submitDevPin() {
           </div>
         </div>
 
-        <!-- TAB 2: GÓC ASMR RU NGỦ TỔNG HỢP -->
+        <!-- TAB 3: GÓC ASMR RU NGỦ -->
         <div v-if="activeTab === 'asmr'" class="tab-panel asmr-panel">
           <div class="asmr-header">
             <h3 class="panel-title">Âm Thanh Trắng (ASMR) Thư Giãn Buổi Trưa 🌿</h3>
@@ -312,7 +427,6 @@ function submitDevPin() {
           </div>
 
           <div class="asmr-presets-grid">
-            <!-- Hộp nhạc ru ngủ -->
             <button
               class="asmr-card"
               :class="{ 'is-playing': activeAmbientSound === 'lullaby' }"
@@ -327,7 +441,6 @@ function submitDevPin() {
               <span class="asmr-status-badge">{{ activeAmbientSound === 'lullaby' ? 'Đang phát' : 'Phát' }}</span>
             </button>
 
-            <!-- Tiếng mưa rơi -->
             <button
               class="asmr-card"
               :class="{ 'is-playing': activeAmbientSound === 'rain' }"
@@ -342,7 +455,6 @@ function submitDevPin() {
               <span class="asmr-status-badge">{{ activeAmbientSound === 'rain' ? 'Đang phát' : 'Phát' }}</span>
             </button>
 
-            <!-- Tiếng quạt mát -->
             <button
               class="asmr-card"
               :class="{ 'is-playing': activeAmbientSound === 'fan' }"
@@ -357,7 +469,6 @@ function submitDevPin() {
               <span class="asmr-status-badge">{{ activeAmbientSound === 'fan' ? 'Đang phát' : 'Phát' }}</span>
             </button>
 
-            <!-- Tắt âm -->
             <button
               class="asmr-card"
               :class="{ 'is-playing': activeAmbientSound === 'none' }"
@@ -371,73 +482,6 @@ function submitDevPin() {
               </div>
               <span class="asmr-status-badge">{{ activeAmbientSound === 'none' ? 'Đang chọn' : 'Tắt' }}</span>
             </button>
-          </div>
-        </div>
-
-        <!-- TAB 3: GÓC CANH GIẤC NGỦ & TƯƠNG TÁC HÀI HƯỚC -->
-        <div v-if="activeTab === 'mini-game'" class="tab-panel game-panel">
-          <div class="game-header">
-            <h3 class="panel-title">Nhiệm Vụ Bảo Vệ Giấc Ngủ Văn Phòng 🛡️</h3>
-            <p class="panel-desc">
-              Tương tác trực tiếp trên bức vẽ stickman hoặc bấm các nút bên dưới để giải trí!
-            </p>
-          </div>
-
-          <div class="game-actions-grid">
-            <!-- Chọt nhân viên -->
-            <div class="game-stat-card">
-              <div class="stat-top">
-                <span class="stat-icon">👆</span>
-                <span class="stat-num">{{ pokeCount }}</span>
-              </div>
-              <div class="stat-name">Lần chọt nhân viên</div>
-              <button class="btn btn-secondary btn-sm stat-btn" type="button" @click="handlePoke">
-                <Hand :size="14" />
-                <span>Chọt một cái!</span>
-              </button>
-            </div>
-
-            <!-- Vuốt Boss Mèo -->
-            <div class="game-stat-card">
-              <div class="stat-top">
-                <span class="stat-icon">🐱</span>
-                <span class="stat-num">{{ catPetCount }}</span>
-              </div>
-              <div class="stat-name">Lần cưng nựng Boss Mèo</div>
-              <button class="btn btn-secondary btn-sm stat-btn" type="button" @click="petCat">
-                <Heart :size="14" class="text-rose-400" />
-                <span>Xoa cằm Boss</span>
-              </button>
-            </div>
-
-            <!-- Diệt muỗi -->
-            <div class="game-stat-card">
-              <div class="stat-top">
-                <span class="stat-icon">🦟</span>
-                <span class="stat-num">{{ mosquitoCaught }}</span>
-              </div>
-              <div class="stat-name">Muỗi đã bị diệt</div>
-              <button
-                class="btn btn-secondary btn-sm stat-btn"
-                :disabled="!isMosquitoAlive"
-                type="button"
-                @click="slapMosquito(520, 220)"
-              >
-                <span>💥 {{ isMosquitoAlive ? 'Đập muỗi ngay!' : 'Muỗi đang hồi sinh…' }}</span>
-              </button>
-            </div>
-
-            <!-- Đổi giấc mơ -->
-            <div class="game-stat-card">
-              <div class="stat-top">
-                <span class="stat-icon">{{ currentDream.icon }}</span>
-                <span class="stat-badge">{{ currentDream.badge }}</span>
-              </div>
-              <div class="stat-name">{{ currentDream.title }}</div>
-              <button class="btn btn-secondary btn-sm stat-btn" type="button" @click="nextDream">
-                <span>💭 Đổi giấc mơ khác</span>
-              </button>
-            </div>
           </div>
         </div>
       </section>
@@ -591,9 +635,9 @@ function submitDevPin() {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding: 28px 20px 48px;
-  gap: 24px;
-  max-width: 960px;
+  padding: 24px 20px 48px;
+  gap: 20px;
+  max-width: 1060px;
   margin: 0 auto;
   width: 100%;
 }
@@ -632,7 +676,7 @@ function submitDevPin() {
   font-size: 13.5px;
   color: #94a3b8;
   margin: 0;
-  max-width: 620px;
+  max-width: 680px;
   line-height: 1.6;
 }
 
@@ -640,16 +684,16 @@ function submitDevPin() {
   background: rgba(30, 41, 59, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 18px;
-  padding: 12px 26px;
+  padding: 10px 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
 }
 
 .timer-label {
-  font-size: 11px;
+  font-size: 10.5px;
   letter-spacing: 1px;
   font-weight: 700;
   color: #fbbf24;
@@ -669,14 +713,14 @@ function submitDevPin() {
 
 .timer-num {
   font-family: 'Courier New', Courier, monospace;
-  font-size: 32px;
+  font-size: 30px;
   font-weight: 900;
   color: #ffffff;
   background: #0f172a;
-  padding: 4px 12px;
+  padding: 3px 10px;
   border-radius: 8px;
   border: 1px solid #334155;
-  min-width: 60px;
+  min-width: 55px;
   text-align: center;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
 }
@@ -685,11 +729,11 @@ function submitDevPin() {
   font-size: 9px;
   font-weight: 700;
   color: #64748b;
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
 .timer-sep {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 900;
   color: #f59e0b;
   animation: blink-sep 1s infinite;
@@ -707,7 +751,7 @@ function submitDevPin() {
 /* Feature Deck */
 .lunch-feature-deck {
   width: 100%;
-  max-width: 900px;
+  max-width: 1040px;
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
@@ -723,11 +767,11 @@ function submitDevPin() {
 
 .tab-btn {
   flex: 1;
-  padding: 14px 18px;
+  padding: 13px 16px;
   background: transparent;
   border: none;
   color: #94a3b8;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -781,7 +825,7 @@ function submitDevPin() {
 }
 
 .tab-panel {
-  padding: 20px 24px;
+  padding: 18px 22px;
 }
 
 .panel-title {
@@ -795,6 +839,86 @@ function submitDevPin() {
   margin: 0;
   font-size: 12.5px;
   color: #94a3b8;
+}
+
+/* 4 Nhân viên Grid */
+.characters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.char-card {
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.char-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.char-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.char-name {
+  margin: 0 0 2px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.char-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+  display: block;
+}
+
+.scenery-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 12px;
+}
+
+.scenery-btn {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 6px 12px;
+  color: #cbd5e1;
+  font-size: 11.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.scenery-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.scenery-icon {
+  font-size: 14px;
 }
 
 /* Food Panel */
@@ -969,67 +1093,6 @@ function submitDevPin() {
 .asmr-card.is-playing .asmr-status-badge {
   background: #6366f1;
   color: #ffffff;
-}
-
-/* Game Panel */
-.game-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.game-stat-card {
-  background: rgba(30, 41, 59, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-}
-
-.stat-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.stat-icon {
-  font-size: 24px;
-}
-
-.stat-num {
-  font-size: 20px;
-  font-weight: 900;
-  color: #38bdf8;
-  font-family: 'Courier New', Courier, monospace;
-}
-
-.stat-badge {
-  font-size: 9px;
-  background: #3b82f6;
-  color: white;
-  padding: 2px 6px;
-  border-radius: 6px;
-  font-weight: bold;
-}
-
-.stat-name {
-  font-size: 12px;
-  color: #cbd5e1;
-  font-weight: 600;
-  min-height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.stat-btn {
-  width: 100%;
-  font-size: 12px;
 }
 
 /* Modal Dev */
