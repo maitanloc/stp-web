@@ -153,6 +153,49 @@ const onlyNeedsNormalization = ref(false)
 const missingSheetNumberFirst = ref(false)
 const sortByNumber = ref(false)
 
+function resetScopeFilters(): void {
+  year.value = ''
+  yearFrom.value = ''
+  yearTo.value = ''
+  type.value = ''
+  search.value = ''
+  onlyExisting.value = false
+  numberMode.value = 'all'
+  numberFrom.value = ''
+  numberTo.value = ''
+  singleNumber.value = ''
+  onlyMissingSheetNumber.value = false
+  onlyMissingDocumentNumber.value = false
+  onlyMissingNumber.value = false
+  onlyNeedsNormalization.value = false
+  missingSheetNumberFirst.value = false
+  sortByNumber.value = false
+  page.value = 1
+}
+
+const hasActiveFilter = computed(() => {
+  return (
+    year.value !== '' ||
+    yearFrom.value !== '' ||
+    yearTo.value !== '' ||
+    Boolean(type.value) ||
+    Boolean(search.value.trim()) ||
+    onlyExisting.value ||
+    numberMode.value !== 'all' ||
+    onlyMissingSheetNumber.value ||
+    onlyMissingDocumentNumber.value ||
+    onlyMissingNumber.value ||
+    onlyNeedsNormalization.value ||
+    missingSheetNumberFirst.value ||
+    sortByNumber.value
+  )
+})
+
+function clearAllFilters(): void {
+  resetScopeFilters()
+  void fetchRows()
+}
+
 const edits = ref(new Map<number, RowEdit>())
 const changedCount = computed(() => edits.value.size)
 const selected = ref(new Set<number>())
@@ -401,7 +444,7 @@ async function restoreFromServer(sessionId: string): Promise<boolean> {
     rememberSession(data.sessionId, data.fileName)
     resetHistory()
     loadHistory(data.fileName)
-    page.value = 1
+    resetScopeFilters()
     await fetchRows()
     await fetchYearReport()
     // Nạp toàn bộ sửa đổi của cả phòng đã lưu trên server
@@ -1814,23 +1857,7 @@ async function inspect(): Promise<void> {
     previewOpen.value = false
     previewMode.value = 'full'
     filteredPreview.value = null
-    year.value = ''
-    yearFrom.value = ''
-    yearTo.value = ''
-    type.value = ''
-    search.value = ''
-    onlyExisting.value = false
-    numberMode.value = 'all'
-    numberFrom.value = ''
-    numberTo.value = ''
-    singleNumber.value = ''
-    onlyMissingSheetNumber.value = false
-    onlyMissingDocumentNumber.value = false
-    onlyMissingNumber.value = false
-    onlyNeedsNormalization.value = false
-    missingSheetNumberFirst.value = false
-    sortByNumber.value = false
-    page.value = 1
+    resetScopeFilters()
     pageSize.value = 20
     files.value = []
     closeSummaryEditor()
@@ -2111,6 +2138,7 @@ function closeSession(): void {
   closeSummaryEditor()
   draftSavedAt.value = null
   draftStatus.value = 'idle'
+  resetScopeFilters()
 }
 
 function goToPage(next: number): void {
@@ -3187,8 +3215,8 @@ onBeforeUnmount(() => {
               </span>
             </label>
 
-            <label class="checkbox summary-existing">
-              <input v-model="onlyExisting" type="checkbox" />
+            <label class="checkbox summary-existing" :class="{ 'is-disabled': session.existingListCount === 0 }">
+              <input v-model="onlyExisting" type="checkbox" :disabled="session.existingListCount === 0" />
               <span class="checkbox-text">
                 <span class="checkbox-title">Chỉ dòng đã có danh mục</span>
                 <span class="checkbox-desc">{{ formatNumber(session.existingListCount) }} dòng</span>
@@ -3520,7 +3548,20 @@ onBeforeUnmount(() => {
                       <EmptyState
                         title="Không có hồ sơ phù hợp"
                         description="Thử bỏ bộ lọc năm, loại hồ sơ, số hồ sơ hoặc từ khoá tìm kiếm."
-                      />
+                      >
+                        <template #action>
+                          <button
+                            v-if="hasActiveFilter"
+                            class="btn btn-secondary btn-sm"
+                            type="button"
+                            style="margin-top: 14px"
+                            @click="clearAllFilters"
+                          >
+                            <Eraser :size="14" />
+                            Xoá bộ lọc (Hiện toàn bộ {{ formatNumber(session?.rowCount ?? 0) }} hồ sơ)
+                          </button>
+                        </template>
+                      </EmptyState>
                     </td>
                   </tr>
                 </template>

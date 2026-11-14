@@ -1630,7 +1630,11 @@ public sealed class SummaryToolService : ISummaryToolService
             NormalizedSummary = normalizedSummary,
             NormalizedBaseSummary = normalizedBaseSummary,
             Group = raw.Group,
-            Type = raw.Type
+            Type = !string.IsNullOrWhiteSpace(raw.Type)
+                ? raw.Type
+                : MarriageSummaryNormalizer.IsMarriageRegistration(raw.Text)
+                    ? "Đăng ký kết hôn"
+                    : null
         };
     }
 
