@@ -602,6 +602,7 @@ public sealed partial class AutoTickService : IAutoTickService
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = @"C:\ProgramData\ms-playwright";
 
             using var proc = Process.Start(psi);
             if (proc is null)
@@ -895,6 +896,7 @@ public sealed partial class AutoTickService : IAutoTickService
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = @"C:\ProgramData\ms-playwright";
 
         using var proc = Process.Start(psi);
         if (proc is null)

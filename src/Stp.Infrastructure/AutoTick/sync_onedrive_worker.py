@@ -3,6 +3,19 @@ import os
 import json
 import time
 import re
+
+# Đảm bảo Playwright luôn tìm thấy Chromium dù chạy dưới quyền Windows Service (SYSTEM) hay User
+if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ or not os.path.exists(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")):
+    candidate_paths = [
+        r"C:\ProgramData\ms-playwright",
+        r"C:\WINDOWS\system32\config\systemprofile\AppData\Local\ms-playwright",
+        r"C:\Users\maita\AppData\Local\ms-playwright",
+    ]
+    for p in candidate_paths:
+        if os.path.exists(p):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = p
+            break
+
 from playwright.sync_api import sync_playwright
 
 def normalize_text(text):
