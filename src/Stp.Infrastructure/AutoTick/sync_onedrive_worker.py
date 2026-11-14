@@ -121,14 +121,17 @@ def run_sync(input_file, output_file):
         )
         page = context.new_page()
         print(f"INFO:Opening OneDrive workbook for sheet {sheet_name}...", flush=True)
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        time.sleep(3)
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            print(f"WARN:page.goto warning: {e}", flush=True)
+        time.sleep(2)
 
         excel_frame = None
         start_wait = time.time()
-        while time.time() - start_wait < 25:
+        while time.time() - start_wait < 30:
             for f in page.frames:
-                if "xlviewer" in f.url.lower() or "wopiframe" in f.url.lower() or "doc.aspx" in f.url.lower():
+                if "xlviewer" in f.url.lower() or "wopiframe" in f.url.lower() or "doc.aspx" in f.url.lower() or f.name == "WacFrame_Excel_0":
                     excel_frame = f
                     break
             if excel_frame:
@@ -196,7 +199,7 @@ def run_sync(input_file, output_file):
                     page.evaluate(f"() => navigator.clipboard.writeText({json.dumps(text)})")
                 except Exception:
                     pass
-            time.sleep(0.08)
+            time.sleep(0.06)
             page.keyboard.press("Control+v")
 
         for r_item in rows:
@@ -217,12 +220,14 @@ def run_sync(input_file, output_file):
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(f"D{r_idx}")
                     page.keyboard.press("Enter")
-                    time.sleep(0.22)
+                    time.sleep(0.20)
+                    name_box.evaluate("el => el.blur()")
+                    time.sleep(0.05)
 
                     safe_paste(summary_text)
-                    time.sleep(0.22)
+                    time.sleep(0.18)
                     page.keyboard.press("Enter")
-                    time.sleep(0.12)
+                    time.sleep(0.10)
                     print(f"PROGRESS_D:{r_idx}:{num_label}:D{r_idx}", flush=True)
 
                 # 2. Fill Column H (Công thức tổng hợp trích yếu động) if provided
@@ -230,35 +235,52 @@ def run_sync(input_file, output_file):
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(f"H{r_idx}")
                     page.keyboard.press("Enter")
-                    time.sleep(0.22)
+                    time.sleep(0.20)
+                    name_box.evaluate("el => el.blur()")
+                    time.sleep(0.05)
 
                     safe_paste(formula_h)
-                    time.sleep(0.22)
+                    time.sleep(0.18)
                     page.keyboard.press("Enter")
-                    time.sleep(0.12)
+                    time.sleep(0.10)
                     print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
 
-                # 3. Tick checkbox cells in target_cells (~0.25s - 0.3s mỗi tick, 100% chuẩn xác không trượt ô)
+                # 3. Tick checkbox cells in target_cells
+                # Trong Excel Online, ô checkbox là giá trị boolean TRUE/FALSE.
+                # Khi di chuyển qua NameBox, blur name_box để trả focus về ô lưới tính,
+                # sau đó dán giá trị TRUE qua clipboard Control+v để đảm bảo 100% ô nhận giá trị TRUE
+                # (tương thích cả ô checkbox định dạng control lẫn ô boolean).
                 for cell_coord in target_cells:
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(cell_coord)
                     page.keyboard.press("Enter")
-                    time.sleep(0.14)
-                    page.keyboard.press("Space")
                     time.sleep(0.12)
+                    name_box.evaluate("el => el.blur()")
+                    time.sleep(0.05)
+
+                    safe_paste("TRUE")
+                    time.sleep(0.10)
+                    page.keyboard.press("Enter")
+                    time.sleep(0.06)
+
                     ticked_cols.append(cell_coord)
                     total_ticked += 1
                     print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
 
-                # 3. Untick checkbox cells in untick_cells (khi người dùng xóa bớt giấy tờ khỏi trích yếu)
-                # Trong Excel Online, nhấn phím Delete trên ô checkbox đã tick sẽ lập tức huỷ tick (đưa về FALSE)
+                # 4. Untick checkbox cells in untick_cells (khi người dùng xóa bớt giấy tờ khỏi trích yếu)
                 for cell_coord in untick_cells:
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(cell_coord)
                     page.keyboard.press("Enter")
-                    time.sleep(0.14)
-                    page.keyboard.press("Delete")
                     time.sleep(0.12)
+                    name_box.evaluate("el => el.blur()")
+                    time.sleep(0.05)
+
+                    safe_paste("FALSE")
+                    time.sleep(0.10)
+                    page.keyboard.press("Enter")
+                    time.sleep(0.06)
+
                     unticked_cols.append(cell_coord)
                     total_ticked += 1
                     print(f"PROGRESS_UNTICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)

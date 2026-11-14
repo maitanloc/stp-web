@@ -7,11 +7,18 @@ using Stp.Core.Storage;
 using Stp.Infrastructure.AutoTick;
 using Stp.Infrastructure.Storage;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Stp.Tests.AutoTick;
 
 public sealed class AutoTickServiceTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public AutoTickServiceTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
     private sealed class DummyPublisher : IAutoTickEventPublisher
     {
         public List<AutoTickProgressEvent> ProgressEvents { get; } = new();
@@ -138,5 +145,88 @@ public sealed class AutoTickServiceTests
         Assert.NotNull(res);
         Assert.NotEmpty(res.Sheets);
         Assert.True(res.TotalRows > 0);
+    }
+
+    [Fact]
+    public void Inspect_RealFile_D_STP()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "stp_onedrive");
+        var file = Directory.GetFiles(tempDir, "*DK KET HON.xlsx").OrderByDescending(File.GetLastWriteTime).FirstOrDefault();
+        if (file == null)
+        {
+            _output.WriteLine("No file in stp_onedrive");
+            return;
+        }
+
+        _output.WriteLine($"Inspecting: {file}");
+        using var wb = new XLWorkbook(file);
+        _output.WriteLine($"Total sheets: {wb.Worksheets.Count}");
+        _output.WriteLine("Sheet names: " + string.Join(", ", wb.Worksheets.Select(w => w.Name)));
+
+        // Check sheet 1997 or whichever is there
+        var ws = wb.Worksheet("1997") ?? wb.Worksheets.First();
+        _output.WriteLine($"--- Sheet: {ws.Name} ---");
+        for (int r = 1; r <= 8; r++)
+        {
+            var rowTexts = new List<string>();
+            for (int c = 1; c <= 45; c++)
+            {
+                var text = ws.Cell(r, c).GetString().Trim();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    var colLetter = ws.Column(c).ColumnLetter();
+                    rowTexts.Add($"{colLetter}{r}: {text}");
+                }
+            }
+            _output.WriteLine($"Row {r}: {string.Join(" | ", rowTexts)}");
+        }
+
+        // Test improved matching
+        var sheetsToCheck = new[] { "1997", "1998", "file nhập", "1995ok" };
+
+        foreach (var sName in sheetsToCheck)
+        {
+            var wsTarget = wb.Worksheet(sName);
+            if (wsTarget == null) continue;
+
+            var hdrs = typeof(AutoTickService).GetMethod("ExtractHeaders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, new object[] { wsTarget }) as List<AutoTickSheetHeader>;
+            Assert.NotNull(hdrs);
+
+            var unmatchedList = new HashSet<string>();
+            int checkedRows = 0;
+            int lastR = Math.Min(wsTarget.LastRowUsed()?.RowNumber() ?? 50, 150);
+
+            for (int r = 9; r <= lastR; r++)
+            {
+                var summary = wsTarget.Cell(r, 8).GetString().Trim();
+                if (string.IsNullOrEmpty(summary)) summary = wsTarget.Cell(r, 4).GetString().Trim();
+
+                var m = System.Text.RegularExpressions.Regex.Match(summary, @"\(([^)]+)\)\s*$");
+                if (!m.Success) continue;
+
+                checkedRows++;
+                var items = m.Groups[1].Value.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => s.Trim().ToLowerInvariant())
+                    .ToList();
+
+                foreach (var item in items)
+                {
+                    bool isMatched = hdrs.Any(h => IsSmartMatchInternal(h.Title, item));
+                    if (!isMatched)
+                    {
+                        unmatchedList.Add(item);
+                        _output.WriteLine($"  [{sName} Row {r}] UNMATCHED: '{item}'");
+                    }
+                }
+            }
+            _output.WriteLine($"Sheet '{sName}': Checked {checkedRows} rows. Unmatched count: {unmatchedList.Count}. Items: {string.Join(" | ", unmatchedList)}");
+        }
+    }
+
+    private static bool IsSmartMatchInternal(string headerTitle, string documentItem)
+    {
+        return (bool)typeof(AutoTickService).GetMethod("IsSmartMatch", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .Invoke(null, new object[] { headerTitle, documentItem })!;
     }
 }
