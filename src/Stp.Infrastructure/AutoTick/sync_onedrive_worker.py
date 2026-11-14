@@ -10,12 +10,23 @@ if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ or not os.path.exists(os.environ
     candidate_paths = [
         r"C:\ProgramData\ms-playwright",
         r"C:\WINDOWS\system32\config\systemprofile\AppData\Local\ms-playwright",
-        r"C:\Users\maita\AppData\Local\ms-playwright",
     ]
+    try:
+        users_dir = r"C:\Users"
+        if os.path.isdir(users_dir):
+            for u in os.listdir(users_dir):
+                candidate_paths.append(os.path.join(users_dir, u, "AppData", "Local", "ms-playwright"))
+    except Exception:
+        pass
+
     for p in candidate_paths:
-        if os.path.exists(p):
-            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = p
-            break
+        try:
+            if os.path.isdir(p) and any(os.scandir(p)):
+                os.environ["PLAYWRIGHT_BROWSERS_PATH"] = p
+                print(f"INFO:Found Playwright browsers at: {p}", flush=True)
+                break
+        except Exception:
+            pass
 
 from playwright.sync_api import sync_playwright
 
@@ -122,35 +133,33 @@ def run_sync(input_file, output_file):
             permissions=["clipboard-read", "clipboard-write"]
         )
         page = context.new_page()
+        page.set_default_timeout(6000)
         print(f"INFO:Opening OneDrive workbook for sheet {sheet_name}...", flush=True)
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.goto(url, wait_until="networkidle", timeout=60000)
         except Exception as e:
-            print(f"WARN:page.goto warning: {e}", flush=True)
+            print(f"WARN:page.goto warning (networkidle): {e}", flush=True)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            except Exception:
+                pass
         time.sleep(2)
 
         excel_frame = None
         start_wait = time.time()
-        while time.time() - start_wait < 30:
+        while time.time() - start_wait < 35:
             for f in page.frames:
                 if "xlviewer" in f.url.lower() or "wopiframe" in f.url.lower() or "doc.aspx" in f.url.lower() or f.name == "WacFrame_Excel_0":
                     excel_frame = f
                     break
             if excel_frame:
                 break
-            for f in page.frames:
-                try:
-                    if f.locator("#FormulaBar-NameBox-input, #FormulaBarNameBox, input[aria-label*='Name Box']").count() > 0:
-                        excel_frame = f
-                        break
-                except Exception:
-                    pass
-            if excel_frame:
-                break
             time.sleep(1)
 
         if not excel_frame:
-            excel_frame = page.main_frame
+            raise RuntimeError("Không tìm thấy khung làm việc Excel Online (iframe). Vui lòng kiểm tra liên kết OneDrive hoặc quyền chia sẻ.")
+
+        excel_frame.set_default_timeout(6000)
 
         # Grant clipboard permissions for all frame origins
         try:
@@ -188,20 +197,32 @@ def run_sync(input_file, output_file):
         except Exception:
             pass
 
-        # Select sheet if tab button exists
+        name_box = excel_frame.locator("#FormulaBar-NameBox-input, #FormulaBarNameBox, input[aria-label*='Name Box'], input[id*='NameBox']").first
         try:
-            tab = excel_frame.locator(f"[role='tab']:text-is('{sheet_name}'), button:text-is('{sheet_name}'), [role='tab']:has-text('{sheet_name}'), button:has-text('{sheet_name}')")
+            name_box.wait_for(state="attached", timeout=20000)
+        except Exception as e:
+            raise RuntimeError(f"Không thể định vị thanh Name Box trong Excel Online: {e}")
+
+        # Chuyển sang sheet cần đồng bộ: Thử click tab trước, nếu ẩn thì nhảy trực tiếp qua Name Box
+        sheet_switched = False
+        try:
+            tab = excel_frame.locator(f"#m_excelWebRenderer_ewaCtl_m_sheetTabBar [role='tab']:text-is('{sheet_name}'), #m_excelWebRenderer_ewaCtl_m_sheetTabBar [role='tab'][aria-label*='{sheet_name}']").first
             if tab.count() > 0:
-                tab.first.click()
-                time.sleep(1)
+                tab.click()
+                time.sleep(0.5)
+                sheet_switched = True
         except Exception:
             pass
 
-        name_box = excel_frame.locator("#FormulaBar-NameBox-input, #FormulaBarNameBox, input[aria-label*='Name Box'], input[id*='NameBox']").first
-        try:
-            name_box.wait_for(state="attached", timeout=15000)
-        except Exception:
-            pass
+        if not sheet_switched:
+            try:
+                name_box.evaluate("el => el.focus()")
+                name_box.fill(f"'{sheet_name}'!A1")
+                page.keyboard.press("Enter")
+                time.sleep(0.8)
+                sheet_switched = True
+            except Exception:
+                pass
 
         def safe_paste(text):
             pasted = False
@@ -259,8 +280,6 @@ def run_sync(input_file, output_file):
                     name_box.fill(f"D{r_idx}")
                     page.keyboard.press("Enter")
                     time.sleep(0.20)
-                    name_box.evaluate("el => el.blur()")
-                    time.sleep(0.05)
 
                     safe_paste(summary_text)
                     time.sleep(0.18)
@@ -274,8 +293,6 @@ def run_sync(input_file, output_file):
                     name_box.fill(f"H{r_idx}")
                     page.keyboard.press("Enter")
                     time.sleep(0.20)
-                    name_box.evaluate("el => el.blur()")
-                    time.sleep(0.05)
 
                     safe_paste(formula_h)
                     time.sleep(0.18)
@@ -284,17 +301,11 @@ def run_sync(input_file, output_file):
                     print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
 
                 # 3. Tick checkbox cells in target_cells
-                # Trong Excel Online, ô checkbox là giá trị boolean TRUE/FALSE.
-                # Khi di chuyển qua NameBox, blur name_box để trả focus về ô lưới tính,
-                # sau đó dán giá trị TRUE qua clipboard Control+v để đảm bảo 100% ô nhận giá trị TRUE
-                # (tương thích cả ô checkbox định dạng control lẫn ô boolean).
                 for cell_coord in target_cells:
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(cell_coord)
                     page.keyboard.press("Enter")
                     time.sleep(0.12)
-                    name_box.evaluate("el => el.blur()")
-                    time.sleep(0.05)
 
                     safe_paste("TRUE")
                     time.sleep(0.10)
@@ -305,14 +316,12 @@ def run_sync(input_file, output_file):
                     total_ticked += 1
                     print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
 
-                # 4. Untick checkbox cells in untick_cells (khi người dùng xóa bớt giấy tờ khỏi trích yếu)
+                # 4. Untick checkbox cells in untick_cells
                 for cell_coord in untick_cells:
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(cell_coord)
                     page.keyboard.press("Enter")
                     time.sleep(0.12)
-                    name_box.evaluate("el => el.blur()")
-                    time.sleep(0.05)
 
                     safe_paste("FALSE")
                     time.sleep(0.10)
