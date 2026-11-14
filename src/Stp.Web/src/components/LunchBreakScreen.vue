@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   Clock,
   Dices,
@@ -16,10 +17,15 @@ import {
   Wrench,
 } from '@lucide/vue'
 import { useLunchBreak } from '../composables/useLunchBreak'
+import { useToast } from '../composables/useToast'
 import StickmanSleepers from './StickmanSleepers.vue'
+
+const router = useRouter()
+const toast = useToast()
 
 const {
   now,
+  isLunchHour,
   timeRemaining,
   isPreview,
   pokeCount,
@@ -106,11 +112,20 @@ function submitDevPin() {
   if (ok) {
     isDevPinModalOpen.value = false
     devPinInput.value = ''
+    toast.success('Mở khóa Dev thành công', 'Bạn có thể truy cập các tab làm việc.')
+    void router.push('/')
   } else {
     pinError.value = true
     window.setTimeout(() => {
       pinError.value = false
     }, 1500)
+  }
+}
+
+function handleExitPreview() {
+  togglePreview()
+  if (!isLunchHour.value) {
+    void router.push('/')
   }
 }
 </script>
@@ -177,7 +192,7 @@ function submitDevPin() {
           v-if="isPreview"
           class="btn btn-warning btn-sm"
           type="button"
-          @click="togglePreview"
+          @click="handleExitPreview"
         >
           <Power :size="14" />
           <span>Thoát Preview</span>

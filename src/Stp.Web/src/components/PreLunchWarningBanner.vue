@@ -440,3 +440,4 @@ const formattedCurrentTime = computed(() => {
   opacity: 0;
 }
 </style>
+

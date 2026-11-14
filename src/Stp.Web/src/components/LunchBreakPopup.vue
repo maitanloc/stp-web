@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Clock, Coffee, Sparkles, Utensils, Wrench, X } from '@lucide/vue'
 import { useLunchBreak } from '../composables/useLunchBreak'
+
+const router = useRouter()
+const route = useRoute()
 
 const {
   timeRemaining,
@@ -15,9 +19,21 @@ const isDevPinOpen = ref(false)
 const devPinInput = ref('')
 const pinError = ref(false)
 
+function onGoToLunch() {
+  dismissWarningPopup()
+  if (route.path !== '/nghi-trua') {
+    void router.push('/nghi-trua')
+  }
+}
+
 function submitPin() {
   const ok = enableDevBypass(devPinInput.value)
-  if (!ok) {
+  if (ok) {
+    dismissWarningPopup()
+    if (route.path === '/nghi-trua') {
+      void router.push('/')
+    }
+  } else {
     pinError.value = true
     window.setTimeout(() => {
       pinError.value = false
@@ -30,7 +46,7 @@ onMounted(() => {
     if (autoDismissSeconds.value > 1) {
       autoDismissSeconds.value--
     } else {
-      dismissWarningPopup()
+      onGoToLunch()
     }
   }, 1000)
 })
@@ -54,7 +70,7 @@ onUnmounted(() => {
           type="button"
           title="Vào màn hình nghỉ trưa"
           aria-label="Đóng"
-          @click="dismissWarningPopup"
+          @click="onGoToLunch"
         >
           <X :size="16" />
         </button>
@@ -122,7 +138,7 @@ onUnmounted(() => {
         <button
           class="btn btn-primary btn-md lunch-action-btn"
           type="button"
-          @click="dismissWarningPopup"
+          @click="onGoToLunch"
         >
           <span>Đi ăn cơm & ngủ trưa thôi! 😴</span>
           <span class="auto-count-tag">({{ autoDismissSeconds }}s)</span>

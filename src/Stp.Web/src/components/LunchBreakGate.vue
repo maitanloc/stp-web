@@ -1,10 +1,81 @@
 <script setup lang="ts">
-// Tạm thời vô hiệu hoá giờ nghỉ trưa & bảo trì máy chủ để người dùng test
+import { onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Wrench } from '@lucide/vue'
+import { useLunchBreak } from '../composables/useLunchBreak'
+import LunchBreakPopup from './LunchBreakPopup.vue'
+import PreLunchWarningBanner from './PreLunchWarningBanner.vue'
+
+const router = useRouter()
+const route = useRoute()
+
+const {
+  isLunchBreakActive,
+  showWarningPopup,
+  isDevBypass,
+  disableDevBypass,
+} = useLunchBreak()
+
+// Cứ đến 12h: Tự động chuyển hướng sang tab nghỉ trưa (/nghi-trua)
+function checkAutoNavigate(active: boolean) {
+  if (active && !isDevBypass.value) {
+    if (route.path !== '/nghi-trua') {
+      try {
+        sessionStorage.setItem('stp.lunch.auto_navigated', 'true')
+      } catch {}
+      void router.push('/nghi-trua')
+    }
+  } else if (!active && route.path === '/nghi-trua') {
+    // 13:00 hết giờ nghỉ trưa: tự động đưa người dùng trở lại Dashboard
+    try {
+      if (sessionStorage.getItem('stp.lunch.auto_navigated') === 'true') {
+        sessionStorage.removeItem('stp.lunch.auto_navigated')
+        void router.push('/')
+      }
+    } catch {}
+  }
+}
+
+watch(isLunchBreakActive, (active) => {
+  checkAutoNavigate(active)
+}, { immediate: true })
+
+watch(isDevBypass, (bypass) => {
+  if (!bypass && isLunchBreakActive.value && route.path !== '/nghi-trua') {
+    void router.push('/nghi-trua')
+  }
+})
+
+onMounted(() => {
+  checkAutoNavigate(isLunchBreakActive.value)
+})
 </script>
 
 <template>
   <div class="lunch-gate-container">
-    <!-- Tạm thời vô hiệu hoá giờ nghỉ trưa & bảo trì máy chủ để người dùng test -->
+    <!-- Cảnh báo đóng server trước 10 phút (11:50) cho toàn cơ quan -->
+    <PreLunchWarningBanner />
+
+    <!-- Popup nhắc nhở nghỉ trưa ban đầu lúc 12:00 -->
+    <LunchBreakPopup v-if="showWarningPopup" />
+
+    <!-- Floating badge cho Dev khi đã bypass -->
+    <Teleport to="body">
+      <div v-if="isDevBypass" class="dev-bypass-pill">
+        <div class="dev-pill-inner">
+          <Wrench :size="13" class="text-amber-400" />
+          <span>Dev Mode: Đang bỏ qua giờ nghỉ trưa</span>
+          <button
+            class="btn btn-ghost btn-xs text-amber-300"
+            type="button"
+            title="Bật lại chế độ nghỉ trưa để kiểm tra"
+            @click="disableDevBypass"
+          >
+            Bật lại
+          </button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

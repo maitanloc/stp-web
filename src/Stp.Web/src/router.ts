@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppShell from './components/AppShell.vue'
 import { initTeamIdentity, teamIdentity } from './composables/useTeamIdentity'
+import { useToast } from './composables/useToast'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -109,6 +110,15 @@ const routes: RouteRecordRaw[] = [
           admin: true,
         },
       },
+      {
+        path: 'nghi-trua',
+        name: 'lunch-break',
+        component: () => import('./views/LunchBreakView.vue'),
+        meta: {
+          title: 'Giờ nghỉ trưa (12:00 – 13:00)',
+          subtitle: 'Khu vực nghỉ ngơi văn phòng, xả stress và bảo trì máy chủ',
+        },
+      },
     ],
   },
   {
@@ -131,12 +141,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'In hàng loạt / Xuất PDF' },
   },
   {
-    path: '/nghi-trua',
-    name: 'lunch-break',
-    component: () => import('./views/LunchBreakView.vue'),
-    meta: { title: 'Nghỉ trưa (12:00 – 13:00) · STP Archive' },
-  },
-  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('./views/NotFoundView.vue'),
@@ -150,8 +154,23 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 })
 
-// Route admin: kiểm tra quyền từ cookie phiên (không chặn route thường).
+// Navigation guard: kiểm tra giờ nghỉ trưa (12h - 13h) và quyền admin
 router.beforeEach(async (to) => {
+  // 1. Kiểm tra khung giờ nghỉ trưa: 12:00:00 – 12:59:59 GMT+7
+  try {
+    const isBypass = sessionStorage.getItem('stp.lunch.bypass') === 'true'
+    const isLunchHour = new Date().getHours() === 12
+    if (isLunchHour && !isBypass && to.path !== '/nghi-trua') {
+      const toast = useToast()
+      toast.warning(
+        'Giờ nghỉ trưa (12:00 – 13:00)',
+        'Hệ thống đang tạm nghỉ ngơi & bảo trì. Tự động chuyển sang tab Nghỉ trưa!',
+      )
+      return { path: '/nghi-trua' }
+    }
+  } catch {}
+
+  // 2. Route admin: kiểm tra quyền từ cookie phiên (không chặn route thường).
   if (!to.meta.admin) return true
   await initTeamIdentity()
   if (teamIdentity.value?.role !== 'admin') {

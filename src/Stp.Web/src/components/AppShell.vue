@@ -28,9 +28,13 @@ import {
 } from '../composables/useToolRegistry'
 import CommandPalette from './CommandPalette.vue'
 import NotificationBell from './NotificationBell.vue'
+import { useLunchBreak } from '../composables/useLunchBreak'
+import { useToast } from '../composables/useToast'
 
 const route = useRoute()
 const { theme, toggleTheme } = useTheme()
+const toast = useToast()
+const { isLunchHour, isDevBypass } = useLunchBreak()
 
 const sidebarOpen = ref(false)
 const healthy = ref<boolean | null>(null)
@@ -58,6 +62,17 @@ const pageSubtitle = computed(() => String(route.meta.subtitle ?? ''))
 function isActive(path: string): boolean {
   if (path === '/') return route.path === '/'
   return route.path === path || route.path.startsWith(`${path}/`)
+}
+
+function handleToolNavClick(event: MouseEvent, to: string): void {
+  sidebarOpen.value = false
+  if (isLunchHour.value && !isDevBypass.value && to !== '/nghi-trua') {
+    event.preventDefault()
+    toast.warning(
+      'Giờ nghỉ trưa (12:00 – 13:00)',
+      'Hệ thống đang tạm khóa để bảo trì & nghỉ trưa. Vui lòng nghỉ ngơi hoặc nhập mã Dev (stp2026) để vào!',
+    )
+  }
 }
 
 async function checkHealth(): Promise<void> {
@@ -109,8 +124,8 @@ onUnmounted(() => {
             :key="item.to"
             :to="item.to"
             class="nav-item"
-            :class="{ 'is-active': isActive(item.to) }"
-            @click="sidebarOpen = false"
+            :class="{ 'is-active': isActive(item.to), 'is-lunch-blocked': isLunchHour && !isDevBypass }"
+            @click="handleToolNavClick($event, item.to)"
           >
             <component :is="item.icon" :size="17" />
             <span class="grow">{{ item.label }}</span>
@@ -130,9 +145,15 @@ onUnmounted(() => {
       </nav>
 
       <div class="sidebar-footer">
-        <RouterLink class="nav-item" to="/nghi-trua">
+        <RouterLink
+          class="nav-item"
+          :class="{ 'is-active': isActive('/nghi-trua') }"
+          to="/nghi-trua"
+          @click="sidebarOpen = false"
+        >
           <Moon :size="17" />
-          <span>Giờ nghỉ trưa (12h-13h)</span>
+          <span class="grow">Giờ nghỉ trưa (12h-13h)</span>
+          <span v-if="isLunchHour && !isDevBypass" class="lunch-live-badge">12h-13h</span>
         </RouterLink>
         <RouterLink class="nav-item" to="/developer" target="_blank" rel="noopener">
           <ShieldCheck :size="17" />
@@ -151,7 +172,7 @@ onUnmounted(() => {
     <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
 
     <div class="main">
-      <header class="topbar">
+      <header v-if="route.path !== '/nghi-trua'" class="topbar">
         <button
           class="btn btn-ghost btn-icon mobile-only"
           type="button"
@@ -206,7 +227,7 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <main class="page">
+      <main class="page" :class="{ 'page-lunch': route.path === '/nghi-trua' }">
         <RouterView v-slot="{ Component }">
           <Transition name="route" mode="out-in">
             <component :is="Component" :key="route.name?.toString() ?? route.path" />
