@@ -36,12 +36,9 @@ import { errorMessage } from '../lib/errors'
 
 const toast = useToast()
 
-// Default OneDrive URL from user
+// OneDrive Storage Key
 const ONEDRIVE_STORAGE_KEY = 'stp.autotick.onedrive_url'
-const DEFAULT_URL =
-  'https://onedrive.live.com/:x:/g/personal/52960fb7b88aa4ef/IQDder6_nmp6QI5JsHL1gk1oAV2fQl2Dv7Nt09mpsdj3lJ0?e=5ggKl7'
-
-const oneDriveUrl = ref(localStorage.getItem(ONEDRIVE_STORAGE_KEY) || DEFAULT_URL)
+const oneDriveUrl = ref(localStorage.getItem(ONEDRIVE_STORAGE_KEY) || '')
 watch(oneDriveUrl, (val) => {
   if (val && val.trim()) {
     localStorage.setItem(ONEDRIVE_STORAGE_KEY, val.trim())

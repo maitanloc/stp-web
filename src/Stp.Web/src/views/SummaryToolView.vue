@@ -318,9 +318,7 @@ const pendingExportMode = ref<'full' | 'filtered'>('full')
 
 // OneDrive Live Sync state
 const ONEDRIVE_STORAGE_KEY = 'stp.autotick.onedrive_url'
-const DEFAULT_ONEDRIVE_URL =
-  'https://onedrive.live.com/:x:/g/personal/52960fb7b88aa4ef/IQDder6_nmp6QI5JsHL1gk1oAV2fQl2Dv7Nt09mpsdj3lJ0?e=5ggKl7'
-const oneDriveUrl = ref(localStorage.getItem(ONEDRIVE_STORAGE_KEY) || DEFAULT_ONEDRIVE_URL)
+const oneDriveUrl = ref(localStorage.getItem(ONEDRIVE_STORAGE_KEY) || '')
 const oneDriveSyncModalOpen = ref(false)
 const syncingOneDrive = ref(false)
 const oneDriveSyncResult = ref<AutoTickSyncSummaryResponse | null>(null)
@@ -328,6 +326,7 @@ const oneDriveSyncError = ref<string | null>(null)
 const rowsToSyncPreview = ref<AutoTickSyncSummaryItem[]>([])
 const selectedSyncSheet = ref('1997')
 const oneDriveSyncScope = ref<'changes_only' | 'current_filter'>('changes_only')
+const ensureFormulaH = ref(true)
 const syncingInBackground = ref(false)
 
 watch(lastOneDriveSyncCompleted, (completed) => {
@@ -2476,19 +2475,23 @@ function openOneDriveSyncFromToolbar(): void {
 async function executeOneDriveSync(): Promise<void> {
   if (rowsToSyncPreview.value.length === 0 || syncingOneDrive.value) return
 
+  if (!oneDriveUrl.value.trim()) {
+    toast.warning('Thiếu liên kết', 'Vui lòng nhập hoặc dán liên kết OneDrive / Excel Online.')
+    return
+  }
+
   syncingOneDrive.value = true
   oneDriveSyncError.value = null
   oneDriveSyncResult.value = null
 
-  if (oneDriveUrl.value.trim()) {
-    localStorage.setItem(ONEDRIVE_STORAGE_KEY, oneDriveUrl.value.trim())
-  }
+  localStorage.setItem(ONEDRIVE_STORAGE_KEY, oneDriveUrl.value.trim())
 
   try {
     const payload: AutoTickSyncSummaryRequest = {
       oneDriveUrl: oneDriveUrl.value.trim(),
       sheetName: selectedSyncSheet.value.trim() || '1997',
       rows: rowsToSyncPreview.value,
+      ensureFormulaH: ensureFormulaH.value,
     }
 
     const res = await request<AutoTickSyncSummaryResponse>('/api/auto-tick/sync-summary?background=true', {
@@ -4911,14 +4914,22 @@ onBeforeUnmount(() => {
           <div class="modal-body stack" style="gap: 16px">
             <!-- OneDrive Link Input -->
             <label class="field">
-              <span class="label">Liên kết file Excel trên OneDrive (Được đồng bộ từ Menu Tự động đánh dấu):</span>
+              <span class="label">Liên kết file Excel Online / OneDrive:</span>
               <input
                 v-model="oneDriveUrl"
                 class="input"
                 type="text"
-                placeholder="https://onedrive.live.com/:x:/g/personal/..."
+                placeholder="Dán liên kết Excel Online hoặc OneDrive vào đây..."
                 :disabled="syncingOneDrive"
               />
+            </label>
+
+            <!-- Ensure Formula H Option -->
+            <label class="field-checkbox" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; margin-top: -6px">
+              <input v-model="ensureFormulaH" type="checkbox" :disabled="syncingOneDrive" />
+              <span style="font-size: 0.88rem; color: var(--text)">
+                Tự động kiểm tra & cập nhật công thức ở Cột H (Trích yếu tổng hợp)
+              </span>
             </label>
 
             <!-- Sheet & Count Summary Card -->

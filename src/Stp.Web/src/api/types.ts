@@ -830,12 +830,14 @@ export interface AutoTickSyncSummaryItem {
   summaryText: string
   items: string[]
   targetCells?: string[]
+  formulaH?: string
 }
 
 export interface AutoTickSyncSummaryRequest {
   oneDriveUrl: string
   sheetName: string
   rows: AutoTickSyncSummaryItem[]
+  ensureFormulaH?: boolean
 }
 
 export interface AutoTickSyncSummaryRowResult {

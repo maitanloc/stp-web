@@ -353,6 +353,8 @@ public sealed partial class AutoTickService : IAutoTickService
 
             var sheet = workbook.Worksheet(sheetName);
             var headers = ExtractHeaders(sheet);
+            int lastColNumber = sheet.LastColumnUsed()?.ColumnNumber() ?? (headers.Count > 0 ? headers.Max(h => h.ColumnIndex) : 95);
+            string lastColLetter = sheet.Column(lastColNumber).ColumnLetter();
             int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 4;
             int newUnticked = 0;
 
@@ -405,9 +407,16 @@ public sealed partial class AutoTickService : IAutoTickService
             };
         }
 
-        var url = string.IsNullOrWhiteSpace(request.OneDriveUrl)
-            ? "https://onedrive.live.com/:x:/g/personal/52960fb7b88aa4ef/IQDder6_nmp6QI5JsHL1gk1oAV2fQl2Dv7Nt09mpsdj3lJ0?e=5ggKl7"
-            : request.OneDriveUrl.Trim();
+        if (string.IsNullOrWhiteSpace(request.OneDriveUrl))
+        {
+            return new AutoTickSyncSummaryResponse
+            {
+                Success = false,
+                Message = "Vui lòng nhập đường dẫn liên kết OneDrive hoặc Excel Online."
+            };
+        }
+
+        var url = request.OneDriveUrl.Trim();
 
         try
         {
@@ -423,6 +432,8 @@ public sealed partial class AutoTickService : IAutoTickService
 
             var sheet = workbook.Worksheet(sheetName);
             var headers = ExtractHeaders(sheet);
+            int lastColNumber = sheet.LastColumnUsed()?.ColumnNumber() ?? (headers.Count > 0 ? headers.Max(h => h.ColumnIndex) : 95);
+            string lastColLetter = sheet.Column(lastColNumber).ColumnLetter();
 
             int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 500;
             var rowNumberMap = new Dictionary<int, int>();
@@ -499,13 +510,24 @@ public sealed partial class AutoTickService : IAutoTickService
                     }
                 }
 
+                string? formulaH = null;
+                if (request.EnsureFormulaH)
+                {
+                    var cellH = sheet.Cell(rowIndex, 8);
+                    if (!cellH.HasFormula)
+                    {
+                        formulaH = $"=\"Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài của \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"của \"), \" và\")&\" và  \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"và \"), \".\")&\" (\" & TEXTJOIN(\", \", TRUE, REPT(I$4:{lastColLetter}$4, I{rowIndex}:{lastColLetter}{rowIndex}=TRUE)) & \")\"";
+                    }
+                }
+
                 processedRows.Add(new
                 {
                     rowIndex,
                     numberLabel = rItem.NumberLabel,
                     summaryText = rItem.SummaryText,
                     targetCells,
-                    untickCells
+                    untickCells,
+                    formulaH
                 });
             }
 

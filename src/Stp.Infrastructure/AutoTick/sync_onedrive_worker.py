@@ -91,6 +91,7 @@ def run_sync(input_file, output_file):
             r_idx = r_item.get('rowIndex')
             num_label = r_item.get('numberLabel', '')
             summary_text = r_item.get('summaryText', '')
+            formula_h = r_item.get('formulaH', '')
             target_cells = r_item.get('targetCells', [])
             untick_cells = r_item.get('untickCells', [])
 
@@ -104,17 +105,32 @@ def run_sync(input_file, output_file):
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(f"D{r_idx}")
                     page.keyboard.press("Enter")
-                    time.sleep(0.25)
+                    time.sleep(0.22)
 
                     excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(summary_text)})")
                     time.sleep(0.08)
                     page.keyboard.press("Control+v")
-                    time.sleep(0.25)
+                    time.sleep(0.22)
                     page.keyboard.press("Enter")
-                    time.sleep(0.15)
+                    time.sleep(0.12)
                     print(f"PROGRESS_D:{r_idx}:{num_label}:D{r_idx}", flush=True)
 
-                # 2. Tick checkbox cells in target_cells (~0.25s - 0.3s mỗi tick, 100% chuẩn xác không trượt ô)
+                # 2. Fill Column H (Công thức tổng hợp trích yếu động) if provided
+                if formula_h:
+                    name_box.evaluate("el => el.focus()")
+                    name_box.fill(f"H{r_idx}")
+                    page.keyboard.press("Enter")
+                    time.sleep(0.22)
+
+                    excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(formula_h)})")
+                    time.sleep(0.08)
+                    page.keyboard.press("Control+v")
+                    time.sleep(0.22)
+                    page.keyboard.press("Enter")
+                    time.sleep(0.12)
+                    print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
+
+                # 3. Tick checkbox cells in target_cells (~0.25s - 0.3s mỗi tick, 100% chuẩn xác không trượt ô)
                 for cell_coord in target_cells:
                     name_box.evaluate("el => el.focus()")
                     name_box.fill(cell_coord)

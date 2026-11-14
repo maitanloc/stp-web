@@ -130,6 +130,7 @@ public sealed class AutoTickSyncSummaryItem
     public string SummaryText { get; set; } = string.Empty;
     public IReadOnlyList<string> Items { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string>? TargetCells { get; set; }
+    public string? FormulaH { get; set; }
 }
 
 public sealed class AutoTickSyncSummaryRequest
@@ -137,6 +138,7 @@ public sealed class AutoTickSyncSummaryRequest
     public string OneDriveUrl { get; set; } = string.Empty;
     public string SheetName { get; set; } = string.Empty;
     public IReadOnlyList<AutoTickSyncSummaryItem> Rows { get; set; } = Array.Empty<AutoTickSyncSummaryItem>();
+    public bool EnsureFormulaH { get; set; } = true;
 }
 
 public sealed class AutoTickSyncSummaryRowResult
