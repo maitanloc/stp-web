@@ -415,16 +415,8 @@ public sealed class SummaryToolService : ISummaryToolService
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
         var result = new List<SummaryPreviewRow>();
 
-        foreach (var change in changes)
-        {
-            if (!byRow.TryGetValue(change.RowNumber, out var row))
-            {
-                throw new ArgumentException(
-                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
-            }
-        }
-
         var changeMap = changes
+            .Where(change => byRow.ContainsKey(change.RowNumber))
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
 
@@ -466,20 +458,12 @@ public sealed class SummaryToolService : ISummaryToolService
         var allowed = scopedRows.Select(row => row.RowNumber).ToHashSet();
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
 
-        foreach (var change in changes)
-        {
-            if (!byRow.ContainsKey(change.RowNumber))
-            {
-                throw new ArgumentException(
-                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
-            }
-        }
-
-        var changeMap = changes
+        var validChanges = changes.Where(change => byRow.ContainsKey(change.RowNumber)).ToList();
+        var changeMap = validChanges
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
         var result = new List<SummaryPreviewRow>();
-        var ignored = changes.Count(change => !allowed.Contains(change.RowNumber));
+        var ignored = validChanges.Count(change => !allowed.Contains(change.RowNumber));
         var changedRows = 0;
         var normalizedRows = 0;
 
@@ -522,16 +506,8 @@ public sealed class SummaryToolService : ISummaryToolService
         var session = RequireSession(sessionId);
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
 
-        foreach (var change in changes)
-        {
-            if (!byRow.ContainsKey(change.RowNumber))
-            {
-                throw new ArgumentException(
-                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
-            }
-        }
-
         var changeMap = changes
+            .Where(change => byRow.ContainsKey(change.RowNumber))
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
         var allowed = onlyRowNumbers is null || onlyRowNumbers.Count == 0
@@ -609,19 +585,11 @@ public sealed class SummaryToolService : ISummaryToolService
         var allowed = scopedRows.Select(row => row.RowNumber).ToHashSet();
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
 
-        foreach (var change in changes)
-        {
-            if (!byRow.ContainsKey(change.RowNumber))
-            {
-                throw new ArgumentException(
-                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
-            }
-        }
-
-        var changeMap = changes
+        var validChanges = changes.Where(change => byRow.ContainsKey(change.RowNumber)).ToList();
+        var changeMap = validChanges
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
-        var ignored = changes.Count(change => !allowed.Contains(change.RowNumber));
+        var ignored = validChanges.Count(change => !allowed.Contains(change.RowNumber));
 
         var build = BuildSheetPatches(session, scopedRows, changeMap, null);
         var changedRows = build.ChangedRows;
@@ -2750,16 +2718,9 @@ public sealed class SummaryToolService : ISummaryToolService
         IReadOnlyList<int>? years)
     {
         var byRow = session.Rows.ToDictionary(row => row.RowNumber);
-        foreach (var change in changes)
-        {
-            if (!byRow.ContainsKey(change.RowNumber))
-            {
-                throw new ArgumentException(
-                    $"Không tìm thấy dòng {change.RowNumber} trong sheet {session.SheetName}.");
-            }
-        }
 
         var changeMap = changes
+            .Where(change => byRow.ContainsKey(change.RowNumber))
             .GroupBy(change => change.RowNumber)
             .ToDictionary(group => group.Key, group => group.Last());
         var yearFilter = years is { Count: > 0 } ? years.ToHashSet() : null;

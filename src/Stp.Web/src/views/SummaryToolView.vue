@@ -786,6 +786,7 @@ const scopeLabel = computed(() => {
 
 const allChanges = computed<SummaryChangeRequest[]>(() =>
   [...edits.value.values()]
+    .filter((edit) => rows.value.length === 0 || rows.value.some((r) => r.rowNumber === edit.row.rowNumber))
     .sort((left, right) => left.row.rowNumber - right.row.rowNumber)
     .map((edit) => {
       const summary = edit.summaryText ?? composeSummary(edit.row, edit.items)
