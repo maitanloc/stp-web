@@ -595,7 +595,7 @@ public sealed partial class AutoTickService : IAutoTickService
 
             var psi = new ProcessStartInfo
             {
-                FileName = "python",
+                FileName = ResolvePythonExecutable(),
                 Arguments = $"\"{scriptPath}\" \"{inputPath}\" \"{outputPath}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -888,7 +888,7 @@ public sealed partial class AutoTickService : IAutoTickService
 
         var psi = new ProcessStartInfo
         {
-            FileName = "python",
+            FileName = ResolvePythonExecutable(),
             Arguments = $"\"{scriptPath}\" \"{inputPath}\" \"{outputPath}\"",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -1219,6 +1219,30 @@ public sealed partial class AutoTickService : IAutoTickService
         public string? ResultFileName { get; set; }
         public CancellationTokenSource? Cts { get; init; }
         public ConcurrentQueue<AutoTickRowResult> RecentRowResults { get; } = new();
+    }
+
+    private static string ResolvePythonExecutable()
+    {
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string[] candidates =
+        {
+            Path.Combine(userProfile, @".stp_python\Scripts\python.exe"),
+            @"C:\Python314\python.exe",
+            @"C:\Python313\python.exe",
+            @"C:\Python312\python.exe",
+            @"C:\Python311\python.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python314\python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python313\python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python312\python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python311\python.exe"),
+        };
+
+        foreach (var c in candidates)
+        {
+            if (File.Exists(c)) return c;
+        }
+
+        return "python";
     }
 }
 
