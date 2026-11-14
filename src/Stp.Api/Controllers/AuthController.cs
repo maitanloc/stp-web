@@ -295,6 +295,178 @@ public sealed class AuthController : ControllerBase
         return Ok(new RecapListResponse(items));
     }
 
+    /// <summary>Cập nhật tên hiển thị cá nhân cho tài khoản đang đăng nhập.</summary>
+    [HttpPost("profile")]
+    public async Task<ActionResult<AuthIdentityResponse>> UpdateProfile(
+        [FromBody] UpdateProfileRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Title = "Chưa đăng nhập",
+                Detail = "Vui lòng đăng nhập để cập nhật thông tin cá nhân.",
+                Status = StatusCodes.Status401Unauthorized
+            });
+        }
+
+        var newDisplayName = AccountRules.NormalizeInput((request?.DisplayName ?? string.Empty).Trim());
+        var errors = AccountRules.ValidateDisplayName(newDisplayName);
+        if (errors.Count > 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Tên hiển thị chưa hợp lệ",
+                Detail = string.Join(" ", errors),
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        using var db = _factory.CreateDbContext();
+        var user = await db.StpUsers.SingleOrDefaultAsync(candidate => candidate.Id == identity.Id, cancellationToken);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        var oldDisplayName = user.DisplayName;
+        user.DisplayName = newDisplayName;
+        await db.SaveChangesAsync(cancellationToken);
+
+        // Gia hạn phiên với tên hiển thị mới trong cookie
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.DisplayName),
+            new(StpTeamIdentity.ClaimUsername, user.Username),
+            new(ClaimTypes.Role, user.Role)
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, StpTeamIdentity.SchemeName));
+        await HttpContext.SignInAsync(
+            StpTeamIdentity.SchemeName,
+            principal,
+            new AuthenticationProperties
+            {
+                IsPersistent = true,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddHours(24)
+            });
+
+        _audit.Write(user.DisplayName, "auth.update-profile", "StpUser", user.Id.ToString(), $"Đổi tên hiển thị từ '{oldDisplayName}' sang '{newDisplayName}'");
+
+        return Ok(new AuthIdentityResponse(user.Id, user.Username, user.DisplayName, user.Role));
+    }
+
+    /// <summary>Tự đổi mật khẩu cho tài khoản đang đăng nhập.</summary>
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] ChangePasswordRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Title = "Chưa đăng nhập",
+                Detail = "Vui lòng đăng nhập để đổi mật khẩu.",
+                Status = StatusCodes.Status401Unauthorized
+            });
+        }
+
+        var currentPassword = AccountRules.NormalizeInput(request?.CurrentPassword ?? string.Empty);
+        var newPassword = AccountRules.NormalizeInput(request?.NewPassword ?? string.Empty);
+
+        if (string.IsNullOrWhiteSpace(currentPassword) || string.IsNullOrWhiteSpace(newPassword))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Thiếu thông tin",
+                Detail = "Vui lòng nhập cả mật khẩu hiện tại và mật khẩu mới.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var errors = AccountRules.ValidatePassword(newPassword);
+        if (errors.Count > 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Mật khẩu mới không hợp lệ",
+                Detail = string.Join(" ", errors),
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        using var db = _factory.CreateDbContext();
+        var user = await db.StpUsers.SingleOrDefaultAsync(candidate => candidate.Id == identity.Id, cancellationToken);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        var verification = _hasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword);
+        if (verification == PasswordVerificationResult.Failed)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Mật khẩu hiện tại không đúng",
+                Detail = "Mật khẩu hiện tại bạn vừa nhập chưa chính xác.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        user.PasswordHash = _hasher.HashPassword(user, newPassword);
+        await db.SaveChangesAsync(cancellationToken);
+
+        _audit.Write(user.DisplayName, "auth.change-password", "StpUser", user.Id.ToString(), "Tự đổi mật khẩu tài khoản");
+
+        return NoContent();
+    }
+
+    /// <summary>Thống kê chi tiết tài khoản cho trang cá nhân.</summary>
+    [HttpGet("profile-stats")]
+    public async Task<ActionResult<ProfileStatsResponse>> ProfileStats(CancellationToken cancellationToken)
+    {
+        var identity = await StpTeamIdentity.FromAsync(HttpContext);
+        if (identity is null)
+        {
+            return Unauthorized();
+        }
+
+        using var db = _factory.CreateDbContext();
+        var user = await db.StpUsers.AsNoTracking().SingleOrDefaultAsync(candidate => candidate.Id == identity.Id, cancellationToken);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        var totalActions = await db.AuditLogs
+            .AsNoTracking()
+            .CountAsync(log => log.Actor == user.DisplayName, cancellationToken);
+
+        var chatMessagesCount = await db.ChatMessages
+            .AsNoTracking()
+            .CountAsync(msg => msg.Actor == user.DisplayName, cancellationToken);
+
+        var summarySessionsCount = await db.SummaryDrafts
+            .AsNoTracking()
+            .CountAsync(cancellationToken);
+
+        return Ok(new ProfileStatsResponse(
+            user.Id,
+            user.Username,
+            user.DisplayName,
+            user.Role,
+            user.CreatedAt,
+            user.LastLoginAt,
+            user.AvatarVersion,
+            totalActions,
+            chatMessagesCount,
+            summarySessionsCount));
+    }
+
     /// <summary>Ghép thao tác trong nhật ký thành "khu làm việc + tên việc" tiếng Việt cho thẻ tổng kết.</summary>
     private static (string Area, string Label) DescribeAction(string action) => action switch
     {

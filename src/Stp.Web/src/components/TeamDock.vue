@@ -228,6 +228,299 @@ function insertEmoji(emoji: string): void {
   emojiOpen.value = false
 }
 
+// ==================== Đa phương tiện Chat (Ảnh, Audio, Tệp) ====================
+interface ParsedMessage {
+  images: Array<{ url: string; name: string }>
+  audios: Array<{ url: string; duration: string }>
+  files: Array<{ url: string; name: string; size: string }>
+  text: string
+}
+
+function parseMessage(body: string): ParsedMessage {
+  const images: Array<{ url: string; name: string }> = []
+  const audios: Array<{ url: string; duration: string }> = []
+  const files: Array<{ url: string; name: string; size: string }> = []
+
+  let cleanText = body
+
+  // Match [img:url|name] or [img:url]
+  cleanText = cleanText.replace(/\[img:([^|\]]+)(?:\|([^\]]*))?\]/g, (_, url, name) => {
+    images.push({ url: url.trim(), name: (name || 'hình ảnh').trim() })
+    return ''
+  })
+
+  // Match [audio:url|duration] or [audio:url]
+  cleanText = cleanText.replace(/\[audio:([^|\]]+)(?:\|([^\]]*))?\]/g, (_, url, duration) => {
+    audios.push({ url: url.trim(), duration: (duration || '0:10').trim() })
+    return ''
+  })
+
+  // Match [file:url|name|size] or [file:url|name]
+  cleanText = cleanText.replace(/\[file:([^|\]]+)\|([^|\]]*)(?:\|([^\]]*))?\]/g, (_, url, name, size) => {
+    files.push({ url: url.trim(), name: name.trim(), size: (size || '').trim() })
+    return ''
+  })
+
+  return {
+    images,
+    audios,
+    files,
+    text: cleanText.trim(),
+  }
+}
+
+// Upload tệp đính kèm
+const chatFileInput = ref<HTMLInputElement | null>(null)
+const chatFileAccept = ref<string>('*/*')
+const isUploadingMedia = ref(false)
+
+function triggerChatUpload(acceptType: string = '*/*') {
+  chatFileAccept.value = acceptType
+  nextTick(() => {
+    chatFileInput.value?.click()
+  })
+}
+
+async function uploadFileToServer(file: File): Promise<{ url: string; fileName: string; fileType: string; sizeBytes: number }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch('/api/team/chat/upload', {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const errorJson = await res.json().catch(() => null)
+    throw new Error(errorJson?.detail || errorJson?.title || 'Tải tệp lên thất bại')
+  }
+  return await res.json()
+}
+
+async function sendCustomMessage(customBody: string): Promise<void> {
+  const actor = userName.value
+  if (!actor || !customBody.trim()) return
+
+  const tmpId = `tmp-${Date.now()}` as unknown as `${string}-${string}-${string}-${string}-${string}`
+  const tmpMessage: ChatMessageResponse = {
+    id: tmpId,
+    actor,
+    body: customBody.trim(),
+    createdAt: new Date().toISOString(),
+  }
+  messages.value = [...messages.value, tmpMessage]
+  markChatRead()
+  void scrollChatBottom()
+  try {
+    await request('/api/team/chat', { method: 'POST', body: { actor, body: customBody.trim() } })
+    await fetchChat()
+  } catch (error) {
+    messages.value = messages.value.filter((m) => m.id !== tmpId)
+    toast.error('Không gửi được tin nhắn', errorMessage(error))
+  }
+}
+
+async function handleFilesUpload(fileList: FileList | File[]) {
+  if (!userName.value) {
+    nameModalOpen.value = true
+    return
+  }
+  isUploadingMedia.value = true
+  try {
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i]
+      const result = await uploadFileToServer(file)
+      let tag = ''
+      if (result.fileType === 'image') {
+        tag = `[img:${result.url}|${result.fileName}]`
+      } else if (result.fileType === 'audio') {
+        tag = `[audio:${result.url}|Voice]`
+      } else {
+        const sizeStr = result.sizeBytes > 1024 * 1024
+          ? (result.sizeBytes / (1024 * 1024)).toFixed(1) + ' MB'
+          : Math.round(result.sizeBytes / 1024) + ' KB'
+        tag = `[file:${result.url}|${result.fileName}|${sizeStr}]`
+      }
+      await sendCustomMessage(tag)
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Lỗi tải tệp'
+    toast.error(msg)
+  } finally {
+    isUploadingMedia.value = false
+    if (chatFileInput.value) chatFileInput.value.value = ''
+  }
+}
+
+async function onChatFilesSelected(event: Event) {
+  const target = event.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    await handleFilesUpload(target.files)
+  }
+}
+
+async function onPasteOnChat(event: ClipboardEvent) {
+  const items = event.clipboardData?.items
+  if (!items) return
+
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.startsWith('image/')) {
+      event.preventDefault()
+      const blob = items[i].getAsFile()
+      if (blob) {
+        toast.info('Đang tải ảnh từ clipboard...')
+        await handleFilesUpload([blob])
+      }
+      return
+    }
+  }
+}
+
+// Ghi âm âm thanh (Voice Message)
+const isRecording = ref(false)
+const recordingDuration = ref(0)
+let recordingTimer: ReturnType<typeof setInterval> | null = null
+let mediaRecorderInstance: MediaRecorder | null = null
+let recordedChunks: Blob[] = []
+
+async function startVoiceRecording() {
+  if (!userName.value) {
+    nameModalOpen.value = true
+    return
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    recordedChunks = []
+
+    let mimeType = 'audio/webm'
+    if (typeof MediaRecorder !== 'undefined') {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus'
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus'
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4'
+      }
+    }
+
+    mediaRecorderInstance = new MediaRecorder(stream, { mimeType })
+    mediaRecorderInstance.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) recordedChunks.push(e.data)
+    }
+
+    mediaRecorderInstance.start(200)
+    isRecording.value = true
+    recordingDuration.value = 0
+    recordingTimer = setInterval(() => {
+      recordingDuration.value++
+    }, 1000)
+  } catch {
+    toast.error('Không thể truy cập microphone. Vui lòng cấp quyền ghi âm.')
+  }
+}
+
+async function stopVoiceRecording(send: boolean) {
+  if (!mediaRecorderInstance) return
+  if (recordingTimer) {
+    clearInterval(recordingTimer)
+    recordingTimer = null
+  }
+
+  const recDuration = recordingDuration.value
+  isRecording.value = false
+
+  mediaRecorderInstance.onstop = async () => {
+    mediaRecorderInstance?.stream.getTracks().forEach((track) => track.stop())
+    if (!send || recordedChunks.length === 0) {
+      recordedChunks = []
+      return
+    }
+
+    const blob = new Blob(recordedChunks, { type: mediaRecorderInstance?.mimeType || 'audio/webm' })
+    recordedChunks = []
+    const file = new File([blob], `voice_${Date.now()}.webm`, { type: blob.type })
+
+    isUploadingMedia.value = true
+    try {
+      const res = await uploadFileToServer(file)
+      const minutes = Math.floor(recDuration / 60)
+      const secs = recDuration % 60
+      const durationStr = `${minutes}:${secs < 10 ? '0' : ''}${secs}`
+      await sendCustomMessage(`[audio:${res.url}|${durationStr}]`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Không gửi được tin nhắn thoại'
+      toast.error(msg)
+    } finally {
+      isUploadingMedia.value = false
+    }
+  }
+
+  mediaRecorderInstance.stop()
+}
+
+function cancelVoiceRecording() {
+  void stopVoiceRecording(false)
+}
+
+// Trình phát âm thanh Inline
+const activeAudio = ref<HTMLAudioElement | null>(null)
+const playingUrl = ref<string | null>(null)
+const audioCurrent = ref(0)
+const audioDuration = ref(0)
+
+function togglePlayAudio(url: string) {
+  if (playingUrl.value === url && activeAudio.value) {
+    if (activeAudio.value.paused) {
+      void activeAudio.value.play()
+    } else {
+      activeAudio.value.pause()
+      playingUrl.value = null
+    }
+    return
+  }
+
+  if (activeAudio.value) {
+    activeAudio.value.pause()
+    activeAudio.value = null
+  }
+
+  const audio = new Audio(url)
+  activeAudio.value = audio
+  playingUrl.value = url
+
+  audio.ontimeupdate = () => {
+    audioCurrent.value = audio.currentTime
+    audioDuration.value = audio.duration || 0
+  }
+  audio.onended = () => {
+    playingUrl.value = null
+    audioCurrent.value = 0
+  }
+  audio.onerror = () => {
+    toast.error('Không thể phát tập tin âm thanh này')
+    playingUrl.value = null
+  }
+  void audio.play()
+}
+
+// Lightbox xem ảnh lớn
+const previewImage = ref<{ url: string; name: string } | null>(null)
+
+function openImagePreview(url: string, name: string) {
+  previewImage.value = { url, name }
+}
+
+function closeImagePreview() {
+  previewImage.value = null
+}
+
+function getFileBadge(name: string): { label: string; color: string } {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  if (['xlsx', 'xls', 'csv'].includes(ext)) return { label: 'EXCEL', color: '#10b981' }
+  if (['doc', 'docx'].includes(ext)) return { label: 'WORD', color: '#3b82f6' }
+  if (['pdf'].includes(ext)) return { label: 'PDF', color: '#ef4444' }
+  if (['zip', 'rar', '7z'].includes(ext)) return { label: 'ZIP', color: '#f59e0b' }
+  return { label: ext.toUpperCase() || 'FILE', color: '#8b5cf6' }
+}
+
 function toggleEmoji(): void {
   emojiOpen.value = !emojiOpen.value
 }
@@ -668,6 +961,13 @@ watch(userName, () => {
                 <button
                   type="button"
                   class="account-item"
+                  @click="accountMenuOpen = false; router.push('/ca-nhan')"
+                >
+                  👤 Trang cá nhân
+                </button>
+                <button
+                  type="button"
+                  class="account-item"
                   :disabled="avatarUploading"
                   @click="triggerAvatarUpload"
                 >
@@ -726,6 +1026,13 @@ watch(userName, () => {
                     <span class="account-user">Chế độ thành viên trực tiếp</span>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  class="account-item"
+                  @click="accountMenuOpen = false; router.push('/ca-nhan')"
+                >
+                  👤 Trang cá nhân
+                </button>
                 <button
                   type="button"
                   class="account-item"
@@ -822,12 +1129,86 @@ watch(userName, () => {
               <span v-if="message.actor !== userName" class="who" :style="{ color: colorForName(message.actor) }">
                 {{ message.actor }}
               </span>
-              <p class="body">
-                <template v-for="(part, index) in mentionParts(message.body)" :key="index">
+
+              <!-- Image attachments -->
+              <div v-if="parseMessage(message.body).images.length > 0" class="bubble-images">
+                <div
+                  v-for="(img, imgIdx) in parseMessage(message.body).images"
+                  :key="imgIdx"
+                  class="chat-image-thumb"
+                  :title="`Bấm để xem ảnh phóng to (${img.name})`"
+                  @click="openImagePreview(img.url, img.name)"
+                >
+                  <img :src="img.url" :alt="img.name" loading="lazy" />
+                  <span class="img-overlay-zoom">🔍</span>
+                </div>
+              </div>
+
+              <!-- Audio voice notes -->
+              <div v-if="parseMessage(message.body).audios.length > 0" class="bubble-audios">
+                <div
+                  v-for="(aud, audIdx) in parseMessage(message.body).audios"
+                  :key="audIdx"
+                  class="chat-audio-player"
+                  :class="{ 'is-playing': playingUrl === aud.url }"
+                >
+                  <button
+                    type="button"
+                    class="audio-play-btn"
+                    :title="playingUrl === aud.url ? 'Tạm dừng' : 'Nghe ghi âm'"
+                    @click="togglePlayAudio(aud.url)"
+                  >
+                    <span v-if="playingUrl === aud.url">⏸</span>
+                    <span v-else>▶</span>
+                  </button>
+                  <div class="audio-info">
+                    <div class="audio-waveform">
+                      <span class="bar bar-1"></span>
+                      <span class="bar bar-2"></span>
+                      <span class="bar bar-3"></span>
+                      <span class="bar bar-4"></span>
+                      <span class="bar bar-5"></span>
+                    </div>
+                    <span class="audio-time">
+                      {{ playingUrl === aud.url ? Math.floor(audioCurrent) + 's' : aud.duration }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- File attachments -->
+              <div v-if="parseMessage(message.body).files.length > 0" class="bubble-files">
+                <a
+                  v-for="(fileItem, fileIdx) in parseMessage(message.body).files"
+                  :key="fileIdx"
+                  :href="fileItem.url"
+                  :download="fileItem.name"
+                  target="_blank"
+                  class="chat-file-card"
+                  :title="`Tải về ${fileItem.name}`"
+                >
+                  <span
+                    class="file-badge"
+                    :style="{ background: getFileBadge(fileItem.name).color }"
+                  >
+                    {{ getFileBadge(fileItem.name).label }}
+                  </span>
+                  <div class="file-meta">
+                    <span class="file-name">{{ fileItem.name }}</span>
+                    <span v-if="fileItem.size" class="file-size">{{ fileItem.size }}</span>
+                  </div>
+                  <span class="file-dl-icon">⬇</span>
+                </a>
+              </div>
+
+              <!-- Text body -->
+              <p v-if="parseMessage(message.body).text" class="body">
+                <template v-for="(part, index) in mentionParts(parseMessage(message.body).text)" :key="index">
                   <span v-if="part.isMention" class="mention">{{ part.text }}</span>
                   <template v-else>{{ part.text }}</template>
                 </template>
               </p>
+
               <span class="time">{{ clockTime(message.createdAt) }}</span>
             </div>
           </div>
@@ -836,7 +1217,31 @@ watch(userName, () => {
           <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
           {{ typingWho }} đang gõ…
         </div>
+
+        <!-- Recording status banner -->
+        <div v-if="isRecording" class="recording-bar">
+          <span class="recording-pulse">🔴</span>
+          <span class="recording-label">
+            Đang ghi âm thoại: {{ Math.floor(recordingDuration / 60) }}:{{ (recordingDuration % 60) < 10 ? '0' : '' }}{{ recordingDuration % 60 }}
+          </span>
+          <button type="button" class="btn-rec-cancel" @click="cancelVoiceRecording">Hủy</button>
+          <button type="button" class="btn-rec-send" @click="stopVoiceRecording(true)">Gửi voice</button>
+        </div>
+
+        <div v-if="isUploadingMedia" class="media-uploading-bar">
+          <span class="spin-icon">⏳</span> Đang tải tệp lên máy chủ...
+        </div>
+
         <div class="chat-compose">
+          <input
+            ref="chatFileInput"
+            type="file"
+            :accept="chatFileAccept"
+            multiple
+            style="display: none"
+            @change="onChatFilesSelected"
+          />
+
           <div v-if="emojiOpen" class="emoji-panel">
             <button
               v-for="emoji in EMOJIS"
@@ -848,12 +1253,36 @@ watch(userName, () => {
               {{ emoji }}
             </button>
           </div>
+
+          <!-- Attach image / file button -->
+          <button
+            type="button"
+            class="send send-media"
+            title="Gửi ảnh hoặc tệp tài liệu"
+            :disabled="isRecording || isUploadingMedia"
+            @click="triggerChatUpload('*/*')"
+          >
+            📎
+          </button>
+
+          <!-- Voice record button -->
+          <button
+            type="button"
+            class="send send-voice"
+            :class="{ 'is-recording': isRecording }"
+            :title="isRecording ? 'Bấm để hoàn tất ghi âm' : 'Ghi âm tin nhắn thoại'"
+            @click="isRecording ? stopVoiceRecording(true) : startVoiceRecording()"
+          >
+            🎙️
+          </button>
+
           <textarea
             v-model="draft"
             rows="1"
-            :placeholder="userName ? 'Nhập tin nhắn cho cả nhóm... @tên để nhắc ai đó' : 'Khai tên trước để chat'"
+            :placeholder="userName ? 'Nhắn tin, dán ảnh (Ctrl+V) hoặc ghi âm...' : 'Khai tên trước để chat'"
             @keydown.enter.exact.prevent="sendDraft()"
             @input="onDraftInput"
+            @paste="onPasteOnChat"
           />
           <button
             type="button"
@@ -936,6 +1365,34 @@ watch(userName, () => {
 
     <UserNameModal :open="nameModalOpen" @saved="saveName" @closed="onModalClosed" />
     <LoginModal :open="loginModalOpen" @logged="onLogged" @closed="loginModalOpen = false" />
+
+    <!-- Lightbox phóng to ảnh chat -->
+    <div v-if="previewImage" class="chat-lightbox" @click="closeImagePreview">
+      <div class="lightbox-content" @click.stop>
+        <div class="lightbox-header">
+          <span class="lightbox-title">{{ previewImage.name }}</span>
+          <div class="lightbox-actions">
+            <a
+              :href="previewImage.url"
+              :download="previewImage.name"
+              class="lightbox-btn"
+              title="Tải ảnh về máy"
+            >
+              ⬇ Tải về
+            </a>
+            <button
+              type="button"
+              class="lightbox-btn"
+              title="Đóng xem ảnh"
+              @click="closeImagePreview"
+            >
+              ✕ Đóng
+            </button>
+          </div>
+        </div>
+        <img :src="previewImage.url" :alt="previewImage.name" class="lightbox-img" />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1719,5 +2176,358 @@ watch(userName, () => {
   font-size: 11.5px;
   color: var(--muted);
   line-height: 1.4;
+}
+
+/* Media Attachments in Chat */
+.bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chat-image-thumb {
+  position: relative;
+  width: 140px;
+  height: 100px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.chat-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.chat-image-thumb:hover img {
+  transform: scale(1.05);
+}
+
+.img-overlay-zoom {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-image-thumb:hover .img-overlay-zoom {
+  opacity: 1;
+}
+
+/* Audio Player */
+.bubble-audios {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.chat-audio-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 6px 10px;
+  border-radius: 18px;
+  width: fit-content;
+  min-width: 130px;
+}
+
+.chat-line.own .chat-audio-player {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.audio-play-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: transform 0.1s ease;
+}
+
+.chat-line.own .audio-play-btn {
+  background: #fff;
+  color: var(--color-primary, #3b82f6);
+}
+
+.audio-play-btn:active {
+  transform: scale(0.92);
+}
+
+.audio-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+
+.audio-waveform .bar {
+  width: 3px;
+  background: currentColor;
+  opacity: 0.6;
+  border-radius: 2px;
+}
+
+.audio-waveform .bar-1 { height: 6px; }
+.audio-waveform .bar-2 { height: 12px; }
+.audio-waveform .bar-3 { height: 15px; }
+.audio-waveform .bar-4 { height: 8px; }
+.audio-waveform .bar-5 { height: 10px; }
+
+.chat-audio-player.is-playing .audio-waveform .bar {
+  animation: soundBars 0.6s ease-in-out infinite alternate;
+}
+
+.chat-audio-player.is-playing .bar-1 { animation-delay: 0.1s; }
+.chat-audio-player.is-playing .bar-2 { animation-delay: 0.3s; }
+.chat-audio-player.is-playing .bar-3 { animation-delay: 0.2s; }
+.chat-audio-player.is-playing .bar-4 { animation-delay: 0.4s; }
+.chat-audio-player.is-playing .bar-5 { animation-delay: 0.15s; }
+
+@keyframes soundBars {
+  0% { height: 4px; }
+  100% { height: 15px; }
+}
+
+.audio-time {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* File Attachment Card */
+.bubble-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.chat-file-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border);
+  padding: 6px 10px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  width: fit-content;
+  max-width: 240px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-file-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.chat-line.own .chat-file-card {
+  background: rgba(255, 255, 255, 0.95);
+  color: #1e293b;
+}
+
+.file-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  padding: 3px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.file-meta {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.file-size {
+  font-size: 10px;
+  color: var(--color-text-muted, #64748b);
+}
+
+.file-dl-icon {
+  font-size: 13px;
+  color: var(--color-primary, #3b82f6);
+  margin-left: auto;
+}
+
+/* Recording & Uploading Bar */
+.recording-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border-top: 1px solid rgba(239, 68, 68, 0.3);
+  font-size: 12px;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+.recording-pulse {
+  animation: pulseRec 1s ease infinite alternate;
+}
+
+@keyframes pulseRec {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+.recording-label {
+  flex-grow: 1;
+}
+
+.btn-rec-cancel {
+  border: none;
+  background: none;
+  color: var(--color-text-muted, #64748b);
+  cursor: pointer;
+  font-size: 11.5px;
+  padding: 2px 6px;
+}
+
+.btn-rec-cancel:hover {
+  text-decoration: underline;
+}
+
+.btn-rec-send {
+  border: none;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-rec-send:hover {
+  background: #b91c1c;
+}
+
+.media-uploading-bar {
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  font-size: 11.5px;
+  color: #2563eb;
+  border-top: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.send-media, .send-voice {
+  font-size: 14px;
+}
+
+.send-voice.is-recording {
+  background: #ef4444;
+  color: #fff;
+  animation: pulseRec 0.8s ease infinite alternate;
+}
+
+/* Lightbox */
+.chat-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  backdrop-filter: blur(4px);
+}
+
+.lightbox-content {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface, #fff);
+  border-radius: 12px;
+  overflow: hidden;
+  max-width: 90vw;
+  max-height: 90vh;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.lightbox-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.lightbox-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60vw;
+}
+
+.lightbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lightbox-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-hover, #f1f5f9);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.lightbox-btn:hover {
+  background: var(--color-border);
+}
+
+.lightbox-img {
+  max-width: 100%;
+  max-height: calc(90vh - 60px);
+  object-fit: contain;
+  display: block;
 }
 </style>

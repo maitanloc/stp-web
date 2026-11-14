@@ -857,5 +857,42 @@ export interface AutoTickSyncSummaryResponse {
   details: AutoTickSyncSummaryRowResult[]
 }
 
+export interface ActivityRecapResponse {
+  at: string
+  action: string
+  area: string
+  label: string
+  details?: string | null
+}
+
+export interface ChatUploadResponse {
+  url: string
+  fileName: string
+  fileType: 'image' | 'audio' | 'file'
+  sizeBytes: number
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string
+  newPassword: string
+}
+
+export interface UpdateProfileRequest {
+  displayName: string
+}
+
+export interface ProfileStatsResponse {
+  id: string
+  username: string
+  displayName: string
+  role: string
+  createdAt: string
+  lastLoginAt?: string | null
+  avatarVersion: number
+  totalActions: number
+  chatMessagesCount: number
+  summarySessionsCount: number
+}
+
 
 

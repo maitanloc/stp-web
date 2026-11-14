@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   ListChecks,
   RefreshCw,
+  User,
   Users,
   Wrench,
 } from '@lucide/vue'
@@ -45,6 +46,7 @@ const TOOLS: ToolDef[] = [
   { label: 'Đồng bộ từ Excel', to: '/dong-bo', icon: RefreshCw, group: 'Quy trình', badgeKey: 'jobs' },
   { label: 'Kho hồ sơ', to: '/kho', icon: FolderOpen, group: 'Tra cứu', badgeKey: 'archive' },
   { label: 'Quản lý tài khoản', to: '/quan-ly', icon: Users, group: 'Hệ thống', adminOnly: true },
+  { label: 'Trang cá nhân', to: '/ca-nhan', icon: User, group: 'Hệ thống' },
   { label: 'Không gian nâng cao', to: '/nang-cao', icon: Wrench, group: 'Hệ thống' },
 ]
 

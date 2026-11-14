@@ -111,6 +111,15 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'ca-nhan',
+        name: 'profile',
+        component: () => import('./views/ProfileView.vue'),
+        meta: {
+          title: 'Trang cá nhân',
+          subtitle: 'Thông tin tài khoản, thống kê hoạt động và thiết lập cá nhân',
+        },
+      },
+      {
         path: 'nghi-trua',
         name: 'lunch-break',
         component: () => import('./views/LunchBreakView.vue'),

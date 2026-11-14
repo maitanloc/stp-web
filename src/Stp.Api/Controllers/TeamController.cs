@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Stp.Api.Hubs;
 using Stp.Contracts;
 using Stp.Core.Domain;
+using Stp.Core.Storage;
 using Stp.Infrastructure.Persistence;
 using Stp.Api.Services;
 
@@ -26,25 +27,73 @@ public sealed class TeamController : ControllerBase
     private const int MaxActor = 100;
     private const int MaxChatHistory = 100;
     private const int MaxActivityTake = 100;
+    private const long MaxChatAttachmentBytes = 30L * 1024 * 1024; // 30 MB
+
+    private static readonly HashSet<string> DangerousExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".bat", ".cmd", ".sh", ".ps1", ".vbs", ".dll", ".com", ".scr", ".msi", ".js", ".vbe", ".wsf", ".wsh"
+    };
+
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"
+    };
+
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".webm", ".mp3", ".wav", ".ogg", ".m4a", ".aac"
+    };
+
+    private static readonly Dictionary<string, string> MimeMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".png"] = "image/png",
+        [".jpg"] = "image/jpeg",
+        [".jpeg"] = "image/jpeg",
+        [".gif"] = "image/gif",
+        [".webp"] = "image/webp",
+        [".svg"] = "image/svg+xml",
+        [".bmp"] = "image/bmp",
+        [".webm"] = "audio/webm",
+        [".mp3"] = "audio/mpeg",
+        [".wav"] = "audio/wav",
+        [".ogg"] = "audio/ogg",
+        [".m4a"] = "audio/mp4",
+        [".aac"] = "audio/aac",
+        [".pdf"] = "application/pdf",
+        [".xlsx"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        [".xls"] = "application/vnd.ms-excel",
+        [".docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        [".doc"] = "application/msword",
+        [".pptx"] = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        [".ppt"] = "application/vnd.ms-powerpoint",
+        [".txt"] = "text/plain; charset=utf-8",
+        [".csv"] = "text/csv; charset=utf-8",
+        [".zip"] = "application/zip",
+        [".rar"] = "application/x-rar-compressed",
+        [".7z"] = "application/x-7z-compressed"
+    };
 
     private readonly IDbContextFactory<StpDbContext> _factory;
     private readonly TeamPresence _presence;
     private readonly TeamAudit _audit;
     private readonly NotificationService _notifications;
     private readonly IHubContext<TeamHub> _hubContext;
+    private readonly IFileStorage _storage;
 
     public TeamController(
         IDbContextFactory<StpDbContext> factory,
         TeamPresence presence,
         TeamAudit audit,
         NotificationService notifications,
-        IHubContext<TeamHub> hubContext)
+        IHubContext<TeamHub> hubContext,
+        IFileStorage storage)
     {
         _factory = factory;
         _presence = presence;
         _audit = audit;
         _notifications = notifications;
         _hubContext = hubContext;
+        _storage = storage;
     }
 
     /// <summary>
@@ -163,6 +212,128 @@ public sealed class TeamController : ControllerBase
             "/trich-yeu");
 
         return Ok(new ChatMessagesResponse([chatResponse]));
+    }
+
+    /// <summary>
+    /// Tải lên tệp đính kèm cho kênh chat (ảnh, âm thanh voice, tài liệu).
+    /// Lưu vào data/chat/{guid}{ext}, trả về link API và metadata.
+    /// </summary>
+    [HttpPost("chat/upload")]
+    [RequestSizeLimit(35 * 1024 * 1024)]
+    public async Task<ActionResult<ChatUploadResponse>> UploadChatAttachment(
+        IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Chưa có tệp",
+                Detail = "Vui lòng chọn một tệp hình ảnh, âm thanh hoặc tài liệu để tải lên.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        if (file.Length > MaxChatAttachmentBytes)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Tệp quá lớn",
+                Detail = "Dung lượng tệp đính kèm tối đa là 30 MB.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var originalFileName = Path.GetFileName(file.FileName ?? "attachment");
+        var ext = Path.GetExtension(originalFileName).ToLowerInvariant();
+
+        if (DangerousExtensions.Contains(ext))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Định dạng tệp không được phép",
+                Detail = "Không thể tải lên tệp thực thi vì lý do an toàn bảo mật.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(ext))
+        {
+            if (file.ContentType?.StartsWith("audio/") == true)
+            {
+                ext = ".webm";
+            }
+            else if (file.ContentType?.StartsWith("image/") == true)
+            {
+                ext = ".png";
+            }
+            else
+            {
+                ext = ".bin";
+            }
+        }
+
+        var fileType = ImageExtensions.Contains(ext) || file.ContentType?.StartsWith("image/") == true
+            ? "image"
+            : AudioExtensions.Contains(ext) || file.ContentType?.StartsWith("audio/") == true
+                ? "audio"
+                : "file";
+
+        var chatDirectory = Path.Combine(_storage.RootPath, "chat");
+        Directory.CreateDirectory(chatDirectory);
+
+        var uniqueFileName = $"{Guid.NewGuid():N}{ext}";
+        var targetPath = Path.Combine(chatDirectory, uniqueFileName);
+
+        if (!_storage.IsUnderRoot(targetPath))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new ProblemDetails
+            {
+                Title = "Đường dẫn không hợp lệ",
+                Status = StatusCodes.Status500InternalServerError
+            });
+        }
+
+        await using (var stream = new FileStream(
+                         targetPath,
+                         FileMode.Create,
+                         FileAccess.Write,
+                         FileShare.None,
+                         bufferSize: 81920,
+                         useAsync: true))
+        {
+            await file.CopyToAsync(stream, cancellationToken);
+        }
+
+        var url = $"/api/team/chat/attachment/{uniqueFileName}";
+        return Ok(new ChatUploadResponse(url, originalFileName, fileType, file.Length));
+    }
+
+    /// <summary>
+    /// Tải tệp đính kèm của kênh chat (phục vụ ảnh, audio streaming, tài liệu).
+    /// </summary>
+    [HttpGet("chat/attachment/{fileName}")]
+    public IActionResult GetChatAttachment(string fileName)
+    {
+        var safeFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(safeFileName) || safeFileName != fileName)
+        {
+            return BadRequest();
+        }
+
+        var targetPath = Path.Combine(_storage.RootPath, "chat", safeFileName);
+        if (!_storage.IsUnderRoot(targetPath) || !System.IO.File.Exists(targetPath))
+        {
+            return NotFound();
+        }
+
+        var ext = Path.GetExtension(safeFileName).ToLowerInvariant();
+        if (!MimeMap.TryGetValue(ext, out var contentType))
+        {
+            contentType = "application/octet-stream";
+        }
+
+        return PhysicalFile(targetPath, contentType, enableRangeProcessing: true);
     }
 
     /// <summary>

@@ -27,6 +27,13 @@ public sealed record ChatPostRequest(string Actor, string Body);
 
 public sealed record ChatMessageResponse(Guid Id, string Actor, string Body, DateTimeOffset CreatedAt);
 
+/// <summary>Phản hồi khi tải lên tệp đính kèm kênh chat (ảnh, audio, tài liệu).</summary>
+public sealed record ChatUploadResponse(
+    string Url,
+    string FileName,
+    string FileType,
+    long SizeBytes);
+
 /// <summary>
 /// Page chat (G4): Items cũ → mới; NextCursor = mốc thời gian tin cũ nhất
 /// trong page (iso) để tải page cũ hơn bằng ?before=; HasMore cho biết còn

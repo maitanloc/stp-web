@@ -51,6 +51,15 @@ export async function registerTeamIdentity(
   return identity
 }
 
+/** Làm mới thông tin danh tính từ backend (sau khi đổi tên hiển thị...). */
+export async function refreshTeamIdentity(): Promise<TeamIdentity | null> {
+  teamIdentity.value = await fetchTeamIdentity()
+  if (teamIdentity.value) {
+    setUserName(teamIdentity.value.displayName)
+  }
+  return teamIdentity.value
+}
+
 /** Đăng xuất trên backend + xoá danh tính trong app; giữ tên tự khai cũ làm dự phòng. */
 export async function logoutTeamIdentity(): Promise<void> {
   try {

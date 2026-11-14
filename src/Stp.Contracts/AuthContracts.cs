@@ -39,3 +39,22 @@ public sealed record ActivityRecapResponse(
     string? Details);
 
 public sealed record RecapListResponse(IReadOnlyList<ActivityRecapResponse> Items);
+
+/// <summary>Yêu cầu đổi mật khẩu cho tài khoản đang đăng nhập.</summary>
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+/// <summary>Yêu cầu cập nhật thông tin cá nhân (tên hiển thị).</summary>
+public sealed record UpdateProfileRequest(string DisplayName);
+
+/// <summary>Thống kê chi tiết tài khoản cho trang cá nhân.</summary>
+public sealed record ProfileStatsResponse(
+    Guid Id,
+    string Username,
+    string DisplayName,
+    string Role,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? LastLoginAt,
+    int AvatarVersion,
+    int TotalActions,
+    int ChatMessagesCount,
+    int SummarySessionsCount);

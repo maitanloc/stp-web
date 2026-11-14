@@ -13,9 +13,10 @@ import {
   Sun,
   X,
 } from '@lucide/vue'
-import { request } from '../api/client'
+import { getUserName, request } from '../api/client'
 import type { HealthResponse } from '../api/types'
-import { initTeamIdentity } from '../composables/useTeamIdentity'
+import { initTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
+import { renderAvatar } from '../lib/team'
 import { useTheme } from '../composables/useTheme'
 import {
   isPinned,
@@ -58,6 +59,7 @@ function pinLabel(tool: ToolDef): string {
 
 const pageTitle = computed(() => String(route.meta.title ?? 'STP Archive'))
 const pageSubtitle = computed(() => String(route.meta.subtitle ?? ''))
+const currentUserName = computed(() => teamIdentity.value?.displayName ?? getUserName())
 
 function isActive(path: string): boolean {
   if (path === '/') return route.path === '/'
@@ -200,6 +202,26 @@ onUnmounted(() => {
             <kbd class="palette-kbd">Ctrl K</kbd>
           </button>
           <NotificationBell />
+          <RouterLink
+            class="btn btn-secondary btn-sm topbar-user-btn"
+            :class="{ 'is-active': isActive('/ca-nhan') }"
+            to="/ca-nhan"
+            :title="currentUserName ? `Trang cá nhân: ${currentUserName}` : 'Trang cá nhân'"
+          >
+            <span
+              class="topbar-user-avatar"
+              :style="currentUserName ? renderAvatar(currentUserName).style : {}"
+            >
+              <img
+                v-if="currentUserName && renderAvatar(currentUserName).imageUrl"
+                :src="renderAvatar(currentUserName).imageUrl"
+                alt=""
+                class="avatar-img"
+              />
+              <template v-else>{{ currentUserName ? renderAvatar(currentUserName).initials : '👤' }}</template>
+            </span>
+            <span class="topbar-user-name">{{ currentUserName || 'Cá nhân' }}</span>
+          </RouterLink>
           <RouterLink class="btn btn-secondary btn-sm" to="/dong-bo">
             <RefreshCw :size="14" />
             Đồng bộ
@@ -239,3 +261,44 @@ onUnmounted(() => {
     <CommandPalette ref="palette" />
   </div>
 </template>
+
+<style scoped>
+.topbar-user-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 5px;
+  border-radius: 999px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.topbar-user-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--color-primary, #3b82f6);
+  flex-shrink: 0;
+}
+
+.topbar-user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.topbar-user-name {
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.82rem;
+}
+</style>
