@@ -1,50 +1,10 @@
 <script setup lang="ts">
-import { Wrench } from '@lucide/vue'
-import { useLunchBreak } from '../composables/useLunchBreak'
-import LunchBreakPopup from './LunchBreakPopup.vue'
-import LunchBreakScreen from './LunchBreakScreen.vue'
-import PreLunchWarningBanner from './PreLunchWarningBanner.vue'
-
-const {
-  isLunchBreakActive,
-  showWarningPopup,
-  isDevBypass,
-  disableDevBypass,
-} = useLunchBreak()
+// Tạm thời vô hiệu hoá giờ nghỉ trưa & bảo trì máy chủ để người dùng test
 </script>
 
 <template>
   <div class="lunch-gate-container">
-    <!-- Cảnh báo đóng server trước 10 phút (11:50) cho toàn cơ quan -->
-    <PreLunchWarningBanner />
-
-    <!-- Popup nhắc nhở nghỉ trưa ban đầu lúc 12:00 -->
-    <LunchBreakPopup v-if="showWarningPopup" />
-
-    <!-- Màn hình nghỉ trưa toàn diện nếu đang trong khung giờ hoặc preview -->
-    <Teleport to="body">
-      <Transition name="lunch-screen-fade">
-        <LunchBreakScreen v-if="isLunchBreakActive" />
-      </Transition>
-    </Teleport>
-
-    <!-- Floating badge cho Dev khi đã bypass -->
-    <Teleport to="body">
-      <div v-if="isDevBypass && !isLunchBreakActive" class="dev-bypass-pill">
-        <div class="dev-pill-inner">
-          <Wrench :size="13" class="text-amber-400" />
-          <span>Dev Mode: Đang bỏ qua giờ nghỉ trưa</span>
-          <button
-            class="btn btn-ghost btn-xs text-amber-300"
-            type="button"
-            title="Bật lại chế độ nghỉ trưa để kiểm tra"
-            @click="disableDevBypass"
-          >
-            Bật lại
-          </button>
-        </div>
-      </div>
-    </Teleport>
+    <!-- Tạm thời vô hiệu hoá giờ nghỉ trưa & bảo trì máy chủ để người dùng test -->
   </div>
 </template>
 
