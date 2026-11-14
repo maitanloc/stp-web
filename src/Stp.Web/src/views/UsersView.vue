@@ -5,6 +5,7 @@ import { request } from '../api/client'
 import { initTeamIdentity, teamIdentity } from '../composables/useTeamIdentity'
 import { errorMessage } from '../lib/errors'
 import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
 
 interface UserAccount {
   id: string
@@ -18,6 +19,7 @@ interface UserAccount {
 
 const router = useRouter()
 const toast = useToast()
+const { confirmDialog } = useConfirm()
 
 const loading = ref(true)
 const users = ref<UserAccount[]>([])
@@ -96,10 +98,16 @@ async function patchUser(
   }
 }
 
-function toggleActive(user: UserAccount): void {
+async function toggleActive(user: UserAccount): Promise<void> {
   const nextActive = !user.isActive
-  if (!nextActive && !window.confirm(`Ngừng kích hoạt tài khoản "${user.username}"? Người này sẽ không đăng nhập được nữa.`)) {
-    return
+  if (!nextActive) {
+    const ok = await confirmDialog({
+      title: 'Ngừng kích hoạt tài khoản?',
+      message: `Ngừng kích hoạt tài khoản "${user.username}" (${user.displayName})? Người này sẽ không đăng nhập được nữa.`,
+      variant: 'warning',
+      confirmText: 'Ngừng kích hoạt',
+    })
+    if (!ok) return
   }
   void patchUser(
     user,

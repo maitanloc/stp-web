@@ -131,6 +131,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'In hàng loạt / Xuất PDF' },
   },
   {
+    path: '/nghi-trua',
+    name: 'lunch-break',
+    component: () => import('./views/LunchBreakView.vue'),
+    meta: { title: 'Nghỉ trưa (12:00 – 13:00) · STP Archive' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('./views/NotFoundView.vue'),

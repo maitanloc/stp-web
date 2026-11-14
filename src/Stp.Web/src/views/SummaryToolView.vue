@@ -65,6 +65,7 @@ import AppSelect from '../components/AppSelect.vue'
 import FilePicker from '../components/FilePicker.vue'
 import SummaryItemPicker from '../components/SummaryItemPicker.vue'
 import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
 import {
   clearTeamEditingState,
   setTeamEditingState,
@@ -118,6 +119,7 @@ const DRAFT_PREFIX = 'stp.summary.draft.'
 const PAGE_SIZES = [20, 50, 100, 200]
 
 const toast = useToast()
+const { confirmDialog } = useConfirm()
 
 const files = ref<File[]>([])
 const session = ref<SummaryInspectResponse | null>(null)
@@ -936,7 +938,13 @@ async function savePreset(): Promise<void> {
 }
 
 async function deletePreset(id: string, name: string): Promise<void> {
-  if (!confirm(`Bạn có chắc muốn xoá bộ mẫu "${name}"?`)) return
+  const ok = await confirmDialog({
+    title: 'Xoá bộ mẫu?',
+    message: `Bạn có chắc muốn xoá bộ mẫu "${name}"? Các thành viên khác sẽ không thể dùng bộ mẫu này nữa.`,
+    variant: 'danger',
+    confirmText: 'Xoá bộ mẫu',
+  })
+  if (!ok) return
   try {
     await request(`/api/summary/catalog/presets/${id}`, { method: 'DELETE' })
     toast.info('Đã xoá bộ mẫu', `Đã xoá bộ mẫu "${name}".`)
@@ -1692,9 +1700,15 @@ function onSpeedKeydown(event: KeyboardEvent): void {
   applyFromAbove(anchor)
 }
 
-function resetEdits(): void {
+async function resetEdits(): Promise<void> {
   if (edits.value.size === 0) return
-  if (!window.confirm('Bỏ toàn bộ thay đổi chưa xuất?')) return
+  const ok = await confirmDialog({
+    title: 'Bỏ thay đổi?',
+    message: 'Bỏ toàn bộ thay đổi chưa xuất? Dữ liệu chưa lưu vào file sẽ bị mất.',
+    variant: 'warning',
+    confirmText: 'Bỏ toàn bộ thay đổi',
+  })
+  if (!ok) return
   edits.value = new Map()
   pushHistory()
   closeSummaryEditor()
@@ -2139,12 +2153,18 @@ async function deleteSessionSilent(sessionId: string): Promise<void> {
   }
 }
 
-function closeSession(): void {
+async function closeSession(): Promise<void> {
   const active = session.value
   if (!active) return
 
-  if (changedCount.value > 0 && !window.confirm('Bỏ các thay đổi chưa xuất và đóng workbook?')) {
-    return
+  if (changedCount.value > 0) {
+    const ok = await confirmDialog({
+      title: 'Đóng workbook?',
+      message: 'Có thay đổi chưa xuất. Bạn có chắc muốn bỏ các thay đổi này và đóng workbook?',
+      variant: 'warning',
+      confirmText: 'Bỏ thay đổi và đóng',
+    })
+    if (!ok) return
   }
 
   leaveSummarySession(active.sessionId, myActorName.value ?? 'Quản trị')
@@ -2728,11 +2748,14 @@ async function restoreDraftAsync(fileName: string): Promise<void> {
 
     const savedAt = new Date(payload.savedAt)
     const label = savedAt.toLocaleString('vi-VN')
-    if (
-      !window.confirm(
-        `Tìm thấy bản nháp ${payload.edits.length} dòng cho file này (${source}, ${label}). Khôi phục?`,
-      )
-    ) {
+    const ok = await confirmDialog({
+      title: 'Khôi phục bản nháp?',
+      message: `Tìm thấy bản nháp ${payload.edits.length} dòng cho file này (${source}, lúc ${label}). Bạn có muốn khôi phục lại không?`,
+      variant: 'primary',
+      confirmText: 'Khôi phục bản nháp',
+      cancelText: 'Bỏ qua',
+    })
+    if (!ok) {
       localStorage.removeItem(draftKey(fileName))
       return
     }

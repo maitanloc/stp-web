@@ -43,6 +43,7 @@ import type {
 } from '../api/types'
 import AppSelect from '../components/AppSelect.vue'
 import { useDevAuth } from '../composables/useDevAuth'
+import { useConfirm } from '../composables/useConfirm'
 import { useToast } from '../composables/useToast'
 import { errorMessage } from '../lib/errors'
 import { formatDateTime, formatNumber, shortHash } from '../lib/format'
@@ -77,6 +78,7 @@ const tabs: TabDef[] = [
 
 const toast = useToast()
 const { state, isAuthenticated, refreshStatus, login, setup, logout, messageOf } = useDevAuth()
+const { confirmDialog } = useConfirm()
 
 const tab = ref<TabKey>('overview')
 const initialized = ref(false)
@@ -197,8 +199,14 @@ async function loadMacros(selectId?: string): Promise<void> {
 }
 
 async function selectMacro(id: string, force = false): Promise<void> {
-  if (!force && macroDirty.value && !window.confirm('Bỏ các thay đổi chưa lưu của macro?')) {
-    return
+  if (!force && macroDirty.value) {
+    const ok = await confirmDialog({
+      title: 'Bỏ thay đổi macro?',
+      message: 'Macro đang có thay đổi chưa lưu. Bạn có chắc muốn chuyển file và bỏ thay đổi?',
+      variant: 'warning',
+      confirmText: 'Bỏ thay đổi',
+    })
+    if (!ok) return
   }
 
   selectedMacroId.value = id
@@ -370,7 +378,13 @@ async function openJob(id: string): Promise<void> {
 
 async function cancelJob(): Promise<void> {
   if (!selectedJobId.value) return
-  if (!window.confirm('Huỷ job này?')) return
+  const ok = await confirmDialog({
+    title: 'Huỷ tiến trình?',
+    message: 'Bạn có chắc muốn huỷ job đang chạy này?',
+    variant: 'danger',
+    confirmText: 'Huỷ job',
+  })
+  if (!ok) return
   try {
     await request(`/api/jobs/${selectedJobId.value}/cancel`, { method: 'POST' })
     toast.warning('Đã huỷ job')

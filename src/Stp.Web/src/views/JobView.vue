@@ -7,9 +7,11 @@ import type { JobDetailResponse } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import JobDetailPanel from '../components/JobDetailPanel.vue'
 import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
 
 const route = useRoute()
 const toast = useToast()
+const { confirmDialog } = useConfirm()
 
 const detail = ref<JobDetailResponse | null>(null)
 const loading = ref(true)
@@ -67,7 +69,13 @@ async function load(silent = false): Promise<void> {
 }
 
 async function cancel(): Promise<void> {
-  if (!window.confirm('Huỷ job này? Các file đang xử lý dở sẽ không được tiếp tục.')) return
+  const ok = await confirmDialog({
+    title: 'Huỷ tiến trình?',
+    message: 'Huỷ job này? Các file đang xử lý dở sẽ không được tiếp tục.',
+    variant: 'danger',
+    confirmText: 'Huỷ job',
+  })
+  if (!ok) return
   try {
     await request(`/api/jobs/${jobId.value}/cancel`, { method: 'POST' })
     toast.warning('Đã gửi yêu cầu huỷ job')

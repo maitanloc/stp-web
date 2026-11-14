@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -202,6 +203,51 @@ if (requireTeamLogin)
         await next();
     });
 }
+// Chế độ nghỉ trưa & bảo trì máy chủ (12:00 - 13:00 GMT+7)
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    if (path.StartsWithSegments("/api"))
+    {
+        var isExempt =
+            path.StartsWithSegments("/api/health")
+            || path.StartsWithSegments("/api/system/time")
+            || path.StartsWithSegments("/api/auth")
+            || path.StartsWithSegments("/api/dev")
+            || path.StartsWithSegments("/api/team/avatar")
+            || path.StartsWithSegments("/api/team/avatars");
+
+        if (!isExempt)
+        {
+            var vnTime = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
+            var isLunchHour = vnTime.Hour == 12;
+            var devBypass = context.Request.Headers.ContainsKey("X-Dev-Bypass")
+                || context.Request.Query.ContainsKey("dev")
+                || context.Request.Headers["X-Dev-Pin"] == "stp2026";
+
+            if (isLunchHour && !devBypass)
+            {
+                var userRole = context.User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value;
+                if (!string.Equals(userRole, "admin", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    await context.Response.WriteAsJsonAsync(new
+                    {
+                        title = "Hệ thống đang nghỉ trưa",
+                        detail = "Máy chủ tạm thời bảo trì trong giờ nghỉ trưa (12:00 - 13:00) để đội ngũ kỹ thuật nâng cấp hệ thống. Vui lòng quay lại lúc 13:00.",
+                        status = 503,
+                        isLunchBreak = true,
+                        resumeAt = "13:00:00"
+                    });
+                    return;
+                }
+            }
+        }
+    }
+
+    await next();
+});
+
 app.UseAuthorization();
 app.MapControllers();
 // F1: hub nhóm — /hubs/team (ngrok free hỗ trợ websocket, link tunnel bình thường).
@@ -221,6 +267,26 @@ app.MapGet("/api/health", async (StpDbContext db, CancellationToken cancellation
         databaseName = db.Database.GetDbConnection().Database,
         migrations = startupMigrationError is null ? "applied" : "failed",
         utc = DateTimeOffset.UtcNow
+    });
+});
+
+app.MapGet("/api/system/time", () =>
+{
+    var vnTime = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
+    var isLunchHour = vnTime.Hour == 12;
+    var secondsRemaining = isLunchHour
+        ? Math.Max(0, (59 - vnTime.Minute) * 60 + (60 - vnTime.Second))
+        : 0;
+
+    return Results.Ok(new
+    {
+        serverTime = vnTime.ToString("yyyy-MM-ddTHH:mm:sszzz"),
+        hour = vnTime.Hour,
+        minute = vnTime.Minute,
+        second = vnTime.Second,
+        isLunchBreak = isLunchHour,
+        secondsRemaining,
+        resumeAt = "13:00:00"
     });
 });
 

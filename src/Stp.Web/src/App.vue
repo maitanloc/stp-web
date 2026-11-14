@@ -9,6 +9,8 @@ import BootSplash from './components/BootSplash.vue'
 import WelcomeRecap from './components/WelcomeRecap.vue'
 import TeamDock from './components/TeamDock.vue'
 import ToastHost from './components/ToastHost.vue'
+import ConfirmModalHost from './components/ConfirmModalHost.vue'
+import LunchBreakGate from './components/LunchBreakGate.vue'
 import { cleanupExpiredLocalStorage } from './lib/storageCleanup'
 
 /**
@@ -74,6 +76,8 @@ watch(teamIdentity, (value) => {
       </div>
     </div>
     <ToastHost v-if="phase === 'app'" />
+    <ConfirmModalHost />
+    <LunchBreakGate v-if="phase === 'app'" />
   </div>
 </template>
 

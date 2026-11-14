@@ -130,6 +130,10 @@ onUnmounted(() => {
       </nav>
 
       <div class="sidebar-footer">
+        <RouterLink class="nav-item" to="/nghi-trua">
+          <Moon :size="17" />
+          <span>Giờ nghỉ trưa (12h-13h)</span>
+        </RouterLink>
         <RouterLink class="nav-item" to="/developer" target="_blank" rel="noopener">
           <ShieldCheck :size="17" />
           <span>Trang developer</span>
