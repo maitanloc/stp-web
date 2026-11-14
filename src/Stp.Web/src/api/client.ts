@@ -105,21 +105,38 @@ export class ApiError extends Error {
 
   get isValidation(): boolean {
     return (
-      this.status === 422 &&
+      (this.status === 422 || this.status === 400) &&
       typeof this.payload === 'object' &&
       this.payload !== null &&
-      Array.isArray((this.payload as { errors?: unknown }).errors)
+      Boolean((this.payload as { errors?: unknown }).errors)
     )
   }
 
   get validationErrors(): string[] {
     if (!this.isValidation) return []
-    return ((this.payload as { errors: string[] }).errors ?? []).filter(Boolean)
+    const p = this.payload as Record<string, unknown>
+    if (Array.isArray(p.errors)) {
+      return (p.errors as string[]).filter(Boolean)
+    }
+    if (p.errors && typeof p.errors === 'object') {
+      const messages: string[] = []
+      for (const [field, errs] of Object.entries(p.errors as Record<string, unknown>)) {
+        const prefix = field && field !== '$' ? `${field}: ` : ''
+        if (Array.isArray(errs)) {
+          messages.push(...errs.filter(Boolean).map((e) => `${prefix}${e}`))
+        } else if (typeof errs === 'string' && errs.trim().length > 0) {
+          messages.push(`${prefix}${errs.trim()}`)
+        }
+      }
+      return messages
+    }
+    return []
   }
 
   get validationWarnings(): string[] {
     if (!this.isValidation) return []
-    return ((this.payload as { warnings?: string[] }).warnings ?? []).filter(Boolean)
+    const p = this.payload as Record<string, unknown>
+    return Array.isArray(p.warnings) ? (p.warnings as string[]).filter(Boolean) : []
   }
 }
 

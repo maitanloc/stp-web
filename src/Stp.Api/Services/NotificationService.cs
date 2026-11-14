@@ -39,6 +39,57 @@ public sealed class NotificationService
         _logger = logger;
     }
 
+    /// <summary>Ghi thông báo cho mọi tài khoản đang hoạt động.</summary>
+    public void NotifyAll(
+        string kind,
+        string title,
+        string body,
+        string? link)
+    {
+        try
+        {
+            using var db = _factory.CreateDbContext();
+            var recipients = db.StpUsers
+                .AsNoTracking()
+                .Where(user => user.IsActive)
+                .Select(user => user.DisplayName)
+                .ToList();
+
+            var at = DateTimeOffset.UtcNow;
+            if (recipients.Count > 0)
+            {
+                db.Notifications.AddRange(recipients.Select(recipient => new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    CreatedAt = at,
+                    ForUser = recipient,
+                    Kind = kind,
+                    Title = title,
+                    Body = body,
+                    Link = link,
+                }));
+                db.SaveChanges();
+            }
+
+            foreach (var recipient in recipients)
+            {
+                _ = _hubContext.Clients.All.SendAsync("notification", new
+                {
+                    forUser = recipient,
+                    kind,
+                    title,
+                    body,
+                    link,
+                    timestamp = at,
+                });
+            }
+        }
+        catch (Exception caught)
+        {
+            _logger.LogWarning(caught, "Không sinh được thông báo nhóm ({Kind})", kind);
+        }
+    }
+
     /// <summary>Ghi thông báo cho mọi tài khoản đang hoạt động, trừ chính người gây ra.</summary>
     public void NotifyAllExcept(
         string actor,

@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import {
+  CheckSquare,
   Combine,
   FileSpreadsheet,
   FolderOpen,
@@ -40,6 +41,7 @@ const TOOLS: ToolDef[] = [
   { label: 'Chuyển đổi Excel', to: '/chuyen-doi', icon: FileSpreadsheet, group: 'Quy trình' },
   { label: 'Gộp nhiều file', to: '/gop-file', icon: Combine, group: 'Quy trình' },
   { label: 'Bổ sung trích yếu', to: '/trich-yeu', icon: ListChecks, group: 'Quy trình', badgeKey: 'summary' },
+  { label: 'Tự động đánh dấu', to: '/auto-tick', icon: CheckSquare, group: 'Quy trình' },
   { label: 'Đồng bộ từ Excel', to: '/dong-bo', icon: RefreshCw, group: 'Quy trình', badgeKey: 'jobs' },
   { label: 'Kho hồ sơ', to: '/kho', icon: FolderOpen, group: 'Tra cứu', badgeKey: 'archive' },
   { label: 'Quản lý tài khoản', to: '/quan-ly', icon: Users, group: 'Hệ thống', adminOnly: true },

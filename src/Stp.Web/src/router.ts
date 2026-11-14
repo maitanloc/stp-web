@@ -48,6 +48,15 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'auto-tick',
+        name: 'auto-tick',
+        component: () => import('./views/AutoTickView.vue'),
+        meta: {
+          title: 'Tự động đánh dấu OneDrive',
+          subtitle: 'Tự động đối soát trích yếu và đánh dấu tick trực tiếp trên OneDrive',
+        },
+      },
+      {
         path: 'dong-bo',
         name: 'sync',
         component: () => import('./views/SyncView.vue'),

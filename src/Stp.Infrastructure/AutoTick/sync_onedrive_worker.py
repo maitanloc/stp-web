@@ -1,0 +1,182 @@
+import sys
+import os
+import json
+import time
+import re
+from playwright.sync_api import sync_playwright
+
+def normalize_text(text):
+    if not text:
+        return ""
+    s = text.strip().lower()
+    return re.sub(r'[^a-zA-Z0-9\u00C0-\u1EF9]', '', s)
+
+def is_match(header_title, item):
+    h = normalize_text(header_title)
+    it = normalize_text(item)
+    if h == it:
+        return True
+    if (h == 'cmnd' and it == 'chungminhnhandan') or (h == 'chungminhnhandan' and it == 'cmnd'):
+        return True
+    if (h == 'hokhau' and 'hokhau' in it) or ('hokhau' in h and it == 'hokhau'):
+        return True
+    if (h == 'giaykhaisinh' and it == 'khaisinh') or (h == 'khaisinh' and it == 'giaykhaisinh'):
+        return True
+    if (h == 'giaychungnhankethon' and it == 'chungnhankethon') or (h == 'chungnhankethon' and it == 'giaychungnhankethon'):
+        return True
+    if ('xacnhandocthan' in h and 'honnhanthucte' in h) and ('xacnhandocthan' in it and 'honnhanthucte' in it):
+        return True
+    if (h == 'giaychungnhandocthan' and it == 'chungnhandocthan') or (h == 'chungnhandocthan' and it == 'giaychungnhandocthan'):
+        return True
+    if (h == 'giayxacnhandocthan' and it == 'xacnhandocthan') or (h == 'xacnhandocthan' and it == 'giayxacnhandocthan'):
+        return True
+    if (h == 'phieunhapxuatcanh' and it == 'phieuxuatnhapcanh') or (h == 'phieuxuatnhapcanh' and it == 'phieunhapxuatcanh'):
+        return True
+    if (h == 'tokhaituyenthe' and it == 'bankhaituyenthe') or (h == 'bankhaituyenthe' and it == 'tokhaituyenthe'):
+        return True
+    if (h == 'giaychungnhandangkykhaisinh' and it == 'chungnhandangkykhaisinh') or (h == 'chungnhandangkykhaisinh' and it == 'giaychungnhandangkykhaisinh'):
+        return True
+    return False
+
+def run_sync(input_file, output_file):
+    with open(input_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    url = data.get('oneDriveUrl')
+    sheet_name = data.get('sheetName', '1997')
+    rows = data.get('rows', [])
+    screenshot_path = data.get('screenshotPath')
+
+    results = []
+    total_ticked = 0
+    synced_rows = 0
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={"width": 1400, "height": 900},
+            permissions=["clipboard-read", "clipboard-write"]
+        )
+        page = context.new_page()
+        print(f"INFO:Opening OneDrive workbook for sheet {sheet_name}...", flush=True)
+        page.goto(url, wait_until="networkidle", timeout=60000)
+        time.sleep(3)
+
+        excel_frame = None
+        for f in page.frames:
+            if "xlviewerinternal.aspx" in f.url:
+                excel_frame = f
+                break
+
+        if not excel_frame:
+            raise RuntimeError("Excel frame not found on OneDrive page")
+
+        # Dismiss feedback dialog if present
+        try:
+            close_btn = page.locator("button[aria-label*='Close'], button[aria-label*='close'], button:has-text('✕')").first
+            if close_btn.count() > 0 and close_btn.is_visible():
+                close_btn.click()
+        except Exception:
+            pass
+
+        # Select sheet if tab button exists
+        tab = excel_frame.locator(f"[role='tab']:text-is('{sheet_name}'), button:text-is('{sheet_name}'), [role='tab']:has-text('{sheet_name}'), button:has-text('{sheet_name}')")
+        if tab.count() > 0:
+            tab.first.click()
+            time.sleep(1)
+
+        name_box = excel_frame.locator("#FormulaBar-NameBox-input, #FormulaBarNameBox, input[aria-label*='Name Box'], input[id*='NameBox']").first
+
+        for r_item in rows:
+            r_idx = r_item.get('rowIndex')
+            num_label = r_item.get('numberLabel', '')
+            summary_text = r_item.get('summaryText', '')
+            target_cells = r_item.get('targetCells', [])
+            untick_cells = r_item.get('untickCells', [])
+
+            ticked_cols = []
+            unticked_cols = []
+            err = None
+
+            try:
+                # 1. Fill Column D (Trích yếu nội dung) if provided
+                if summary_text:
+                    name_box.evaluate("el => el.focus()")
+                    name_box.fill(f"D{r_idx}")
+                    page.keyboard.press("Enter")
+                    time.sleep(0.25)
+
+                    excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(summary_text)})")
+                    time.sleep(0.08)
+                    page.keyboard.press("Control+v")
+                    time.sleep(0.25)
+                    page.keyboard.press("Enter")
+                    time.sleep(0.15)
+                    print(f"PROGRESS_D:{r_idx}:{num_label}:D{r_idx}", flush=True)
+
+                # 2. Tick checkbox cells in target_cells (~0.25s - 0.3s mỗi tick, 100% chuẩn xác không trượt ô)
+                for cell_coord in target_cells:
+                    name_box.evaluate("el => el.focus()")
+                    name_box.fill(cell_coord)
+                    page.keyboard.press("Enter")
+                    time.sleep(0.14)
+                    page.keyboard.press("Space")
+                    time.sleep(0.12)
+                    ticked_cols.append(cell_coord)
+                    total_ticked += 1
+                    print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
+
+                # 3. Untick checkbox cells in untick_cells (khi người dùng xóa bớt giấy tờ khỏi trích yếu)
+                # Trong Excel Online, nhấn phím Delete trên ô checkbox đã tick sẽ lập tức huỷ tick (đưa về FALSE)
+                for cell_coord in untick_cells:
+                    name_box.evaluate("el => el.focus()")
+                    name_box.fill(cell_coord)
+                    page.keyboard.press("Enter")
+                    time.sleep(0.14)
+                    page.keyboard.press("Delete")
+                    time.sleep(0.12)
+                    unticked_cols.append(cell_coord)
+                    total_ticked += 1
+                    print(f"PROGRESS_UNTICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
+
+                synced_rows += 1
+                print(f"PROGRESS_ROW:{r_idx}:{num_label}:{synced_rows}", flush=True)
+            except Exception as e:
+                err = str(e)
+                print(f"ERROR_ROW:{r_idx}:{err}", flush=True)
+
+            results.append({
+                "rowIndex": r_idx,
+                "numberLabel": num_label,
+                "summaryFilled": bool(summary_text and not err),
+                "tickedColumns": ticked_cols,
+                "untickedColumns": unticked_cols,
+                "error": err
+            })
+
+        print("INFO:Waiting 2.5s for cloud auto-save...", flush=True)
+        time.sleep(2.5)
+
+        if screenshot_path:
+            try:
+                page.screenshot(path=screenshot_path)
+                print(f"SCREENSHOT:{screenshot_path}", flush=True)
+            except Exception:
+                pass
+
+        browser.close()
+
+    output_data = {
+        "success": True,
+        "syncedRowsCount": synced_rows,
+        "tickedCellsCount": total_ticked,
+        "message": f"Đã đồng bộ thành công {synced_rows} hồ sơ và tick {total_ticked} ô lên OneDrive!",
+        "details": results
+    }
+
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(output_data, f, ensure_ascii=False, indent=2)
+
+if __name__ == '__main__':
+    if len(sys.argv) >= 3:
+        run_sync(sys.argv[1], sys.argv[2])

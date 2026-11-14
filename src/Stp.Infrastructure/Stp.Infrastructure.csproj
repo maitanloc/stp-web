@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Stp.Core\Stp.Core.csproj" />
@@ -9,6 +9,12 @@
     <EmbeddedResource Include="Excel\Templates\*.bas" />
     <EmbeddedResource Include="Excel\Templates\*.bin" />
     <EmbeddedResource Include="Excel\Templates\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="AutoTick\sync_onedrive_worker.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

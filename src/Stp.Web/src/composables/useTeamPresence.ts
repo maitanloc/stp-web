@@ -55,6 +55,7 @@ export interface LiveNotification {
 }
 
 export const lastLiveNotification = ref<LiveNotification | null>(null)
+export const lastOneDriveSyncCompleted = ref<{ success: boolean; message: string; count?: number } | null>(null)
 
 /** Tin nhắn chat nhóm realtime qua hub — nổi bong bóng Messenger tức thì */
 export const lastLiveChatMessage = ref<ChatMessageResponse | null>(null)
@@ -356,6 +357,11 @@ async function startTeamHub(): Promise<void> {
         link: payload.link ?? null,
         timestamp: payload.timestamp ?? new Date().toISOString(),
       }
+    })
+
+    // Tiến trình đồng bộ OneDrive chạy ngầm hoàn tất
+    connection.on('oneDriveSyncCompleted', (payload: { success: boolean; message: string; count?: number }) => {
+      lastOneDriveSyncCompleted.value = payload
     })
 
     // G1: Tin nhắn chat nhóm mới — realtime tức thời cho toàn bộ người trong phòng

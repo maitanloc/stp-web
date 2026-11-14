@@ -6,9 +6,11 @@ import {
   Check,
   CircleCheck,
   Clock,
+  Cloud,
   Database,
   Download,
   Eraser,
+  ExternalLink,
   FilePenLine,
   FileSpreadsheet,
   FileText,
@@ -19,10 +21,12 @@ import {
   Save,
   Search,
   Settings,
+  Sparkles,
   Star,
   TriangleExclamationPoint,
   Users,
   X,
+  Zap,
 } from '@lucide/vue'
 import { download, queryString, request, saveBlob } from '../api/client'
 import type {
@@ -44,6 +48,9 @@ import type {
   SummaryScopeRequest,
   SummarySessionInfoResponse,
   SyncResponse,
+  AutoTickSyncSummaryItem,
+  AutoTickSyncSummaryRequest,
+  AutoTickSyncSummaryResponse,
 } from '../api/types'
 import { errorMessage } from '../lib/errors'
 import { formatBytes, formatNumber } from '../lib/format'
@@ -73,6 +80,7 @@ import {
   lastSummaryCellChanged,
   lastSummaryBulkChanged,
   lastTeamSessionChanged,
+  lastOneDriveSyncCompleted,
 } from '../composables/useTeamPresence'
 import { getUserName } from '../api/client'
 import { teamIdentity } from '../composables/useTeamIdentity'
@@ -307,6 +315,31 @@ function onExportScopeChange(): void {
 const exportNameOpen = ref(false)
 const exportName = ref('')
 const pendingExportMode = ref<'full' | 'filtered'>('full')
+
+// OneDrive Live Sync state
+const ONEDRIVE_STORAGE_KEY = 'stp.autotick.onedrive_url'
+const DEFAULT_ONEDRIVE_URL =
+  'https://onedrive.live.com/:x:/g/personal/52960fb7b88aa4ef/IQDder6_nmp6QI5JsHL1gk1oAV2fQl2Dv7Nt09mpsdj3lJ0?e=5ggKl7'
+const oneDriveUrl = ref(localStorage.getItem(ONEDRIVE_STORAGE_KEY) || DEFAULT_ONEDRIVE_URL)
+const oneDriveSyncModalOpen = ref(false)
+const syncingOneDrive = ref(false)
+const oneDriveSyncResult = ref<AutoTickSyncSummaryResponse | null>(null)
+const oneDriveSyncError = ref<string | null>(null)
+const rowsToSyncPreview = ref<AutoTickSyncSummaryItem[]>([])
+const selectedSyncSheet = ref('1997')
+const oneDriveSyncScope = ref<'changes_only' | 'current_filter'>('changes_only')
+const syncingInBackground = ref(false)
+
+watch(lastOneDriveSyncCompleted, (completed) => {
+  if (!completed) return
+  syncingInBackground.value = false
+  if (completed.success) {
+    toast.success('Đồng bộ OneDrive thành công!', completed.message)
+  } else {
+    toast.error('Đồng bộ OneDrive chưa hoàn tất', completed.message)
+  }
+})
+
 
 // D3: báo cáo thiếu theo năm
 const yearReport = ref<Array<{ year: number; total: number; missingSheetNumber: number; missingDocumentNumber: number; missingNumber: number; needsNormalization: number }>>([])
@@ -2325,6 +2358,157 @@ async function doExportFiltered(): Promise<void> {
   }
 }
 
+function extractParensItems(text: string): string[] {
+  const match = text.match(/\(([^)]+)\)\s*$/)
+  if (!match) return []
+  return match[1].split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+}
+
+function updateSyncSheetName(): void {
+  if (scopeRequest.value.year && scopeRequest.value.year >= 1996) {
+    selectedSyncSheet.value = String(scopeRequest.value.year)
+  } else if (session.value?.sheetName && session.value.sheetName !== 'file nhập') {
+    selectedSyncSheet.value = session.value.sheetName
+  } else if (scopeRequest.value.year) {
+    selectedSyncSheet.value = String(scopeRequest.value.year)
+  } else {
+    selectedSyncSheet.value = '1997'
+  }
+}
+
+function prepareRowsForOneDriveSync(items: Array<{ rowNumber: number; summary: string; numberLabel?: string | null }>): AutoTickSyncSummaryItem[] {
+  return items.map((it) => {
+    const change = allChanges.value.find((c) => c.rowNumber === it.rowNumber)
+    const effectiveSummary = change?.summaryText || it.summary
+    const itemsList = change?.items && change.items.length > 0
+      ? change.items
+      : extractParensItems(effectiveSummary)
+
+    return {
+      rowIndex: it.rowNumber,
+      numberLabel: change?.numberLabel || it.numberLabel || '',
+      summaryText: effectiveSummary,
+      items: itemsList,
+    }
+  })
+}
+
+function startSyncToOneDriveFromPreview(): void {
+  const items = previewRows.value
+  if (!items || items.length === 0) {
+    toast.warning('Không có dòng nào', 'Vui lòng chọn hoặc lọc các dòng cần đồng bộ.')
+    return
+  }
+  updateSyncSheetName()
+  rowsToSyncPreview.value = prepareRowsForOneDriveSync(items)
+  oneDriveSyncResult.value = null
+  oneDriveSyncError.value = null
+  oneDriveSyncModalOpen.value = true
+}
+
+function updateSyncRowsPreview(): void {
+  let targetItems: Array<{ rowNumber: number; summary: string; numberLabel?: string | null }> = []
+
+  if (oneDriveSyncScope.value === 'changes_only' && edits.value.size > 0) {
+    targetItems = [...edits.value.values()].map((ed) => ({
+      rowNumber: ed.row.rowNumber,
+      summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
+      numberLabel: ed.numberLabel || ed.row.numberLabel,
+    }))
+  } else if (previewOpen.value && previewRows.value.length > 0) {
+    targetItems = previewRows.value.map((r) => {
+      const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
+      return {
+        rowNumber: r.rowNumber,
+        summary: change?.summaryText || r.summary,
+        numberLabel: change?.numberLabel || r.numberLabel,
+      }
+    })
+  } else if (rows.value.length > 0) {
+    targetItems = rows.value.map((r) => {
+      const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
+      return {
+        rowNumber: r.rowNumber,
+        summary: change?.summaryText || r.summary,
+        numberLabel: change?.numberLabel || r.numberLabel,
+      }
+    })
+    for (const ed of edits.value.values()) {
+      if (!targetItems.some((t) => t.rowNumber === ed.row.rowNumber)) {
+        targetItems.push({
+          rowNumber: ed.row.rowNumber,
+          summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
+          numberLabel: ed.numberLabel || ed.row.numberLabel,
+        })
+      }
+    }
+  } else if (edits.value.size > 0) {
+    targetItems = [...edits.value.values()].map((ed) => ({
+      rowNumber: ed.row.rowNumber,
+      summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
+      numberLabel: ed.numberLabel || ed.row.numberLabel,
+    }))
+  }
+
+  rowsToSyncPreview.value = prepareRowsForOneDriveSync(targetItems)
+}
+
+function openOneDriveSyncFromToolbar(): void {
+  if (edits.value.size > 0) {
+    oneDriveSyncScope.value = 'changes_only'
+  } else {
+    oneDriveSyncScope.value = 'current_filter'
+  }
+
+  updateSyncSheetName()
+  updateSyncRowsPreview()
+
+  if (rowsToSyncPreview.value.length === 0) {
+    toast.warning('Chưa có dữ liệu', 'Hãy lọc hoặc chọn hồ sơ để đồng bộ lên OneDrive.')
+    return
+  }
+
+  oneDriveSyncResult.value = null
+  oneDriveSyncError.value = null
+  oneDriveSyncModalOpen.value = true
+}
+
+async function executeOneDriveSync(): Promise<void> {
+  if (rowsToSyncPreview.value.length === 0 || syncingOneDrive.value) return
+
+  syncingOneDrive.value = true
+  oneDriveSyncError.value = null
+  oneDriveSyncResult.value = null
+
+  if (oneDriveUrl.value.trim()) {
+    localStorage.setItem(ONEDRIVE_STORAGE_KEY, oneDriveUrl.value.trim())
+  }
+
+  try {
+    const payload: AutoTickSyncSummaryRequest = {
+      oneDriveUrl: oneDriveUrl.value.trim(),
+      sheetName: selectedSyncSheet.value.trim() || '1997',
+      rows: rowsToSyncPreview.value,
+    }
+
+    const res = await request<AutoTickSyncSummaryResponse>('/api/auto-tick/sync-summary?background=true', {
+      method: 'POST',
+      body: payload,
+    })
+
+    oneDriveSyncResult.value = res
+    // Đóng popup ngay lập tức để người dùng không phải chờ, chuyển sang chạy ngầm
+    oneDriveSyncModalOpen.value = false
+    syncingInBackground.value = true
+    toast.success('Đã bắt đầu chạy ngầm trên OneDrive!', res.message)
+  } catch (err) {
+    oneDriveSyncError.value = errorMessage(err)
+    toast.error('Lỗi khởi động đồng bộ OneDrive', oneDriveSyncError.value)
+  } finally {
+    syncingOneDrive.value = false
+  }
+}
+
 function csvCell(value: string | number | null): string {
   const text = value === null || value === undefined ? '' : String(value)
   return `"${text.replace(/"/g, '""')}"`
@@ -3351,6 +3535,16 @@ onBeforeUnmount(() => {
                 Xuất bản lọc
               </button>
               <button
+                class="btn btn-success btn-sm"
+                type="button"
+                title="Tự động điền trích yếu và đánh tick trực tiếp lên file Excel OneDrive (chạy ngầm tự động)"
+                :disabled="!scopeReady || total === 0 || loadingRows || syncingOneDrive"
+                @click="openOneDriveSyncFromToolbar"
+              >
+                <Cloud :size="14" :class="{ spin: syncingInBackground }" />
+                {{ syncingInBackground ? 'Đang chạy ngầm OneDrive...' : 'Đồng bộ OneDrive' }}
+              </button>
+              <button
                 class="btn btn-primary btn-sm"
                 type="button"
                 title="Xuất ngay theo phạm vi đang lọc với tên file đã nhớ từ lần trước (không cần xem trước)"
@@ -4235,6 +4429,16 @@ onBeforeUnmount(() => {
             </span>
             <button class="btn btn-secondary" type="button" @click="previewOpen = false">Quay lại</button>
             <button
+              class="btn btn-success"
+              type="button"
+              :disabled="syncingOneDrive || previewRows.length === 0"
+              title="Tự động điền Trích yếu vào cột D và tick các ô tương ứng trực tiếp lên OneDrive Cloud"
+              @click="startSyncToOneDriveFromPreview"
+            >
+              <Cloud :size="16" />
+              {{ syncingOneDrive ? 'Đang đồng bộ...' : 'Đồng bộ vào OneDrive' }}
+            </button>
+            <button
               v-if="previewMode === 'filtered'"
               class="btn btn-accent"
               type="button"
@@ -4671,6 +4875,196 @@ onBeforeUnmount(() => {
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" type="button" @click="presetModalOpen = false">Đóng</button>
+          </div>
+        </div>
+      </div>
+      </Transition>
+
+      <!-- Modal: Đồng bộ Trích yếu & Tự động Đánh Dấu vào OneDrive Cloud -->
+      <Transition name="modal">
+      <div v-if="oneDriveSyncModalOpen" class="modal-backdrop" @click.self="!syncingOneDrive && (oneDriveSyncModalOpen = false)">
+        <div class="modal" style="width: min(720px, 100%)">
+          <div class="modal-header">
+            <div>
+              <div class="card-title row" style="gap: 8px; align-items: center">
+                <span class="badge badge-brand">
+                  <Sparkles :size="13" />
+                  Cloud Automation
+                </span>
+                <span>Đồng bộ & Đánh Dấu OneDrive</span>
+              </div>
+              <div class="card-subtitle">
+                Robot Playwright sẽ mở file trên đám mây, tự động điền Cột D (Trích yếu nội dung) và tick các ô Checkbox tương ứng (Cột I..BJ).
+              </div>
+            </div>
+            <button
+              class="btn btn-ghost btn-icon"
+              type="button"
+              :disabled="syncingOneDrive"
+              aria-label="Đóng"
+              @click="oneDriveSyncModalOpen = false"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+
+          <div class="modal-body stack" style="gap: 16px">
+            <!-- OneDrive Link Input -->
+            <label class="field">
+              <span class="label">Liên kết file Excel trên OneDrive (Được đồng bộ từ Menu Tự động đánh dấu):</span>
+              <input
+                v-model="oneDriveUrl"
+                class="input"
+                type="text"
+                placeholder="https://onedrive.live.com/:x:/g/personal/..."
+                :disabled="syncingOneDrive"
+              />
+            </label>
+
+            <!-- Sheet & Count Summary Card -->
+            <div class="card" style="padding: 12px 16px; background: var(--surface)">
+              <div class="row-between wrap" style="gap: 10px">
+                <div class="row" style="gap: 16px; align-items: center">
+                  <div>
+                    <label class="hint" style="display: block; margin-bottom: 2px">Sheet đích trên OneDrive:</label>
+                    <input
+                      v-model="selectedSyncSheet"
+                      type="text"
+                      class="input input-sm"
+                      style="width: 120px; font-weight: 700; color: var(--brand)"
+                      placeholder="1997"
+                      :disabled="syncingOneDrive"
+                    />
+                  </div>
+                  <div>
+                    <span class="hint" style="display: block">Số hồ sơ đồng bộ:</span>
+                    <strong style="color: var(--info); font-size: 1.05rem">
+                      {{ rowsToSyncPreview.length }} hồ sơ
+                    </strong>
+                  </div>
+                </div>
+                <div class="row" style="gap: 6px">
+                  <span class="badge badge-accent">
+                    <Cloud :size="12" />
+                    Chế độ Live Cloud
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Scope Selector (nếu có các hồ sơ vừa chỉnh sửa) -->
+            <div v-if="edits.size > 0 && rows.length > 0" class="row" style="gap: 8px">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="oneDriveSyncScope === 'changes_only' ? 'btn-primary' : 'btn-secondary'"
+                :disabled="syncingOneDrive"
+                @click="oneDriveSyncScope = 'changes_only'; updateSyncRowsPreview()"
+              >
+                Chỉ {{ edits.size }} hồ sơ vừa chỉnh sửa (Khuyến nghị)
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="oneDriveSyncScope === 'current_filter' ? 'btn-primary' : 'btn-secondary'"
+                :disabled="syncingOneDrive"
+                @click="oneDriveSyncScope = 'current_filter'; updateSyncRowsPreview()"
+              >
+                Toàn bộ {{ rows.length }} hồ sơ trong bộ lọc
+              </button>
+            </div>
+
+            <!-- Preview Rows List -->
+            <div>
+              <div class="row-between" style="margin-bottom: 6px">
+                <span style="font-weight: 600; font-size: 0.9rem">Danh sách hồ sơ chuẩn bị điền & tick:</span>
+                <span class="hint">Hiển thị {{ Math.min(5, rowsToSyncPreview.length) }}/{{ rowsToSyncPreview.length }} hồ sơ</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto">
+                <div
+                  v-for="(r, idx) in rowsToSyncPreview.slice(0, 10)"
+                  :key="idx"
+                  class="card"
+                  style="padding: 8px 12px; background: rgba(255, 255, 255, 0.02)"
+                >
+                  <div class="row-between wrap" style="gap: 8px">
+                    <div class="row" style="gap: 8px; align-items: center">
+                      <strong style="color: var(--brand)">HS {{ r.numberLabel || r.rowIndex }}</strong>
+                      <span class="hint">(Hàng {{ r.rowIndex }})</span>
+                    </div>
+                    <div class="row" style="gap: 4px">
+                      <span v-for="it in r.items.slice(0, 3)" :key="it" class="badge badge-xs">
+                        ✓ {{ it }}
+                      </span>
+                      <span v-if="r.items.length > 3" class="hint" style="font-size: 11px">
+                        +{{ r.items.length - 3 }} giấy tờ
+                      </span>
+                    </div>
+                  </div>
+                  <div class="truncate hint" style="font-size: 12px; margin-top: 4px" :title="r.summaryText">
+                    {{ r.summaryText }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Running State -->
+            <div v-if="syncingOneDrive" class="alert alert-info">
+              <RefreshCw :size="18" class="spin" />
+              <div class="grow">
+                <strong>Robot đang đồng bộ trực tiếp lên OneDrive Cloud...</strong>
+                <div style="margin-top: 3px; font-size: 13px">
+                  Đang mở phiên trình duyệt, điền trích yếu vào Cột D và tick các ô checkbox Cột I..BJ. Quá trình mất khoảng 15-30 giây.
+                </div>
+              </div>
+            </div>
+
+            <!-- Success Result -->
+            <div v-else-if="oneDriveSyncResult" class="alert alert-success">
+              <CircleCheck :size="20" />
+              <div class="grow">
+                <strong>Đồng bộ OneDrive thành công rực rỡ!</strong>
+                <div style="margin-top: 4px">
+                  {{ oneDriveSyncResult.message }}
+                </div>
+                <div class="row" style="gap: 8px; margin-top: 8px">
+                  <a :href="oneDriveUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
+                    <ExternalLink :size="14" />
+                    Mở kiểm tra trên OneDrive Cloud
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <!-- Error State -->
+            <div v-else-if="oneDriveSyncError" class="alert alert-danger">
+              <TriangleExclamationPoint :size="18" />
+              <div class="grow">
+                <strong>Lỗi đồng bộ:</strong>
+                <div style="margin-top: 2px">{{ oneDriveSyncError }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button
+              class="btn btn-secondary"
+              type="button"
+              :disabled="syncingOneDrive"
+              @click="oneDriveSyncModalOpen = false"
+            >
+              {{ oneDriveSyncResult ? 'Đóng' : 'Huỷ' }}
+            </button>
+            <button
+              v-if="!oneDriveSyncResult"
+              class="btn btn-success"
+              type="button"
+              :disabled="syncingOneDrive || rowsToSyncPreview.length === 0"
+              @click="executeOneDriveSync"
+            >
+              <Zap :size="16" />
+              {{ syncingOneDrive ? 'Đang thực thi robot...' : 'Bắt đầu Điền & Tick OneDrive' }}
+            </button>
           </div>
         </div>
       </div>

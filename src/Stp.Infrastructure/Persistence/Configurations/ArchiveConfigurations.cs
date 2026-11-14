@@ -100,7 +100,7 @@ public sealed class DocumentLineConfiguration : IEntityTypeConfiguration<Documen
         builder.Property(x => x.TrichYeu).HasMaxLength(2000);
         builder.Property(x => x.TacGia).HasMaxLength(300);
         builder.Property(x => x.ToSo).HasMaxLength(100);
-        builder.Property(x => x.GhiChu).HasMaxLength(500);
+        builder.Property(x => x.GhiChu).HasMaxLength(4000);
 
         builder.HasIndex(x => x.DossierId);
     }

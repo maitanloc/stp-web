@@ -276,12 +276,16 @@ public sealed class ArchiveSyncService : IArchiveSyncService
             _db.ChangeTracker.Clear();
             _logger.LogError(ex, "Đồng bộ {File} thất bại", sourceFileName);
 
+            var detailedError = ex.InnerException is not null
+                ? $"{ex.Message} --> {ex.InnerException.Message}"
+                : ex.Message;
+
             var failed = new SyncSession
             {
                 SourceFileName = sourceFileName,
                 UploadedAt = DateTimeOffset.UtcNow,
                 Status = SyncStatus.Failed,
-                ErrorMessage = Truncate(ex.Message, 2000)
+                ErrorMessage = Truncate(detailedError, 2000)
             };
 
             try
@@ -298,7 +302,7 @@ public sealed class ArchiveSyncService : IArchiveSyncService
             {
                 Success = false,
                 SyncSessionId = failed.Id,
-                ErrorMessage = ex.Message
+                ErrorMessage = detailedError
             };
         }
     }
@@ -343,19 +347,19 @@ public sealed class ArchiveSyncService : IArchiveSyncService
     {
         dossier.MlRow = incoming.MlRow;
         dossier.Number = incoming.Number;
-        dossier.NumberLabel = string.IsNullOrWhiteSpace(incoming.NumberLabel)
+        dossier.NumberLabel = Truncate(string.IsNullOrWhiteSpace(incoming.NumberLabel)
             ? incoming.Number.ToString(CultureInfo.InvariantCulture)
-            : incoming.NumberLabel;
-        dossier.Title = string.IsNullOrWhiteSpace(incoming.Title)
+            : incoming.NumberLabel, 100);
+        dossier.Title = Truncate(string.IsNullOrWhiteSpace(incoming.Title)
             ? "MỤC LỤC VĂN BẢN"
-            : incoming.Title;
-        dossier.Group = incoming.Group;
-        dossier.Type = incoming.Type;
-        dossier.BoxNumber = incoming.BoxNumber;
-        dossier.SubNumber = incoming.SubNumber;
-        dossier.OriginalSummary = incoming.OriginalSummary;
-        dossier.NumberNote = incoming.NumberNote;
-        dossier.SourceVolume = incoming.SourceVolume;
+            : incoming.Title, 300);
+        dossier.Group = Truncate(incoming.Group, 300);
+        dossier.Type = Truncate(incoming.Type, 300);
+        dossier.BoxNumber = Truncate(incoming.BoxNumber, 100);
+        dossier.SubNumber = Truncate(incoming.SubNumber, 100);
+        dossier.OriginalSummary = Truncate(incoming.OriginalSummary, 2000);
+        dossier.NumberNote = Truncate(incoming.NumberNote, 500);
+        dossier.SourceVolume = Truncate(incoming.SourceVolume, 100);
         dossier.HasPrintLayout = incoming.HasPrintLayout;
         dossier.IsAggregate = incoming.IsAggregate;
         dossier.TotalPages = incoming.TotalPages;
@@ -379,12 +383,12 @@ public sealed class ArchiveSyncService : IArchiveSyncService
             {
                 var target = documents[index];
                 target.Stt = source.Stt;
-                target.SoKyHieu = source.SoKyHieu;
-                target.Ngay = source.Ngay;
-                target.TrichYeu = source.TrichYeu;
-                target.TacGia = source.TacGia;
-                target.ToSo = source.ToSo;
-                target.GhiChu = source.GhiChu;
+                target.SoKyHieu = Truncate(source.SoKyHieu, 200);
+                target.Ngay = Truncate(source.Ngay, 100);
+                target.TrichYeu = Truncate(source.TrichYeu, 2000);
+                target.TacGia = Truncate(source.TacGia, 300);
+                target.ToSo = Truncate(source.ToSo, 100);
+                target.GhiChu = Truncate(source.GhiChu, 4000);
             }
             else
             {
@@ -393,12 +397,12 @@ public sealed class ArchiveSyncService : IArchiveSyncService
                     Dossier = dossier,
                     DossierId = dossier.Id,
                     Stt = source.Stt,
-                    SoKyHieu = source.SoKyHieu,
-                    Ngay = source.Ngay,
-                    TrichYeu = source.TrichYeu,
-                    TacGia = source.TacGia,
-                    ToSo = source.ToSo,
-                    GhiChu = source.GhiChu
+                    SoKyHieu = Truncate(source.SoKyHieu, 200),
+                    Ngay = Truncate(source.Ngay, 100),
+                    TrichYeu = Truncate(source.TrichYeu, 2000),
+                    TacGia = Truncate(source.TacGia, 300),
+                    ToSo = Truncate(source.ToSo, 100),
+                    GhiChu = Truncate(source.GhiChu, 4000)
                 };
                 documents.Add(line);
                 _db.DocumentLines.Add(line);
@@ -459,6 +463,6 @@ public sealed class ArchiveSyncService : IArchiveSyncService
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static string Truncate(string value, int length) =>
-        value.Length <= length ? value : value[..length];
+    private static string Truncate(string? value, int length) =>
+        string.IsNullOrEmpty(value) ? string.Empty : (value.Length <= length ? value : value[..length]);
 }

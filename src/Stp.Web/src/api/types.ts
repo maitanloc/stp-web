@@ -712,3 +712,147 @@ export interface SummaryChangeRequest {
   numberLabel?: string | null
 }
 
+export interface AutoTickInspectRequest {
+  oneDriveUrl: string
+  sheetName?: string
+}
+
+export interface AutoTickSheetHeader {
+  columnIndex: number
+  columnLetter: string
+  title: string
+  existingTicksCount: number
+}
+
+export interface AutoTickRowPreview {
+  rowIndex: number
+  numberLabel?: string
+  citizenNames?: string
+  summaryText: string
+  hasParentheses: boolean
+  extractedItems: string[]
+  tickedCount: number
+  isFullyTicked: boolean
+}
+
+export interface AutoTickInspectResponse {
+  fileName: string
+  oneDriveUrl: string
+  userCanWrite: boolean
+  eTag?: string
+  sheets: string[]
+  activeSheet: string
+  totalRows: number
+  rowsWithParentheses: number
+  rowsFullyTicked: number
+  rowsPartiallyTicked: number
+  rowsUnticked: number
+  documentHeaders: AutoTickSheetHeader[]
+  sampleRows: AutoTickRowPreview[]
+}
+
+export interface AutoTickStartRequest {
+  oneDriveUrl: string
+  sheetName: string
+  numberFrom?: number
+  numberTo?: number
+  selectedHeaders?: string[]
+  onlyUnticked?: boolean
+}
+
+export interface AutoTickRowResult {
+  rowIndex: number
+  numberLabel?: string
+  citizenNames?: string
+  summaryText: string
+  extractedItems: string[]
+  newlyTickedColumns: string[]
+  alreadyTickedColumns: string[]
+  unmatchedItems: string[]
+  status: string
+}
+
+export interface AutoTickProgressEvent {
+  jobId: string
+  sheetName: string
+  processedRows: number
+  totalRows: number
+  newlyTickedRowsCount: number
+  newlyTickedCellsCount: number
+  skippedRowsCount: number
+  percent: number
+  currentRow?: AutoTickRowResult
+  isCompleted: boolean
+  isCancelled?: boolean
+  errorMessage?: string
+}
+
+export interface AutoTickJobStatusResponse {
+  jobId: string
+  status: string
+  sheetName: string
+  processedRows: number
+  totalRows: number
+  newlyTickedRowsCount: number
+  newlyTickedCellsCount: number
+  skippedRowsCount: number
+  percent: number
+  startedAt: string
+  finishedAt?: string
+  errorMessage?: string
+  recentRowResults: AutoTickRowResult[]
+}
+
+export interface AutoTickWatcherCheckRequest {
+  oneDriveUrl: string
+  sheetName?: string
+  lastETag?: string
+  knownRowCount?: number
+}
+
+export interface AutoTickWatcherCheckResponse {
+  hasChanges: boolean
+  latestETag?: string
+  newUntickedRowsCount: number
+  sheetName: string
+  checkedAt: string
+}
+
+export interface AutoTickSaveToOneDriveResponse {
+  success: boolean
+  savedPath: string
+  message: string
+}
+
+export interface AutoTickSyncSummaryItem {
+  rowIndex: number
+  numberLabel: string
+  summaryText: string
+  items: string[]
+  targetCells?: string[]
+}
+
+export interface AutoTickSyncSummaryRequest {
+  oneDriveUrl: string
+  sheetName: string
+  rows: AutoTickSyncSummaryItem[]
+}
+
+export interface AutoTickSyncSummaryRowResult {
+  rowIndex: number
+  numberLabel: string
+  summaryFilled: boolean
+  tickedColumns: string[]
+  error?: string | null
+}
+
+export interface AutoTickSyncSummaryResponse {
+  success: boolean
+  syncedRowsCount: number
+  tickedCellsCount: number
+  message: string
+  details: AutoTickSyncSummaryRowResult[]
+}
+
+
+

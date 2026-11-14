@@ -27,6 +27,7 @@ builder.Services.AddStpJobs();
 builder.Services.AddSingleton<TeamPresence>();
 builder.Services.AddSingleton<TeamAudit>();
 builder.Services.AddSingleton<NotificationService>();
+builder.Services.AddSingleton<Stp.Core.AutoTick.IAutoTickEventPublisher, Stp.Api.Services.AutoTickEventPublisher>();
 // F1: realtime presence/hành động nhóm — poll REST vẫn chạy song song dự phòng.
 builder.Services.AddSignalR();
 
