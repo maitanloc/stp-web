@@ -2512,12 +2512,20 @@ function updateSyncSheetName(candidates?: SyncRowCandidate[]): void {
     }
   }
 
+  // 2. Tìm trong danh sách dòng hiện có trên bảng
+  const tableRowWithSheet = rows.value.find((r) => r.sheet && r.sheet.trim())
+  if (tableRowWithSheet && tableRowWithSheet.sheet) {
+    selectedSyncSheet.value = tableRowWithSheet.sheet.trim()
+    return
+  }
+
+  // 3. Theo năm lọc
   if (scopeRequest.value.year && scopeRequest.value.year >= 1996) {
     selectedSyncSheet.value = String(scopeRequest.value.year)
+  } else if (scopeRequest.value.year && scopeRequest.value.year < 1996) {
+    selectedSyncSheet.value = 'file nhập'
   } else if (session.value?.sheetName && session.value.sheetName !== 'file nhập') {
     selectedSyncSheet.value = session.value.sheetName
-  } else if (scopeRequest.value.year) {
-    selectedSyncSheet.value = String(scopeRequest.value.year)
   } else if (session.value?.sheetName) {
     selectedSyncSheet.value = session.value.sheetName
   } else {
@@ -2540,6 +2548,7 @@ function prepareRowsForOneDriveSync(items: SyncRowCandidate[]): AutoTickSyncSumm
 
     return {
       rowIndex: actualRowIndex,
+      sheetName: it.sheet || undefined,
       numberLabel: change?.numberLabel || it.numberLabel || '',
       summaryText: effectiveSummary,
       items: itemsList,
@@ -2579,8 +2588,8 @@ function updateSyncRowsPreview(): void {
           const matchingRow = rows.value.find((x) => x.rowNumber === r.rowNumber)
           return {
             rowNumber: r.rowNumber,
-            sourceRowNumber: matchingRow?.sourceRowNumber,
-            sheet: matchingRow?.sheet,
+            sourceRowNumber: r.sourceRowNumber || matchingRow?.sourceRowNumber,
+            sheet: r.sheet || matchingRow?.sheet,
             summary: change?.summaryText || r.summary,
             numberLabel: change?.numberLabel || r.numberLabel,
           }
@@ -2624,8 +2633,8 @@ function updateSyncRowsPreview(): void {
       const matchingRow = rows.value.find((x) => x.rowNumber === r.rowNumber)
       return {
         rowNumber: r.rowNumber,
-        sourceRowNumber: matchingRow?.sourceRowNumber,
-        sheet: matchingRow?.sheet,
+        sourceRowNumber: r.sourceRowNumber || matchingRow?.sourceRowNumber,
+        sheet: r.sheet || matchingRow?.sheet,
         summary: change?.summaryText || r.summary,
         numberLabel: change?.numberLabel || r.numberLabel,
       }

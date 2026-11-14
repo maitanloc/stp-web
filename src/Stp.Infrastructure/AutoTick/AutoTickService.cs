@@ -396,10 +396,29 @@ public sealed partial class AutoTickService : IAutoTickService
         }
     }
 
+    public bool EnqueueOneDriveJob(string oneDriveUrl)
+    {
+        if (string.IsNullOrWhiteSpace(oneDriveUrl)) return false;
+        var key = NormalizeUrlKey(oneDriveUrl);
+        int count = _activeJobCounts.AddOrUpdate(key, 1, (_, current) => current + 1);
+        return count > 1;
+    }
+
+    public void DequeueOneDriveJob(string oneDriveUrl)
+    {
+        if (string.IsNullOrWhiteSpace(oneDriveUrl)) return;
+        var key = NormalizeUrlKey(oneDriveUrl);
+        _activeJobCounts.AddOrUpdate(key, 0, (_, current) => Math.Max(0, current - 1));
+    }
+
     public bool IsOneDriveBusy(string oneDriveUrl)
     {
         if (string.IsNullOrWhiteSpace(oneDriveUrl)) return false;
         var key = NormalizeUrlKey(oneDriveUrl);
+        if (_activeJobCounts.TryGetValue(key, out int count) && count > 0)
+        {
+            return true;
+        }
         return _oneDriveUrlSemaphores.TryGetValue(key, out var sem) && sem.CurrentCount == 0;
     }
 
@@ -428,9 +447,37 @@ public sealed partial class AutoTickService : IAutoTickService
         }
 
         var url = request.OneDriveUrl.Trim();
+        var sem = _oneDriveUrlSemaphores.GetOrAdd(NormalizeUrlKey(url), _ => new SemaphoreSlim(1, 1));
+        bool isWaitingInQueue = sem.CurrentCount == 0;
+        if (isWaitingInQueue)
+        {
+            _logger.LogInformation("File {Url} đang có robot chạy, tiến trình mới xếp hàng chờ...", url);
+        }
+        _logger.LogInformation("Chờ khóa hàng đợi đồng bộ OneDrive cho file {Url}...", url);
+        var acquired = await sem.WaitAsync(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
+        if (!acquired)
+        {
+            return new AutoTickSyncSummaryResponse
+            {
+                Success = false,
+                Message = "Robot hiện đang bận đồng bộ file này cho một đồng đội khác trong phòng. Vui lòng thử lại sau giây lát."
+            };
+        }
 
         try
         {
+            if (isWaitingInQueue && onLockAcquired is not null)
+            {
+                try
+                {
+                    await onLockAcquired().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Lỗi khi gọi onLockAcquired callback");
+                }
+            }
+
             // 1. Download & inspect workbook to map headers and row coordinates
             var downloaded = await DownloadOneDriveFileAsync(url, ct).ConfigureAwait(false);
             using var workbook = new XLWorkbook(downloaded.FilePath);
@@ -445,11 +492,31 @@ public sealed partial class AutoTickService : IAutoTickService
                     string.Equals(w.Name.Trim(), cleanReqSheet, StringComparison.OrdinalIgnoreCase));
             }
 
-            // 1.2 Tự động kiểm tra độ khớp: nếu targetSheet chưa thấy hoặc có 0 dòng khớp, quét toàn bộ workbook
-            if (targetSheet is null || CountMatchingRowsInSheet(targetSheet, request.Rows) == 0)
+            // Nếu các row gửi kèm có SheetName đồng nhất (ví dụ "file nhập" hoặc "1996"), ưu tiên sheet đó
+            var rowSheetGroup = request.Rows
+                .Where(r => !string.IsNullOrWhiteSpace(r.SheetName))
+                .Select(r => r.SheetName!.Trim())
+                .GroupBy(s => s, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count())
+                .FirstOrDefault();
+
+            if (rowSheetGroup is not null)
             {
-                IXLWorksheet? bestSheet = null;
-                int maxMatches = 0;
+                var rowWs = workbook.Worksheets.FirstOrDefault(w =>
+                    string.Equals(w.Name.Trim(), rowSheetGroup.Key, StringComparison.OrdinalIgnoreCase));
+                if (rowWs is not null)
+                {
+                    targetSheet = rowWs;
+                }
+            }
+
+            int targetMatches = targetSheet is not null ? CountMatchingRowsInSheet(targetSheet, request.Rows) : 0;
+
+            // 1.2 Tự động kiểm tra độ khớp: nếu targetSheet chưa thấy hoặc chưa khớp đủ số dòng, quét toàn bộ workbook
+            if (targetSheet is null || targetMatches < request.Rows.Count)
+            {
+                IXLWorksheet? bestSheet = targetSheet;
+                int maxMatches = targetMatches;
 
                 foreach (var ws in workbook.Worksheets)
                 {
@@ -469,11 +536,11 @@ public sealed partial class AutoTickService : IAutoTickService
                     }
                 }
 
-                if (bestSheet is not null && maxMatches > 0)
+                if (bestSheet is not null && maxMatches > targetMatches)
                 {
+                    _logger.LogInformation("Tự động nhận diện sheet tối ưu: '{SheetName}' chứa {Matches}/{Total} hồ sơ cần đồng bộ (thay cho sheet cũ {OldSheet})",
+                        bestSheet.Name, maxMatches, request.Rows.Count, targetSheet?.Name ?? request.SheetName);
                     targetSheet = bestSheet;
-                    _logger.LogInformation("Tự động nhận diện sheet tối ưu: '{SheetName}' chứa {Matches}/{Total} hồ sơ cần đồng bộ",
-                        bestSheet.Name, maxMatches, request.Rows.Count);
                 }
             }
 
@@ -707,77 +774,85 @@ public sealed partial class AutoTickService : IAutoTickService
             };
             ConfigurePlaywrightEnvironment(psi);
 
-            var sem = _oneDriveUrlSemaphores.GetOrAdd(NormalizeUrlKey(url), _ => new SemaphoreSlim(1, 1));
-            bool isWaitingInQueue = sem.CurrentCount == 0;
-            if (isWaitingInQueue)
-            {
-                _logger.LogInformation("File {Url} đang có robot chạy, tiến trình mới xếp hàng chờ...", url);
-            }
-            _logger.LogInformation("Chờ khóa hàng đợi đồng bộ OneDrive cho file {Url}...", url);
-            var acquired = await sem.WaitAsync(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
-            if (!acquired)
+            using var proc = Process.Start(psi);
+            if (proc is null)
             {
                 return new AutoTickSyncSummaryResponse
                 {
                     Success = false,
-                    Message = "Robot hiện đang bận đồng bộ file này cho một đồng đội khác trong phòng. Vui lòng thử lại sau giây lát."
+                    Message = "Không thể khởi động trình duyệt robot đồng bộ."
                 };
             }
 
-            if (isWaitingInQueue && onLockAcquired is not null)
+            var stdoutSb = new StringBuilder();
+            var stderrSb = new StringBuilder();
+
+            proc.OutputDataReceived += (s, e) =>
             {
-                try
+                if (e.Data is not null)
                 {
-                    await onLockAcquired().ConfigureAwait(false);
+                    lock (stdoutSb) stdoutSb.AppendLine(e.Data);
+                    _logger.LogDebug("[Robot-Out] {Data}", e.Data);
                 }
-                catch (Exception ex)
+            };
+            proc.ErrorDataReceived += (s, e) =>
+            {
+                if (e.Data is not null)
                 {
-                    _logger.LogWarning(ex, "Lỗi khi gọi onLockAcquired callback");
+                    lock (stderrSb) stderrSb.AppendLine(e.Data);
+                    _logger.LogWarning("[Robot-Err] {Data}", e.Data);
                 }
-            }
+            };
+
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+
+            using var procCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            procCts.CancelAfter(TimeSpan.FromMinutes(6)); // Safety timeout 6 mins
 
             try
             {
-                using var proc = Process.Start(psi);
-                if (proc is null)
-                {
-                    return new AutoTickSyncSummaryResponse
-                    {
-                        Success = false,
-                        Message = "Không thể khởi động trình duyệt robot đồng bộ."
-                    };
-                }
-
-                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-
-                if (File.Exists(outputPath))
-                {
-                    var json = await File.ReadAllTextAsync(outputPath, ct).ConfigureAwait(false);
-                    var result = JsonSerializer.Deserialize<AutoTickSyncSummaryResponse>(json, new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-
-                    try { File.Delete(inputPath); File.Delete(outputPath); } catch { }
-
-                    return result ?? new AutoTickSyncSummaryResponse
-                    {
-                        Success = false,
-                        Message = "Không đọc được kết quả đồng bộ từ robot."
-                    };
-                }
-
-                var errText = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
+                await proc.WaitForExitAsync(procCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
                 return new AutoTickSyncSummaryResponse
                 {
                     Success = false,
-                    Message = $"Robot gặp lỗi: {errText}"
+                    Message = "Robot chạy quá thời gian tối đa (6 phút) nên đã tự động dừng để giải phóng hàng đợi."
                 };
             }
-            finally
+
+            if (File.Exists(outputPath))
             {
-                sem.Release();
+                var json = await File.ReadAllTextAsync(outputPath, ct).ConfigureAwait(false);
+                var result = JsonSerializer.Deserialize<AutoTickSyncSummaryResponse>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                try { File.Delete(inputPath); File.Delete(outputPath); } catch { }
+
+                return result ?? new AutoTickSyncSummaryResponse
+                {
+                    Success = false,
+                    Message = "Không đọc được kết quả đồng bộ từ robot."
+                };
             }
+
+            string errText;
+            lock (stderrSb) errText = stderrSb.ToString();
+            if (string.IsNullOrWhiteSpace(errText))
+            {
+                lock (stdoutSb) errText = stdoutSb.ToString();
+            }
+
+            return new AutoTickSyncSummaryResponse
+            {
+                Success = false,
+                Message = $"Robot gặp lỗi: {errText}"
+            };
         }
         catch (Exception ex)
         {
@@ -787,6 +862,10 @@ public sealed partial class AutoTickService : IAutoTickService
                 Success = false,
                 Message = $"Lỗi thực thi đồng bộ: {ex.Message}"
             };
+        }
+        finally
+        {
+            sem.Release();
         }
     }
 
@@ -1427,6 +1506,7 @@ public sealed partial class AutoTickService : IAutoTickService
     }
 
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _oneDriveUrlSemaphores = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, int> _activeJobCounts = new(StringComparer.OrdinalIgnoreCase);
 
     private static string NormalizeUrlKey(string url)
     {
@@ -1602,6 +1682,7 @@ public sealed partial class AutoTickService : IAutoTickService
 
         var sheetNumbers = new HashSet<int>();
         var sheetStrings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var citizenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (int r = 5; r <= Math.Min(lastRow, 3000); r++)
         {
@@ -1615,29 +1696,58 @@ public sealed partial class AutoTickService : IAutoTickService
                     sheetNumbers.Add(n);
                 }
             }
+
+            var sumText = GetCellText(ws.Cell(r, 4));
+            if (!string.IsNullOrWhiteSpace(sumText))
+            {
+                var names = ExtractCitizenNames(sumText);
+                if (!string.IsNullOrWhiteSpace(names))
+                {
+                    citizenNames.Add(NormalizeText(names));
+                }
+            }
         }
 
         int count = 0;
         foreach (var r in rows)
         {
+            bool matched = false;
             if (!string.IsNullOrWhiteSpace(r.NumberLabel))
             {
                 var label = r.NumberLabel.Trim();
                 if (sheetStrings.Contains(label))
                 {
                     count++;
-                    continue;
+                    matched = true;
                 }
-                var m = Regex.Match(label, @"^\d+");
-                if (m.Success && int.TryParse(m.Value, out int n) && sheetNumbers.Contains(n))
+                else
                 {
-                    count++;
-                    continue;
+                    var m = Regex.Match(label, @"^\d+");
+                    if (m.Success && int.TryParse(m.Value, out int n) && sheetNumbers.Contains(n))
+                    {
+                        count++;
+                        matched = true;
+                    }
                 }
             }
-            if (r.RowIndex >= 5 && r.RowIndex <= lastRow)
+
+            if (!matched && !string.IsNullOrWhiteSpace(r.SummaryText))
             {
-                count++;
+                var names = ExtractCitizenNames(r.SummaryText);
+                if (!string.IsNullOrWhiteSpace(names) && citizenNames.Contains(NormalizeText(names)))
+                {
+                    count++;
+                    matched = true;
+                }
+            }
+
+            // Fallback chỉ dành cho hồ sơ không có nhãn số và không có nội dung trích yếu
+            if (!matched && string.IsNullOrWhiteSpace(r.NumberLabel) && string.IsNullOrWhiteSpace(r.SummaryText))
+            {
+                if (r.RowIndex >= 5 && r.RowIndex <= lastRow)
+                {
+                    count++;
+                }
             }
         }
 

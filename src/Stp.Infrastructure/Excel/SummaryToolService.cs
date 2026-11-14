@@ -3024,7 +3024,9 @@ public sealed class SummaryToolService : ISummaryToolService
             plan.DocumentNumberChanged,
             plan.NumberLabel,
             plan.Row.NumberLabel,
-            plan.NumberLabelChanged);
+            plan.NumberLabelChanged,
+            plan.Row.SheetName,
+            plan.Row.SourceRowNumber);
 
     private static List<string> NormalizeItems(
         IReadOnlyList<string> requestedItems,

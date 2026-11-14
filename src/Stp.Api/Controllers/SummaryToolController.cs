@@ -1155,7 +1155,9 @@ public sealed class SummaryToolController : ControllerBase
             row.DocumentNumberChanged,
             row.NumberLabel,
             row.OriginalNumberLabel,
-            row.NumberLabelChanged);
+            row.NumberLabelChanged,
+            row.SheetName,
+            row.SourceRowNumber);
 
     private static SummaryRowResponse ToResponse(SummaryRow row) =>
         new(

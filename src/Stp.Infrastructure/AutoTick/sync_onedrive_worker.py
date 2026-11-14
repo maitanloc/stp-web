@@ -3,6 +3,7 @@ import os
 import json
 import time
 import re
+from urllib.parse import urlparse
 
 # Đảm bảo Playwright luôn tìm thấy Chromium dù chạy dưới quyền Windows Service (SYSTEM) hay User
 if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ or not os.path.exists(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")):
@@ -79,6 +80,7 @@ def launch_browser(p):
         "--disable-gpu",
         "--no-first-run",
         "--no-default-browser-check",
+        "--enable-clipboard-read-write",
     ]
 
     attempts = [
@@ -150,6 +152,16 @@ def run_sync(input_file, output_file):
         if not excel_frame:
             excel_frame = page.main_frame
 
+        # Grant clipboard permissions for all frame origins
+        try:
+            for f in page.frames:
+                if f.url and f.url.startswith("http"):
+                    parsed_u = urlparse(f.url)
+                    frame_origin = f"{parsed_u.scheme}://{parsed_u.netloc}"
+                    context.grant_permissions(["clipboard-read", "clipboard-write"], origin=frame_origin)
+        except Exception:
+            pass
+
         # Dismiss feedback dialog or prompts if present
         for selector in [
             "button[aria-label*='Close']",
@@ -192,15 +204,41 @@ def run_sync(input_file, output_file):
             pass
 
         def safe_paste(text):
+            pasted = False
+            # Strategy 1: excel_frame evaluate with window focus & document.body focus
             try:
-                excel_frame.evaluate(f"() => navigator.clipboard.writeText({json.dumps(text)})")
+                excel_frame.evaluate("""
+                    (val) => {
+                        window.focus();
+                        if (document.body) document.body.focus();
+                        return navigator.clipboard.writeText(val);
+                    }
+                """, text)
+                time.sleep(0.06)
+                page.keyboard.press("Control+v")
+                pasted = True
             except Exception:
+                pass
+
+            # Strategy 2: page evaluate
+            if not pasted:
                 try:
-                    page.evaluate(f"() => navigator.clipboard.writeText({json.dumps(text)})")
+                    page.evaluate("""
+                        (val) => {
+                            window.focus();
+                            if (document.body) document.body.focus();
+                            return navigator.clipboard.writeText(val);
+                        }
+                    """, text)
+                    time.sleep(0.06)
+                    page.keyboard.press("Control+v")
+                    pasted = True
                 except Exception:
                     pass
-            time.sleep(0.06)
-            page.keyboard.press("Control+v")
+            # Strategy 3: Playwright direct keyboard text insertion (100% immune to clipboard permission restrictions)
+            if not pasted:
+                time.sleep(0.05)
+                page.keyboard.insert_text(text)
 
         for r_item in rows:
             r_idx = r_item.get('rowIndex')

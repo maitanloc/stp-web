@@ -145,12 +145,20 @@ public sealed class AutoTickController : ControllerBase
             });
         }
 
-        bool isQueued = _autoTick.IsOneDriveBusy(request.OneDriveUrl);
+        bool isQueued = _autoTick.EnqueueOneDriveJob(request.OneDriveUrl);
 
         if (!background)
         {
-            var syncResult = await _autoTick.SyncSummaryRowsToOneDriveAsync(request, null, ct).ConfigureAwait(false);
-            return Ok(syncResult);
+            try
+            {
+                var syncResult = await _autoTick.SyncSummaryRowsToOneDriveAsync(request, null, ct).ConfigureAwait(false);
+                syncResult.IsQueued = isQueued;
+                return Ok(syncResult);
+            }
+            finally
+            {
+                _autoTick.DequeueOneDriveJob(request.OneDriveUrl);
+            }
         }
 
         // Chạy ngầm hoàn toàn trên server: Người dùng có thể đóng tab hoặc chuyển trang mà robot vẫn tiếp tục chạy đến khi hoàn tất
@@ -229,6 +237,10 @@ public sealed class AutoTickController : ControllerBase
                         message = $"Lỗi thực thi robot: {ex.Message}"
                     });
                 }
+            }
+            finally
+            {
+                _autoTick.DequeueOneDriveJob(request.OneDriveUrl);
             }
         });
 

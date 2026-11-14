@@ -231,7 +231,9 @@ public sealed record SummaryPreviewRow(
     bool DocumentNumberChanged = false,
     string? NumberLabel = null,
     string? OriginalNumberLabel = null,
-    bool NumberLabelChanged = false);
+    bool NumberLabelChanged = false,
+    string SheetName = "",
+    int SourceRowNumber = 0);
 
 public sealed record SummaryExportResult(
     byte[] Content,

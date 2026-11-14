@@ -520,6 +520,8 @@ export interface SummaryPreviewRowResponse {
   numberLabel?: string | null
   originalNumberLabel?: string | null
   numberLabelChanged?: boolean
+  sheet?: string
+  sourceRowNumber?: number
 }
 
 export interface SummaryExportRequest {
@@ -826,6 +828,7 @@ export interface AutoTickSaveToOneDriveResponse {
 
 export interface AutoTickSyncSummaryItem {
   rowIndex: number
+  sheetName?: string
   numberLabel: string
   summaryText: string
   items: string[]

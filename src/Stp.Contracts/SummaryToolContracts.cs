@@ -92,7 +92,9 @@ public sealed record SummaryPreviewRowResponse(
     bool DocumentNumberChanged = false,
     string? NumberLabel = null,
     string? OriginalNumberLabel = null,
-    bool NumberLabelChanged = false);
+    bool NumberLabelChanged = false,
+    string Sheet = "",
+    int SourceRowNumber = 0);
 
 public sealed record SummaryExportRequest(
     IReadOnlyList<SummaryChangeRequest> Changes,

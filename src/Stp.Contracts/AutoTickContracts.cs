@@ -126,6 +126,7 @@ public sealed class AutoTickSaveToOneDriveResponse
 public sealed class AutoTickSyncSummaryItem
 {
     public int RowIndex { get; set; }
+    public string? SheetName { get; set; }
     public string NumberLabel { get; set; } = string.Empty;
     public string SummaryText { get; set; } = string.Empty;
     public IReadOnlyList<string> Items { get; set; } = Array.Empty<string>();

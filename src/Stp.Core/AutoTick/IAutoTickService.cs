@@ -24,5 +24,9 @@ public interface IAutoTickService
         CancellationToken ct = default);
 
     bool IsOneDriveBusy(string oneDriveUrl);
+
+    bool EnqueueOneDriveJob(string oneDriveUrl);
+
+    void DequeueOneDriveJob(string oneDriveUrl);
 }
 
