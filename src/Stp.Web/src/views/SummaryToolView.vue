@@ -327,7 +327,7 @@ const oneDriveSyncResult = ref<AutoTickSyncSummaryResponse | null>(null)
 const oneDriveSyncError = ref<string | null>(null)
 const rowsToSyncPreview = ref<AutoTickSyncSummaryItem[]>([])
 const selectedSyncSheet = ref('1997')
-const oneDriveSyncScope = ref<'changes_only' | 'current_filter'>('changes_only')
+const oneDriveSyncScope = ref<'selected' | 'changes_only' | 'current_filter'>('selected')
 const ensureFormulaH = ref(true)
 const syncingInBackground = ref(false)
 
@@ -1357,6 +1357,7 @@ async function applyToMissingInScope(): Promise<void> {
       )
       total = response.total
       for (const row of response.items) {
+        if (selected.value.size > 0 && !selected.value.has(row.rowNumber)) continue
         if (itemsFor(row).length > 0) continue
         const summary = composeSummary(row, bulkItems.value)
         const baseline = row.needsNormalization ? row.normalizedSummary : row.summary
@@ -1380,13 +1381,14 @@ async function applyToMissingInScope(): Promise<void> {
     if (applied === 0) {
       toast.info('Không có dòng nào cần áp', 'Mọi dòng còn thiếu đã trùng bộ đang chọn.')
     } else {
+      const scopeDesc = selected.value.size > 0 ? `${formatNumber(applied)} dòng đã chọn` : `${formatNumber(applied)} dòng trong phạm vi đang lọc`
       toast.success(
         'Đã áp cho dòng còn thiếu',
-        `${formatNumber(applied)} dòng trong phạm vi đang lọc nhận bộ ${bulkItems.value.join(', ')}.`,
+        `${scopeDesc} nhận bộ ${bulkItems.value.join(', ')}.`,
       )
       void announceAction(
         'bulk',
-        `Gán bộ cho ${formatNumber(applied)} dòng còn thiếu trong phạm vi lọc`,
+        `Gán bộ cho ${scopeDesc}`,
       )
       // Broadcast bulk change cho cả phòng
       broadcastBulkChanges(allChanges.value)
@@ -2418,8 +2420,15 @@ function startSyncToOneDriveFromPreview(): void {
     toast.warning('Không có dòng nào', 'Vui lòng chọn hoặc lọc các dòng cần đồng bộ.')
     return
   }
+  if (selected.value.size > 0) {
+    oneDriveSyncScope.value = 'selected'
+  } else if (edits.value.size > 0) {
+    oneDriveSyncScope.value = 'changes_only'
+  } else {
+    oneDriveSyncScope.value = 'current_filter'
+  }
   updateSyncSheetName()
-  rowsToSyncPreview.value = prepareRowsForOneDriveSync(items)
+  updateSyncRowsPreview()
   oneDriveSyncResult.value = null
   oneDriveSyncError.value = null
   oneDriveSyncModalOpen.value = true
@@ -2428,7 +2437,41 @@ function startSyncToOneDriveFromPreview(): void {
 function updateSyncRowsPreview(): void {
   let targetItems: Array<{ rowNumber: number; summary: string; numberLabel?: string | null }> = []
 
-  if (oneDriveSyncScope.value === 'changes_only' && edits.value.size > 0) {
+  if (oneDriveSyncScope.value === 'selected' && selected.value.size > 0) {
+    // 1. Người dùng chọn: Chỉ các dòng đã tích chọn ở checkbox đầu dòng
+    if (previewOpen.value && previewRows.value.length > 0) {
+      targetItems = previewRows.value
+        .filter((r) => selected.value.has(r.rowNumber))
+        .map((r) => {
+          const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
+          return {
+            rowNumber: r.rowNumber,
+            summary: change?.summaryText || r.summary,
+            numberLabel: change?.numberLabel || r.numberLabel,
+          }
+        })
+    } else {
+      targetItems = rows.value
+        .filter((r) => selected.value.has(r.rowNumber))
+        .map((r) => {
+          const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
+          return {
+            rowNumber: r.rowNumber,
+            summary: change?.summaryText || composeSummary(r, change?.items || r.items) || r.summary,
+            numberLabel: change?.numberLabel || r.numberLabel,
+          }
+        })
+    }
+    for (const ed of edits.value.values()) {
+      if (selected.value.has(ed.row.rowNumber) && !targetItems.some((t) => t.rowNumber === ed.row.rowNumber)) {
+        targetItems.push({
+          rowNumber: ed.row.rowNumber,
+          summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
+          numberLabel: ed.numberLabel || ed.row.numberLabel,
+        })
+      }
+    }
+  } else if (oneDriveSyncScope.value === 'changes_only' && edits.value.size > 0) {
     targetItems = [...edits.value.values()].map((ed) => ({
       rowNumber: ed.row.rowNumber,
       summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
@@ -2473,7 +2516,9 @@ function updateSyncRowsPreview(): void {
 }
 
 function openOneDriveSyncFromToolbar(): void {
-  if (edits.value.size > 0) {
+  if (selected.value.size > 0) {
+    oneDriveSyncScope.value = 'selected'
+  } else if (edits.value.size > 0) {
     oneDriveSyncScope.value = 'changes_only'
   } else {
     oneDriveSyncScope.value = 'current_filter'
@@ -3605,11 +3650,11 @@ onBeforeUnmount(() => {
               class="btn btn-primary btn-sm"
               type="button"
               :disabled="bulkApplying || applyingMissing || !scopeReady"
-              title="Gán bộ đang chọn cho MỌI dòng còn thiếu danh mục trong phạm vi đang lọc — duyệt hết các trang, không cần tích từng dòng"
+              :title="selected.size > 0 ? 'Gán bộ đang chọn cho các dòng đã chọn còn thiếu danh mục' : 'Gán bộ đang chọn cho MỌI dòng còn thiếu danh mục trong phạm vi đang lọc — duyệt hết các trang, không cần tích từng dòng'"
               @click="applyToMissingInScope"
             >
               <Check :size="14" />
-              {{ applyingMissing ? 'Đang áp...' : 'Áp dụng cho dòng lọc còn thiếu' }}
+              {{ applyingMissing ? 'Đang áp...' : (selected.size > 0 ? ('Áp dụng cho ' + selected.size + ' dòng đã chọn còn thiếu') : 'Áp dụng cho dòng lọc còn thiếu') }}
             </button>
             <div v-if="catalogPresets.length > 0" class="row wrap" style="gap: 4px; align-items: center">
               <button
@@ -3693,6 +3738,16 @@ onBeforeUnmount(() => {
               >
                 <CircleCheck :size="14" />
                 Sửa mở đầu đúng mẫu ({{ formatNumber(selectedNormalizableCount) }})
+              </button>
+              <button
+                class="btn btn-accent btn-sm"
+                type="button"
+                :disabled="syncingOneDrive"
+                :title="`Mở hộp thoại đồng bộ ${formatNumber(selected.size)} dòng đã chọn lên OneDrive`"
+                @click="openOneDriveSyncFromToolbar"
+              >
+                <Cloud :size="14" />
+                Đồng bộ {{ formatNumber(selected.size) }} dòng đã chọn lên OneDrive
               </button>
             </div>
             <button class="btn btn-ghost btn-sm" type="button" @click="clearSelection">
@@ -4986,25 +5041,38 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- Scope Selector (nếu có các hồ sơ vừa chỉnh sửa) -->
-            <div v-if="edits.size > 0 && rows.length > 0" class="row" style="gap: 8px">
+            <!-- Scope Selector (dòng chọn / thay đổi / toàn bộ bộ lọc) -->
+            <div v-if="(selected.size > 0 || edits.size > 0) && (rows.length > 0 || previewRows.length > 0)" class="row wrap" style="gap: 8px">
               <button
+                v-if="selected.size > 0"
+                type="button"
+                class="btn btn-sm"
+                :class="oneDriveSyncScope === 'selected' ? 'btn-primary' : 'btn-secondary'"
+                :disabled="syncingOneDrive"
+                @click="oneDriveSyncScope = 'selected'; updateSyncRowsPreview()"
+              >
+                <Check :size="14" />
+                Chỉ {{ selected.size }} dòng đã chọn (Khuyến nghị)
+              </button>
+              <button
+                v-if="edits.size > 0"
                 type="button"
                 class="btn btn-sm"
                 :class="oneDriveSyncScope === 'changes_only' ? 'btn-primary' : 'btn-secondary'"
                 :disabled="syncingOneDrive"
                 @click="oneDriveSyncScope = 'changes_only'; updateSyncRowsPreview()"
               >
-                Chỉ {{ edits.size }} hồ sơ vừa chỉnh sửa (Khuyến nghị)
+                Chỉ {{ edits.size }} hồ sơ vừa chỉnh sửa{{ selected.size === 0 ? ' (Khuyến nghị)' : '' }}
               </button>
               <button
+                v-if="rows.length > 0 || previewRows.length > 0"
                 type="button"
                 class="btn btn-sm"
                 :class="oneDriveSyncScope === 'current_filter' ? 'btn-primary' : 'btn-secondary'"
                 :disabled="syncingOneDrive"
                 @click="oneDriveSyncScope = 'current_filter'; updateSyncRowsPreview()"
               >
-                Toàn bộ {{ rows.length }} hồ sơ trong bộ lọc
+                Toàn bộ {{ (previewOpen && previewRows.length > 0) ? previewRows.length : rows.length }} hồ sơ trong bộ lọc
               </button>
             </div>
 
