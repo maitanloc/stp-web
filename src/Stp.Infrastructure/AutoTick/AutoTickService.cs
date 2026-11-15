@@ -606,7 +606,7 @@ public sealed partial class AutoTickService : IAutoTickService
                             title = cleanDoc
                         });
 
-                        _logger.LogInformation("Tự động thêm cột mới '{Title}' tại {ColLetter}4 trên sheet '{Sheet}' (khỏi tick theo yêu cầu)",
+                        _logger.LogInformation("Tự động thêm cột mới '{Title}' tại {ColLetter}4 trên sheet '{Sheet}' và sẵn sàng tick",
                             cleanDoc, newColLetter, sheetName);
                     }
                 }
@@ -722,8 +722,8 @@ public sealed partial class AutoTickService : IAutoTickService
                         desiredDocs.AddRange(rItem.Items);
                     }
 
-                    // CHỈ khớp vào originalHeaders để tick, các cột mới thêm TUYỆT ĐỐI "khỏi tick nhé"!
-                    var desiredHeaders = FindMatchingHeaders(desiredDocs, originalHeaders);
+                    // Khớp với toàn bộ headers (bao gồm cả các cột mới vừa thêm) để tick thành TRUE theo yêu cầu
+                    var desiredHeaders = FindMatchingHeaders(desiredDocs, headers);
                     foreach (var h in headers)
                     {
                         var cell = sheet.Cell(rowIndex, h.ColumnIndex);
@@ -1090,26 +1090,36 @@ public sealed partial class AutoTickService : IAutoTickService
             var alreadyTickedCols = new List<string>();
             var unmatchedItems = items.Where(it => !matchingHeaders.Any(h => IsSmartMatch(h.Title, it))).ToList();
 
-            // Yêu cầu: "nếu như cột đó mà ko có trong dữ liệu cần robot import vào thì tự thêm vào khỏi tick nhé"
+            // Yêu cầu: Tự động thêm cột mới vào dòng 4 và tick ô thành TRUE
             foreach (var it in unmatchedItems)
             {
                 var cleanIt = it.Trim();
                 if (string.IsNullOrWhiteSpace(cleanIt)) continue;
-                if (allHeaders.Any(h => IsSmartMatch(h.Title, cleanIt))) continue;
 
-                jobLastColNumber++;
-                string newColLetter = sheet.Column(jobLastColNumber).ColumnLetter();
-                sheet.Cell(4, jobLastColNumber).SetValue(cleanIt);
-
-                var newHeader = new AutoTickSheetHeader
+                var existingH = allHeaders.FirstOrDefault(h => IsSmartMatch(h.Title, cleanIt));
+                if (existingH is null)
                 {
-                    ColumnIndex = jobLastColNumber,
-                    ColumnLetter = newColLetter,
-                    Title = cleanIt,
-                    ExistingTicksCount = 0
-                };
-                allHeaders.Add(newHeader);
-                // Lưu ý: Người dùng yêu cầu "khỏi tick nhé", nên KHÔNG gọi cell.SetValue(true) cho cột mới thêm!
+                    jobLastColNumber++;
+                    string newColLetter = sheet.Column(jobLastColNumber).ColumnLetter();
+                    sheet.Cell(4, jobLastColNumber).SetValue(cleanIt);
+
+                    existingH = new AutoTickSheetHeader
+                    {
+                        ColumnIndex = jobLastColNumber,
+                        ColumnLetter = newColLetter,
+                        Title = cleanIt,
+                        ExistingTicksCount = 0
+                    };
+                    allHeaders.Add(existingH);
+                }
+
+                var newCell = sheet.Cell(r, existingH.ColumnIndex);
+                if (!IsCellTicked(newCell))
+                {
+                    newCell.SetValue(true);
+                    newlyTickedCols.Add(existingH.Title);
+                    state.NewlyTickedCellsCount++;
+                }
             }
 
             foreach (var h in matchingHeaders)

@@ -225,7 +225,7 @@ public sealed class AutoTickServiceTests
     }
 
     [Fact]
-    public async Task SyncSummaryRows_AutoAddsMissingColumnHeader_LeavesUnticked()
+    public async Task SyncSummaryRows_AutoAddsMissingColumnHeader_AndTicksTrue()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), $"test_autotick_newcol_{Guid.NewGuid():N}.xlsx");
         try
@@ -269,7 +269,7 @@ public sealed class AutoTickServiceTests
 
             Assert.True(res.Success);
             Assert.Equal(1, res.SyncedRowsCount);
-            Assert.Equal(1, res.TickedCellsCount); // Only "phiếu đề xuất" is ticked!
+            Assert.Equal(2, res.TickedCellsCount); // Cả "phiếu đề xuất" và "chứng nhận hạnh kiểm" đều được tick!
             Assert.Equal(1, res.NewHeadersCount);
             Assert.Contains("chứng nhận hạnh kiểm", res.NewHeaderTitles);
 
@@ -286,8 +286,8 @@ public sealed class AutoTickServiceTests
             // 3. Col K (11) was automatically created with header "chứng nhận hạnh kiểm"
             Assert.Equal("chứng nhận hạnh kiểm", resultWs.Cell(4, 11).GetString().Trim());
 
-            // 4. "khỏi tick nhé" -> Row 5 Col K (11) MUST NOT be ticked!
-            Assert.True(resultWs.Cell(5, 11).IsEmpty() || !resultWs.Cell(5, 11).GetBoolean());
+            // 4. "nếu có thể tick cột mới thành true được thì cứ làm" -> Row 5 Col K (11) IS ticked to TRUE!
+            Assert.True(resultWs.Cell(5, 11).GetBoolean());
 
             // 5. Formula H must cover up to K4 (last column)
             Assert.True(resultWs.Cell(5, 8).HasFormula);
@@ -300,7 +300,7 @@ public sealed class AutoTickServiceTests
     }
 
     [Fact]
-    public async Task ExecuteJob_AutoAddsMissingColumnHeader_LeavesUnticked()
+    public async Task ExecuteJob_AutoAddsMissingColumnHeader_AndTicksTrue()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), $"test_job_newcol_{Guid.NewGuid():N}.xlsx");
         try
@@ -338,7 +338,7 @@ public sealed class AutoTickServiceTests
 
             Assert.NotNull(status);
             Assert.Equal("Completed", status.Status);
-            Assert.Equal(1, status.NewlyTickedCellsCount); // Only phiếu đề xuất
+            Assert.Equal(2, status.NewlyTickedCellsCount); // Cả phiếu đề xuất và tập tục đời sống đều được tick!
 
             var result = await service.GetResultFileAsync(jobId);
             Assert.NotNull(result);
@@ -352,8 +352,8 @@ public sealed class AutoTickServiceTests
             // Col 9 is ticked
             Assert.True(resultWs.Cell(5, 9).GetBoolean());
 
-            // Col 11 is NOT ticked ("khỏi tick nhé")
-            Assert.True(resultWs.Cell(5, 11).IsEmpty() || !resultWs.Cell(5, 11).GetBoolean());
+            // Col 11 IS ticked to TRUE!
+            Assert.True(resultWs.Cell(5, 11).GetBoolean());
         }
         finally
         {

@@ -287,12 +287,15 @@ def run_sync(input_file, output_file):
                     set_cell_value(f"H{r_idx}", formula_h)
                     print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
 
-                # 3. Tick checkbox cells in target_cells
+                # 3. Tick checkbox cells in target_cells (bao gồm cả các cột mới)
                 for cell_coord in target_cells:
-                    set_cell_value(cell_coord, "TRUE")
-                    ticked_cols.append(cell_coord)
-                    total_ticked += 1
-                    print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
+                    try:
+                        set_cell_value(cell_coord, "TRUE")
+                        ticked_cols.append(cell_coord)
+                        total_ticked += 1
+                        print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
+                    except Exception as ex_cell:
+                        print(f"WARN:Không thể tick ô {cell_coord}: {ex_cell}", flush=True)
 
                 # 4. Untick checkbox cells in untick_cells
                 for cell_coord in untick_cells:
