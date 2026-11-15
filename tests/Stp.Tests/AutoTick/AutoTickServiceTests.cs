@@ -181,9 +181,57 @@ public sealed class AutoTickServiceTests
             _output.WriteLine($"Row {r}: {string.Join(" | ", rowTexts)}");
         }
 
-        // Test improved matching
-        var sheetsToCheck = new[] { "1997", "1998", "file nhập", "1995ok" };
+        // Test specific 12 standard items for marriage registration
+        var standard12 = new[]
+        {
+            "giấy khai sinh",
+            "bộ công hàm",
+            "hộ khẩu",
+            "phiếu đề xuất",
+            "chứng chỉ chuyên khoa",
+            "phiếu khám sức khỏe",
+            "CMND",
+            "phiếu nhập xuất cảnh",
+            "hộ chiếu",
+            "thị thực",
+            "tờ khai đăng ký kết hôn",
+            "đơn xin xác nhận độc thân và hôn nhân thực tế"
+        };
 
+        var ws1997 = wb.Worksheet("1997");
+        if (ws1997 != null)
+        {
+            var hdrs1997 = typeof(AutoTickService).GetMethod("ExtractHeaders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, new object[] { ws1997 }) as List<AutoTickSheetHeader>;
+            Assert.NotNull(hdrs1997);
+
+            var matched12 = typeof(AutoTickService).GetMethod("FindMatchingHeaders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, new object[] { standard12, hdrs1997 }) as List<AutoTickSheetHeader>;
+            Assert.NotNull(matched12);
+
+            _output.WriteLine($"=== Standard 12 Matching on 1997: Matched {matched12.Count}/12 ===");
+            foreach (var doc in standard12)
+            {
+                var m = hdrs1997.Where(h => IsSmartMatchInternal(h.Title, doc)).ToList();
+                _output.WriteLine($"Item '{doc}' => {m.Count} candidates: {string.Join(", ", m.Select(h => $"{h.ColumnLetter}4 ({h.Title})"))}");
+            }
+        }
+
+        var ws1996 = wb.Worksheet("1996");
+        if (ws1996 != null)
+        {
+            _output.WriteLine("--- Sheet 1996 Row 4 Headers ---");
+            for (int c = 1; c <= 45; c++)
+            {
+                var val = ws1996.Cell(4, c).GetString().Trim();
+                if (!string.IsNullOrEmpty(val))
+                {
+                    _output.WriteLine($"  Col {ws1996.Column(c).ColumnLetter()}4 ({c}): {val}");
+                }
+            }
+        }
+
+        var sheetsToCheck = new[] { "1997", "1998", "file nhập", "1996", "1995ok" };
         foreach (var sName in sheetsToCheck)
         {
             var wsTarget = wb.Worksheet(sName);
@@ -193,34 +241,103 @@ public sealed class AutoTickServiceTests
                 .Invoke(null, new object[] { wsTarget }) as List<AutoTickSheetHeader>;
             Assert.NotNull(hdrs);
 
-            var unmatchedList = new HashSet<string>();
-            int checkedRows = 0;
-            int lastR = Math.Min(wsTarget.LastRowUsed()?.RowNumber() ?? 50, 150);
+            var matched = typeof(AutoTickService).GetMethod("FindMatchingHeaders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, new object[] { standard12, hdrs }) as List<AutoTickSheetHeader>;
+            Assert.NotNull(matched);
 
-            for (int r = 9; r <= lastR; r++)
+            _output.WriteLine($"=== Standard 12 on Sheet '{sName}': Matched {matched.Count}/12 ===");
+            foreach (var doc in standard12)
             {
-                var summary = wsTarget.Cell(r, 8).GetString().Trim();
-                if (string.IsNullOrEmpty(summary)) summary = wsTarget.Cell(r, 4).GetString().Trim();
+                var candidates = hdrs.Where(h => IsSmartMatchInternal(h.Title, doc)).ToList();
+                _output.WriteLine($"  [{sName}] '{doc}' => {candidates.Count} candidates: {string.Join(", ", candidates.Select(h => $"{h.ColumnLetter}4 ({h.Title})"))}");
+            }
+        }
+    }
 
-                var m = System.Text.RegularExpressions.Regex.Match(summary, @"\(([^)]+)\)\s*$");
-                if (!m.Success) continue;
+    [Fact]
+    public async Task SyncSummaryRows_12StandardMarriageDocuments_All12Ticked()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"test_autotick_12docs_{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.Worksheets.Add("1997");
+                // Set up the 12 standard columns exactly as in Sheet 1997
+                ws.Cell(4, 9).SetValue("phiếu đề xuất");                                               // Col I
+                ws.Cell(4, 10).SetValue("bộ công hàm");                                                 // Col J
+                ws.Cell(4, 14).SetValue("đơn xin xác nhận độc thân và xác nhận hôn nhân thực tế");     // Col N
+                ws.Cell(4, 16).SetValue("CMND");                                                        // Col P
+                ws.Cell(4, 18).SetValue("tờ khai đăng ký kết hôn");                                     // Col R
+                ws.Cell(4, 30).SetValue("chứng chỉ chuyên khoa");                                       // Col AD
+                ws.Cell(4, 31).SetValue("giấy chứng nhận sức khỏe");                                    // Col AE
+                ws.Cell(4, 32).SetValue("phiếu khám sức khỏe");                                         // Col AF
+                ws.Cell(4, 34).SetValue("hộ chiếu");                                                    // Col AH
+                ws.Cell(4, 35).SetValue("thị thực");                                                    // Col AI
+                ws.Cell(4, 36).SetValue("phiếu nhập xuất cảnh");                                        // Col AJ
+                ws.Cell(4, 41).SetValue("hộ khẩu");                                                     // Col AO
+                ws.Cell(4, 42).SetValue("giấy khai sinh");                                              // Col AP
 
-                checkedRows++;
-                var items = m.Groups[1].Value.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(s => s.Trim().ToLowerInvariant())
-                    .ToList();
+                ws.Cell(5, 2).SetValue(1);
+                ws.Cell(5, 4).SetValue("Quyết định kết hôn của Bà Nguyễn Thị A và Ông John Smith. Năm 1997");
 
-                foreach (var item in items)
+                wb.SaveAs(tempFile);
+            }
+
+            var storage = new FileStorage(Options.Create(new StorageOptions { RootPath = Path.GetTempPath() }));
+            var publisher = new DummyPublisher();
+            var service = new AutoTickService(storage, publisher, NullLogger<AutoTickService>.Instance);
+
+            // The exact 12 documents from user's image
+            var exactSummary = "Quyết định kết hôn của Bà Nguyễn Thị A và Ông John Smith. " +
+                "(giấy khai sinh, bộ công hàm, hộ khẩu, phiếu đề xuất, chứng chỉ chuyên khoa, phiếu khám sức khỏe, CMND, phiếu nhập xuất cảnh, hộ chiếu, thị thực, tờ khai đăng ký kết hôn, đơn xin xác nhận độc thân và hôn nhân thực tế)";
+
+            var req = new AutoTickSyncSummaryRequest
+            {
+                OneDriveUrl = tempFile,
+                SheetName = "1997",
+                EnsureFormulaH = true,
+                Rows = new List<AutoTickSyncSummaryItem>
                 {
-                    bool isMatched = hdrs.Any(h => IsSmartMatchInternal(h.Title, item));
-                    if (!isMatched)
+                    new()
                     {
-                        unmatchedList.Add(item);
-                        _output.WriteLine($"  [{sName} Row {r}] UNMATCHED: '{item}'");
+                        RowIndex = 5,
+                        NumberLabel = "1",
+                        SummaryText = exactSummary
                     }
                 }
-            }
-            _output.WriteLine($"Sheet '{sName}': Checked {checkedRows} rows. Unmatched count: {unmatchedList.Count}. Items: {string.Join(" | ", unmatchedList)}");
+            };
+
+            var res = await service.SyncSummaryRowsToOneDriveAsync(req);
+
+            Assert.True(res.Success);
+            Assert.Equal(1, res.SyncedRowsCount);
+            // All 12 items MUST BE TICKED!
+            Assert.Equal(12, res.TickedCellsCount);
+
+            using var resultWb = new XLWorkbook(tempFile);
+            var resultWs = resultWb.Worksheet("1997");
+
+            // Verify every single one of the 12 columns is TRUE
+            Assert.True(resultWs.Cell(5, 9).GetBoolean(), "phiếu đề xuất (Col I) must be ticked");
+            Assert.True(resultWs.Cell(5, 10).GetBoolean(), "bộ công hàm (Col J) must be ticked");
+            Assert.True(resultWs.Cell(5, 14).GetBoolean(), "đơn xin xác nhận độc thân và xác nhận hôn nhân thực tế (Col N) must be ticked");
+            Assert.True(resultWs.Cell(5, 16).GetBoolean(), "CMND (Col P) must be ticked");
+            Assert.True(resultWs.Cell(5, 18).GetBoolean(), "tờ khai đăng ký kết hôn (Col R) must be ticked");
+            Assert.True(resultWs.Cell(5, 30).GetBoolean(), "chứng chỉ chuyên khoa (Col AD) must be ticked");
+            Assert.True(resultWs.Cell(5, 32).GetBoolean(), "phiếu khám sức khỏe (Col AF) must be ticked");
+            Assert.True(resultWs.Cell(5, 34).GetBoolean(), "hộ chiếu (Col AH) must be ticked");
+            Assert.True(resultWs.Cell(5, 35).GetBoolean(), "thị thực (Col AI) must be ticked");
+            Assert.True(resultWs.Cell(5, 36).GetBoolean(), "phiếu nhập xuất cảnh (Col AJ) must be ticked");
+            Assert.True(resultWs.Cell(5, 41).GetBoolean(), "hộ khẩu (Col AO) must be ticked");
+            Assert.True(resultWs.Cell(5, 42).GetBoolean(), "giấy khai sinh (Col AP) must be ticked");
+
+            // Col AE (giấy chứng nhận sức khỏe) was NOT in summary, so it must NOT be ticked!
+            Assert.True(resultWs.Cell(5, 31).IsEmpty() || !resultWs.Cell(5, 31).GetBoolean(), "giấy chứng nhận sức khỏe (Col AE) must remain unticked");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
         }
     }
 

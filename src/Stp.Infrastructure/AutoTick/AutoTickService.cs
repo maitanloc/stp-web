@@ -1439,9 +1439,23 @@ public sealed partial class AutoTickService : IAutoTickService
             var candidates = headers.Where(h => IsSmartMatch(h.Title, item)).ToList();
             if (candidates.Count == 0) continue;
 
-            // Nếu có nhiều cột cùng khớp (ví dụ sheet 1997 có 2 cột cùng tên 'tờ khai đăng ký kết hôn' ở Col 18 R và Col 49 AW):
-            // Ưu tiên chọn cột đã có dữ liệu tick thực tế trong sheet.
-            var best = candidates.OrderByDescending(h => h.ExistingTicksCount).First();
+            static string Clean(string s) => Regex.Replace(s.Normalize(NormalizationForm.FormC).ToLowerInvariant(), @"[^\p{L}\p{Nd}]", "");
+            var cleanItem = Clean(item);
+
+            // Ưu tiên chọn cột:
+            // 1. Trùng khớp chính xác tuyệt đối tên (Exact match)
+            // 2. Chưa bị gán cho item nào khác trong cùng hồ sơ (!matched.Contains(h)) để tránh 2 giấy tờ khác nhau nuốt chung 1 cột
+            // 3. Tên cột chứa trọn vẹn tên giấy tờ hoặc ngược lại
+            // 4. Cột đã có dữ liệu tick thực tế trong sheet
+            // 5. Cột xuất hiện sớm hơn trong bảng (vùng hồ sơ chuẩn Col 9..45)
+            var best = candidates
+                .OrderByDescending(h => Clean(h.Title) == cleanItem)
+                .ThenByDescending(h => !matched.Contains(h))
+                .ThenByDescending(h => Clean(h.Title).Contains(cleanItem) || cleanItem.Contains(Clean(h.Title)))
+                .ThenByDescending(h => h.ExistingTicksCount)
+                .ThenBy(h => h.ColumnIndex)
+                .First();
+
             if (!matched.Contains(best))
             {
                 matched.Add(best);
@@ -1485,6 +1499,9 @@ public sealed partial class AutoTickService : IAutoTickService
         var itClean = Regex.Replace(it, @"[^\p{L}\p{Nd}\s]", "");
         if (hClean == itClean) return true;
 
+        // 0. Phiếu đề xuất / Tờ đề xuất / Đề xuất
+        if (h.Contains("đề xuất") && it.Contains("đề xuất")) return true;
+
         // 1. Visa <-> Thị thực
         if ((h == "visa" || h.Contains("visa")) && (it.Contains("thị thực") || it == "visa")) return true;
         if ((it == "visa" || it.Contains("visa")) && (h.Contains("thị thực") || h == "visa")) return true;
@@ -1494,7 +1511,7 @@ public sealed partial class AutoTickService : IAutoTickService
         if ((it == "cmnd" || it.Contains("chứng minh nhân dân")) && (h == "cmnd" || h.Contains("chứng minh nhân dân"))) return true;
 
         // 3. Hộ chiếu / Passport
-        if (h.Contains("hộ chiếu") && (it == "hộ chiếu" || it.Contains("hộ chiếu") || it == "passport")) return true;
+        if ((h.Contains("hộ chiếu") || h.Contains("passport")) && (it.Contains("hộ chiếu") || it.Contains("passport"))) return true;
 
         // 4. Bộ công hàm / Bản công hàm / Công hàm
         if (h.Contains("công hàm") && it.Contains("công hàm")) return true;
@@ -1558,8 +1575,14 @@ public sealed partial class AutoTickService : IAutoTickService
         if (h.Contains("nhân khẩu") && it.Contains("nhân khẩu")) return true;
         if (h.Contains("hộ khẩu") && (it.Contains("hộ khẩu") || it.Contains("sổ hộ khẩu"))) return true;
 
-        // 14. Khám sức khỏe / Chứng chỉ chuyên khoa
-        if ((h.Contains("sức khỏe") || h.Contains("chuyên khoa")) && (it.Contains("sức khỏe") || it.Contains("chuyên khoa"))) return true;
+        // 14. Khám sức khỏe & Chứng chỉ chuyên khoa (Tách biệt hoàn toàn - đây là 2 loại giấy tờ độc lập trong bộ đăng ký kết hôn)
+        bool hChuyenKhoa = h.Contains("chuyên khoa");
+        bool itChuyenKhoa = it.Contains("chuyên khoa");
+        bool hSucKhoe = h.Contains("sức khỏe");
+        bool itSucKhoe = it.Contains("sức khỏe");
+
+        if (itChuyenKhoa) return hChuyenKhoa;
+        if (itSucKhoe) return hSucKhoe;
 
         // 15. Nhập xuất cảnh / Xuất nhập cảnh
         if ((h.Contains("nhập xuất cảnh") || h.Contains("xuất nhập cảnh")) && (it.Contains("nhập xuất cảnh") || it.Contains("xuất nhập cảnh"))) return true;
