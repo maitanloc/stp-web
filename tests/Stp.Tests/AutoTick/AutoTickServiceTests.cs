@@ -86,7 +86,8 @@ public sealed class AutoTickServiceTests
             var jobId = await service.StartJobAsync(new AutoTickStartRequest
             {
                 OneDriveUrl = tempFile,
-                SheetName = "1997"
+                SheetName = "1997",
+                SkipTicking = false
             });
 
             // Wait for completion
@@ -297,6 +298,7 @@ public sealed class AutoTickServiceTests
                 OneDriveUrl = tempFile,
                 SheetName = "1997",
                 EnsureFormulaH = true,
+                SkipTicking = false,
                 Rows = new List<AutoTickSyncSummaryItem>
                 {
                     new()
@@ -371,6 +373,7 @@ public sealed class AutoTickServiceTests
                 OneDriveUrl = tempFile,
                 SheetName = "1997",
                 EnsureFormulaH = true,
+                SkipTicking = false,
                 Rows = new List<AutoTickSyncSummaryItem>
                 {
                     new()
@@ -442,7 +445,8 @@ public sealed class AutoTickServiceTests
             var jobId = await service.StartJobAsync(new AutoTickStartRequest
             {
                 OneDriveUrl = tempFile,
-                SheetName = "1997"
+                SheetName = "1997",
+                SkipTicking = false
             });
 
             AutoTickJobStatusResponse? status = null;
@@ -512,6 +516,7 @@ public sealed class AutoTickServiceTests
                 OneDriveUrl = tempFile,
                 SheetName = "1997",
                 EnsureFormulaH = true,
+                SkipTicking = false,
                 Rows = new List<AutoTickSyncSummaryItem>
                 {
                     new()
@@ -548,6 +553,86 @@ public sealed class AutoTickServiceTests
             // 4. Formula H must cover up to the new outermost column (Col 51)
             string col51Letter = resultWs.Column(51).ColumnLetter();
             Assert.Contains($"{col51Letter}$4", resultWs.Cell(5, 8).FormulaA1);
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task SyncSummaryRows_NewWorkflow_SkipTicking_FillsColA_D_H()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"test_new_workflow_{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.Worksheets.Add("1997");
+                ws.Cell(4, 1).SetValue("Tình trạng");
+                ws.Cell(4, 2).SetValue("Hồ sơ số");
+                ws.Cell(4, 4).SetValue("Trích yếu nội dung");
+                ws.Cell(4, 8).SetValue("Trích yếu");
+                ws.Cell(4, 9).SetValue("phiếu đề xuất");
+                ws.Cell(4, 10).SetValue("bộ công hàm");
+
+                ws.Cell(5, 2).SetValue("101");
+                ws.Cell(6, 2).SetValue("102");
+
+                wb.SaveAs(tempFile);
+            }
+
+            var storage = new FileStorage(Options.Create(new StorageOptions { RootPath = Path.GetTempPath() }));
+            var publisher = new DummyPublisher();
+            var service = new AutoTickService(storage, publisher, NullLogger<AutoTickService>.Instance);
+
+            var req = new AutoTickSyncSummaryRequest
+            {
+                OneDriveUrl = tempFile,
+                SheetName = "1997",
+                SkipTicking = true,
+                StatusA = "đã nhập",
+                Rows = new List<AutoTickSyncSummaryItem>
+                {
+                    new()
+                    {
+                        RowIndex = 5,
+                        NumberLabel = "101",
+                        SummaryText = "Quyết định kết hôn của Bà A và Ông B (phiếu đề xuất, giấy tờ mới không có cột)",
+                        StatusA = "đã nhập"
+                    },
+                    new()
+                    {
+                        RowIndex = 6,
+                        NumberLabel = "102",
+                        SummaryText = "Quyết định kết hôn của Bà C và Ông D",
+                        StatusA = "đã nhập"
+                    }
+                }
+            };
+
+            var res = await service.SyncSummaryRowsToOneDriveAsync(req);
+
+            Assert.True(res.Success);
+            Assert.Equal(2, res.SyncedRowsCount);
+            Assert.Equal(0, res.TickedCellsCount); // Không tick ô nào!
+            Assert.Equal(0, res.NewHeadersCount); // Không thêm cột thừa!
+
+            using var resultWb = new XLWorkbook(tempFile);
+            var resultWs = resultWb.Worksheet("1997");
+
+            // Row 5:
+            Assert.Equal("đã nhập", resultWs.Cell(5, 1).GetString().Trim());
+            Assert.Equal("Quyết định kết hôn của Bà A và Ông B (phiếu đề xuất, giấy tờ mới không có cột)", resultWs.Cell(5, 4).GetString().Trim());
+            Assert.Equal("Quyết định kết hôn của Bà A và Ông B (phiếu đề xuất, giấy tờ mới không có cột)", resultWs.Cell(5, 8).GetString().Trim());
+            // Columns 9 and 10 must NOT be ticked!
+            Assert.True(resultWs.Cell(5, 9).IsEmpty() || !resultWs.Cell(5, 9).GetBoolean());
+            Assert.True(resultWs.Cell(5, 10).IsEmpty() || !resultWs.Cell(5, 10).GetBoolean());
+
+            // Row 6:
+            Assert.Equal("đã nhập", resultWs.Cell(6, 1).GetString().Trim());
+            Assert.Equal("Quyết định kết hôn của Bà C và Ông D", resultWs.Cell(6, 4).GetString().Trim());
+            Assert.Equal("Quyết định kết hôn của Bà C và Ông D", resultWs.Cell(6, 8).GetString().Trim());
         }
         finally
         {

@@ -51,6 +51,8 @@ public sealed class AutoTickStartRequest
     public int? NumberTo { get; set; }
     public IReadOnlyList<string>? SelectedHeaders { get; set; }
     public bool OnlyUnticked { get; set; }
+    public bool SkipTicking { get; set; } = true;
+    public string StatusA { get; set; } = "đã nhập";
 }
 
 public sealed class AutoTickRowResult
@@ -132,6 +134,7 @@ public sealed class AutoTickSyncSummaryItem
     public IReadOnlyList<string> Items { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string>? TargetCells { get; set; }
     public string? FormulaH { get; set; }
+    public string? StatusA { get; set; } = "đã nhập";
 }
 
 public sealed class AutoTickSyncSummaryRequest
@@ -139,13 +142,18 @@ public sealed class AutoTickSyncSummaryRequest
     public string OneDriveUrl { get; set; } = string.Empty;
     public string SheetName { get; set; } = string.Empty;
     public IReadOnlyList<AutoTickSyncSummaryItem> Rows { get; set; } = Array.Empty<AutoTickSyncSummaryItem>();
-    public bool EnsureFormulaH { get; set; } = true;
+    public bool EnsureFormulaH { get; set; } = false;
+    public bool SkipTicking { get; set; } = true;
+    public string StatusA { get; set; } = "đã nhập";
+    public int? NumberFrom { get; set; }
+    public int? NumberTo { get; set; }
 }
 
 public sealed class AutoTickSyncSummaryRowResult
 {
     public int RowIndex { get; set; }
     public string NumberLabel { get; set; } = string.Empty;
+    public bool StatusAFilled { get; set; }
     public bool SummaryFilled { get; set; }
     public bool FormulaHFilled { get; set; }
     public IReadOnlyList<string> TickedColumns { get; set; } = Array.Empty<string>();

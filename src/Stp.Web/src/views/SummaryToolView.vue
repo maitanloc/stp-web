@@ -345,8 +345,10 @@ const oneDriveSyncResult = ref<AutoTickSyncSummaryResponse | null>(null)
 const oneDriveSyncError = ref<string | null>(null)
 const rowsToSyncPreview = ref<AutoTickSyncSummaryItem[]>([])
 const selectedSyncSheet = ref('1997')
-const oneDriveSyncScope = ref<'selected' | 'changes_only' | 'current_filter'>('selected')
-const ensureFormulaH = ref(true)
+const oneDriveSyncScope = ref<'number_range' | 'selected' | 'changes_only' | 'current_filter'>('number_range')
+const syncNumberFrom = ref<number | ''>('')
+const syncNumberTo = ref<number | ''>('')
+const syncStatusA = ref('đã nhập')
 const syncingInBackground = ref(false)
 const isQueuedForOneDrive = ref(false)
 
@@ -2552,6 +2554,8 @@ function prepareRowsForOneDriveSync(items: SyncRowCandidate[]): AutoTickSyncSumm
       sheetName: it.sheet || undefined,
       numberLabel: change?.numberLabel || it.numberLabel || '',
       summaryText: effectiveSummary,
+      formulaH: effectiveSummary,
+      statusA: syncStatusA.value || 'đã nhập',
       items: itemsList,
     }
   })
@@ -2563,12 +2567,16 @@ function startSyncToOneDriveFromPreview(): void {
     toast.warning('Không có dòng nào', 'Vui lòng chọn hoặc lọc các dòng cần đồng bộ.')
     return
   }
-  if (selected.value.size > 0) {
-    oneDriveSyncScope.value = 'selected'
+  if (numberMode.value === 'range' && (numberFrom.value !== '' || numberTo.value !== '')) {
+    oneDriveSyncScope.value = 'number_range'
+    syncNumberFrom.value = numberFrom.value !== '' ? numberFrom.value : ''
+    syncNumberTo.value = numberTo.value !== '' ? numberTo.value : ''
   } else if (edits.value.size > 0) {
     oneDriveSyncScope.value = 'changes_only'
+  } else if (selected.value.size > 0) {
+    oneDriveSyncScope.value = 'selected'
   } else {
-    oneDriveSyncScope.value = 'current_filter'
+    oneDriveSyncScope.value = 'number_range'
   }
   updateSyncRowsPreview()
   oneDriveSyncResult.value = null
@@ -2579,7 +2587,49 @@ function startSyncToOneDriveFromPreview(): void {
 function updateSyncRowsPreview(): void {
   let targetItems: SyncRowCandidate[] = []
 
-  if (oneDriveSyncScope.value === 'selected' && selected.value.size > 0) {
+  if (oneDriveSyncScope.value === 'number_range') {
+    // 0. Lọc theo khoảng số hồ sơ (Từ số - Đến số)
+    const allPool: SyncRowCandidate[] = []
+    const seen = new Set<number>()
+    const poolRows = previewOpen.value && previewRows.value.length > 0 ? previewRows.value : rows.value
+    for (const r of poolRows) {
+      if (!seen.has(r.rowNumber)) {
+        seen.add(r.rowNumber)
+        const change = allChanges.value.find((c) => c.rowNumber === r.rowNumber)
+        const matchingRow = rows.value.find((x) => x.rowNumber === r.rowNumber)
+        allPool.push({
+          rowNumber: r.rowNumber,
+          sourceRowNumber: r.sourceRowNumber || matchingRow?.sourceRowNumber,
+          sheet: r.sheet || matchingRow?.sheet,
+          summary: change?.summaryText || r.summary,
+          numberLabel: change?.numberLabel || r.numberLabel,
+        })
+      }
+    }
+    for (const ed of edits.value.values()) {
+      if (!seen.has(ed.row.rowNumber)) {
+        seen.add(ed.row.rowNumber)
+        allPool.push({
+          rowNumber: ed.row.rowNumber,
+          sourceRowNumber: ed.row.sourceRowNumber,
+          sheet: ed.row.sheet,
+          summary: ed.summaryText || composeSummary(ed.row, ed.items) || ed.row.summary,
+          numberLabel: ed.numberLabel || ed.row.numberLabel,
+        })
+      }
+    }
+
+    const fromNum = syncNumberFrom.value !== '' ? Number(syncNumberFrom.value) : null
+    const toNum = syncNumberTo.value !== '' ? Number(syncNumberTo.value) : null
+
+    targetItems = allPool.filter((item) => {
+      const match = (item.numberLabel || '').match(/\d+/)
+      const n = match ? parseInt(match[0], 10) : item.rowNumber
+      if (fromNum !== null && n < fromNum) return false
+      if (toNum !== null && n > toNum) return false
+      return true
+    })
+  } else if (oneDriveSyncScope.value === 'selected' && selected.value.size > 0) {
     // 1. Người dùng chọn: Chỉ các dòng đã tích chọn ở checkbox đầu dòng
     if (previewOpen.value && previewRows.value.length > 0) {
       targetItems = previewRows.value
@@ -2677,12 +2727,16 @@ function updateSyncRowsPreview(): void {
 }
 
 function openOneDriveSyncFromToolbar(): void {
-  if (selected.value.size > 0) {
-    oneDriveSyncScope.value = 'selected'
+  if (numberMode.value === 'range' && (numberFrom.value !== '' || numberTo.value !== '')) {
+    oneDriveSyncScope.value = 'number_range'
+    syncNumberFrom.value = numberFrom.value !== '' ? numberFrom.value : ''
+    syncNumberTo.value = numberTo.value !== '' ? numberTo.value : ''
   } else if (edits.value.size > 0) {
     oneDriveSyncScope.value = 'changes_only'
+  } else if (selected.value.size > 0) {
+    oneDriveSyncScope.value = 'selected'
   } else {
-    oneDriveSyncScope.value = 'current_filter'
+    oneDriveSyncScope.value = 'number_range'
   }
 
   updateSyncRowsPreview()
@@ -2716,7 +2770,11 @@ async function executeOneDriveSync(): Promise<void> {
       oneDriveUrl: oneDriveUrl.value.trim(),
       sheetName: selectedSyncSheet.value.trim() || '1997',
       rows: rowsToSyncPreview.value,
-      ensureFormulaH: ensureFormulaH.value,
+      ensureFormulaH: false,
+      skipTicking: true,
+      statusA: syncStatusA.value || 'đã nhập',
+      numberFrom: oneDriveSyncScope.value === 'number_range' && syncNumberFrom.value !== '' ? Number(syncNumberFrom.value) : undefined,
+      numberTo: oneDriveSyncScope.value === 'number_range' && syncNumberTo.value !== '' ? Number(syncNumberTo.value) : undefined,
     }
 
     const res = await request<AutoTickSyncSummaryResponse>('/api/auto-tick/sync-summary?background=true', {
@@ -5341,10 +5399,10 @@ onBeforeUnmount(() => {
                   <Sparkles :size="13" />
                   Cloud Automation
                 </span>
-                <span>Đồng bộ & Đánh Dấu OneDrive</span>
+                <span>Đồng bộ Trích yếu vào OneDrive (Cột A, D, H)</span>
               </div>
               <div class="card-subtitle">
-                Robot Playwright sẽ mở file trên đám mây, tự động điền Cột D (Trích yếu nội dung) và tick các ô Checkbox tương ứng (Cột I..BJ).
+                Robot sẽ mở file Excel Online / OneDrive, tự động điền <strong>Cột D & H</strong> (Trích yếu nội dung) và đánh dấu <strong>Cột A là "đã nhập"</strong> theo khoảng số hoặc danh sách hồ sơ. Bỏ qua hoàn toàn việc tick checkbox.
               </div>
             </div>
             <button
@@ -5359,6 +5417,14 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="modal-body stack" style="gap: 16px">
+            <!-- Mode Info Alert -->
+            <div class="alert alert-info" style="padding: 10px 14px; font-size: 0.88rem; align-items: flex-start">
+              <Info :size="16" style="margin-top: 2px" />
+              <div>
+                <strong>Quy trình mới tối ưu:</strong> Lấy dữ liệu vừa xong trong web đẩy vào <strong>Cột D & H</strong>, đánh <strong>Cột A là "đã nhập"</strong>. Không còn tick checkbox các cột giấy tờ giúp hạn chế tối đa lỗi và tăng tốc độ xử lý.
+              </div>
+            </div>
+
             <!-- OneDrive Link Input -->
             <label class="field">
               <span class="label">Liên kết file Excel Online / OneDrive:</span>
@@ -5369,14 +5435,6 @@ onBeforeUnmount(() => {
                 placeholder="Dán liên kết Excel Online hoặc OneDrive vào đây..."
                 :disabled="syncingOneDrive"
               />
-            </label>
-
-            <!-- Ensure Formula H Option -->
-            <label class="field-checkbox" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; margin-top: -6px">
-              <input v-model="ensureFormulaH" type="checkbox" :disabled="syncingOneDrive" />
-              <span style="font-size: 0.88rem; color: var(--text)">
-                Tự động kiểm tra & cập nhật công thức ở Cột H (Trích yếu tổng hợp)
-              </span>
             </label>
 
             <!-- Sheet & Count Summary Card -->
@@ -5410,8 +5468,18 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- Scope Selector (dòng chọn / thay đổi / toàn bộ bộ lọc) -->
-            <div v-if="(selected.size > 0 || edits.size > 0) && (rows.length > 0 || previewRows.length > 0)" class="row wrap" style="gap: 8px">
+            <!-- Scope Selector (Khoảng số / dòng chọn / thay đổi / toàn bộ bộ lọc) -->
+            <div class="row wrap" style="gap: 8px">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="oneDriveSyncScope === 'number_range' ? 'btn-primary' : 'btn-secondary'"
+                :disabled="syncingOneDrive"
+                @click="oneDriveSyncScope = 'number_range'; updateSyncRowsPreview()"
+              >
+                <Calendar :size="14" />
+                Theo khoảng số hồ sơ (Từ số - Đến số)
+              </button>
               <button
                 v-if="selected.size > 0"
                 type="button"
@@ -5421,7 +5489,7 @@ onBeforeUnmount(() => {
                 @click="oneDriveSyncScope = 'selected'; updateSyncRowsPreview()"
               >
                 <Check :size="14" />
-                Chỉ {{ selected.size }} dòng đã chọn (Khuyến nghị)
+                Chỉ {{ selected.size }} dòng đã chọn
               </button>
               <button
                 v-if="edits.size > 0"
@@ -5445,10 +5513,52 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
+            <!-- Range Filter Inputs when number_range is chosen -->
+            <div v-if="oneDriveSyncScope === 'number_range'" class="card" style="padding: 10px 14px; background: rgba(255, 255, 255, 0.02)">
+              <div class="row wrap" style="gap: 16px; align-items: center">
+                <label class="row" style="gap: 8px; align-items: center">
+                  <span class="hint" style="font-weight: 600">Từ số:</span>
+                  <input
+                    v-model.number="syncNumberFrom"
+                    type="number"
+                    class="input input-sm"
+                    style="width: 100px; font-weight: 700; color: var(--brand)"
+                    placeholder="VD: 1"
+                    :disabled="syncingOneDrive"
+                    @input="updateSyncRowsPreview"
+                  />
+                </label>
+                <label class="row" style="gap: 8px; align-items: center">
+                  <span class="hint" style="font-weight: 600">Đến số:</span>
+                  <input
+                    v-model.number="syncNumberTo"
+                    type="number"
+                    class="input input-sm"
+                    style="width: 100px; font-weight: 700; color: var(--brand)"
+                    placeholder="VD: 50"
+                    :disabled="syncingOneDrive"
+                    @input="updateSyncRowsPreview"
+                  />
+                </label>
+                <label class="row" style="gap: 8px; align-items: center">
+                  <span class="hint" style="font-weight: 600">Nội dung Cột A:</span>
+                  <input
+                    v-model="syncStatusA"
+                    type="text"
+                    class="input input-sm"
+                    style="width: 110px; font-weight: 600"
+                    placeholder="đã nhập"
+                    :disabled="syncingOneDrive"
+                    @input="updateSyncRowsPreview"
+                  />
+                </label>
+              </div>
+            </div>
+
             <!-- Preview Rows List -->
             <div>
               <div class="row-between" style="margin-bottom: 6px">
-                <span style="font-weight: 600; font-size: 0.9rem">Danh sách hồ sơ chuẩn bị điền & tick:</span>
+                <span style="font-weight: 600; font-size: 0.9rem">Danh sách hồ sơ chuẩn bị điền (Cột A, D, H):</span>
                 <span class="hint">Hiển thị {{ Math.min(5, rowsToSyncPreview.length) }}/{{ rowsToSyncPreview.length }} hồ sơ</span>
               </div>
               <div style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto">
@@ -5462,14 +5572,7 @@ onBeforeUnmount(() => {
                     <div class="row" style="gap: 8px; align-items: center">
                       <strong style="color: var(--brand)">HS {{ r.numberLabel || r.rowIndex }}</strong>
                       <span class="hint">(Hàng {{ r.rowIndex }})</span>
-                    </div>
-                    <div class="row" style="gap: 4px">
-                      <span v-for="it in r.items.slice(0, 3)" :key="it" class="badge badge-xs">
-                        ✓ {{ it }}
-                      </span>
-                      <span v-if="r.items.length > 3" class="hint" style="font-size: 11px">
-                        +{{ r.items.length - 3 }} giấy tờ
-                      </span>
+                      <span class="badge badge-xs badge-neutral">Cột A: {{ r.statusA || 'đã nhập' }}</span>
                     </div>
                   </div>
                   <div class="truncate hint" style="font-size: 12px; margin-top: 4px" :title="r.summaryText">
@@ -5485,7 +5588,7 @@ onBeforeUnmount(() => {
               <div class="grow">
                 <strong>Robot đang đồng bộ trực tiếp lên OneDrive Cloud...</strong>
                 <div style="margin-top: 3px; font-size: 13px">
-                  Đang mở phiên trình duyệt, điền trích yếu vào Cột D và tick các ô checkbox Cột I..BJ. Quá trình mất khoảng 15-30 giây.
+                  Đang mở phiên trình duyệt, đánh dấu Cột A là "đã nhập" và điền trích yếu vào Cột D, H. Quá trình mất khoảng 10-20 giây.
                 </div>
               </div>
             </div>
@@ -5534,7 +5637,7 @@ onBeforeUnmount(() => {
               @click="executeOneDriveSync"
             >
               <Zap :size="16" />
-              {{ syncingOneDrive ? 'Đang thực thi robot...' : 'Bắt đầu Điền & Tick OneDrive' }}
+              {{ syncingOneDrive ? 'Đang thực thi robot...' : 'Bắt đầu Điền Cột A, D, H vào OneDrive' }}
             </button>
           </div>
         </div>

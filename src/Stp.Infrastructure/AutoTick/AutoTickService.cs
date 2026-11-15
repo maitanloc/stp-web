@@ -583,60 +583,65 @@ public sealed partial class AutoTickService : IAutoTickService
             }
             int lastColNumber = maxUsedCol > 0 ? maxUsedCol : 95;
 
+            bool skipTicking = request.SkipTicking;
+            string defaultStatusA = !string.IsNullOrWhiteSpace(request.StatusA) ? request.StatusA : "đã nhập";
+
             var newHeadersToAdd = new List<object>();
             var newHeaderTitles = new List<string>();
 
-            // Pre-scan: Tìm tất cả các loại giấy tờ xuất hiện trong trích yếu mà sheet chưa có cột
-            // Yêu cầu: "nếu như cột đó mà ko có trong dữ liệu cần robot import vào thì tự thêm vào khỏi tick nhé"
-            foreach (var rItem in request.Rows)
+            // Pre-scan: Chỉ tìm tất cả các loại giấy tờ xuất hiện trong trích yếu và thêm cột nếu KHÔNG bỏ tick
+            if (!skipTicking)
             {
-                var docsInRow = new List<string>();
-                if (!string.IsNullOrWhiteSpace(rItem.SummaryText))
+                foreach (var rItem in request.Rows)
                 {
-                    var parenMatch = ParenthesesRegex.Match(rItem.SummaryText);
-                    if (parenMatch.Success)
+                    var docsInRow = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(rItem.SummaryText))
                     {
-                        docsInRow.AddRange(SplitDocumentItems(parenMatch.Groups[1].Value));
+                        var parenMatch = ParenthesesRegex.Match(rItem.SummaryText);
+                        if (parenMatch.Success)
+                        {
+                            docsInRow.AddRange(SplitDocumentItems(parenMatch.Groups[1].Value));
+                        }
                     }
-                }
-                if (docsInRow.Count == 0 && rItem.Items.Count > 0)
-                {
-                    docsInRow.AddRange(rItem.Items);
-                }
-
-                foreach (var doc in docsInRow)
-                {
-                    var cleanDoc = doc.Trim();
-                    if (string.IsNullOrWhiteSpace(cleanDoc)) continue;
-
-                    // Kiểm tra xem giấy tờ này đã khớp với cột nào trong sheet (cũ hoặc mới thêm) chưa
-                    if (!headers.Any(h => IsSmartMatch(h.Title, cleanDoc)))
+                    if (docsInRow.Count == 0 && rItem.Items.Count > 0)
                     {
-                        lastColNumber++;
-                        string newColLetter = sheet.Column(lastColNumber).ColumnLetter();
+                        docsInRow.AddRange(rItem.Items);
+                    }
 
-                        // Thêm tiêu đề vào dòng 4 của sheet
-                        sheet.Cell(4, lastColNumber).SetValue(cleanDoc);
+                    foreach (var doc in docsInRow)
+                    {
+                        var cleanDoc = doc.Trim();
+                        if (string.IsNullOrWhiteSpace(cleanDoc)) continue;
 
-                        var newHeader = new AutoTickSheetHeader
+                        // Kiểm tra xem giấy tờ này đã khớp với cột nào trong sheet (cũ hoặc mới thêm) chưa
+                        if (!headers.Any(h => IsSmartMatch(h.Title, cleanDoc)))
                         {
-                            ColumnIndex = lastColNumber,
-                            ColumnLetter = newColLetter,
-                            Title = cleanDoc,
-                            ExistingTicksCount = 0
-                        };
-                        headers.Add(newHeader);
-                        newHeaderTitles.Add(cleanDoc);
+                            lastColNumber++;
+                            string newColLetter = sheet.Column(lastColNumber).ColumnLetter();
 
-                        newHeadersToAdd.Add(new
-                        {
-                            colLetter = newColLetter,
-                            colIndex = lastColNumber,
-                            title = cleanDoc
-                        });
+                            // Thêm tiêu đề vào dòng 4 của sheet
+                            sheet.Cell(4, lastColNumber).SetValue(cleanDoc);
 
-                        _logger.LogInformation("Tự động thêm cột mới '{Title}' tại {ColLetter}4 trên sheet '{Sheet}' và sẵn sàng tick",
-                            cleanDoc, newColLetter, sheetName);
+                            var newHeader = new AutoTickSheetHeader
+                            {
+                                ColumnIndex = lastColNumber,
+                                ColumnLetter = newColLetter,
+                                Title = cleanDoc,
+                                ExistingTicksCount = 0
+                            };
+                            headers.Add(newHeader);
+                            newHeaderTitles.Add(cleanDoc);
+
+                            newHeadersToAdd.Add(new
+                            {
+                                colLetter = newColLetter,
+                                colIndex = lastColNumber,
+                                title = cleanDoc
+                            });
+
+                            _logger.LogInformation("Tự động thêm cột mới '{Title}' tại {ColLetter}4 trên sheet '{Sheet}' và sẵn sàng tick",
+                                cleanDoc, newColLetter, sheetName);
+                        }
                     }
                 }
             }
@@ -725,53 +730,61 @@ public sealed partial class AutoTickService : IAutoTickService
                 var targetCells = new List<string>();
                 var untickCells = new List<string>();
 
-                if (rItem.TargetCells is not null && rItem.TargetCells.Count > 0)
+                if (!skipTicking)
                 {
-                    foreach (var c in rItem.TargetCells)
+                    if (rItem.TargetCells is not null && rItem.TargetCells.Count > 0)
                     {
-                        var cell = sheet.Cell(c);
-                        if (!IsCellTicked(cell)) targetCells.Add(c);
+                        foreach (var c in rItem.TargetCells)
+                        {
+                            var cell = sheet.Cell(c);
+                            if (!IsCellTicked(cell)) targetCells.Add(c);
+                        }
+                    }
+                    else
+                    {
+                        var desiredDocs = new List<string>();
+                        // Người dùng yêu cầu: "đánh tick thì nhìn vào chữ mà làm" - trích xuất trực tiếp giấy tờ trong ngoặc đơn của trích yếu chữ
+                        if (!string.IsNullOrWhiteSpace(rItem.SummaryText))
+                        {
+                            var parenMatch = ParenthesesRegex.Match(rItem.SummaryText);
+                            if (parenMatch.Success)
+                            {
+                                desiredDocs.AddRange(SplitDocumentItems(parenMatch.Groups[1].Value));
+                            }
+                        }
+
+                        if (desiredDocs.Count == 0 && rItem.Items.Count > 0)
+                        {
+                            desiredDocs.AddRange(rItem.Items);
+                        }
+
+                        // Khớp với toàn bộ headers (bao gồm cả các cột mới vừa thêm) để tick thành TRUE theo yêu cầu
+                        var desiredHeaders = FindMatchingHeaders(desiredDocs, headers);
+                        foreach (var h in headers)
+                        {
+                            var cell = sheet.Cell(rowIndex, h.ColumnIndex);
+                            bool isCurrentlyTicked = IsCellTicked(cell);
+                            bool isDesired = desiredHeaders.Contains(h);
+
+                            if (isDesired && !isCurrentlyTicked)
+                            {
+                                targetCells.Add($"{h.ColumnLetter}{rowIndex}");
+                            }
+                            else if (!isDesired && isCurrentlyTicked && originalHeaders.Contains(h))
+                            {
+                                untickCells.Add($"{h.ColumnLetter}{rowIndex}");
+                            }
+                        }
                     }
                 }
-                else
-                {
-                    var desiredDocs = new List<string>();
-                    // Người dùng yêu cầu: "đánh tick thì nhìn vào chữ mà làm" - trích xuất trực tiếp giấy tờ trong ngoặc đơn của trích yếu chữ
-                    if (!string.IsNullOrWhiteSpace(rItem.SummaryText))
-                    {
-                        var parenMatch = ParenthesesRegex.Match(rItem.SummaryText);
-                        if (parenMatch.Success)
-                        {
-                            desiredDocs.AddRange(SplitDocumentItems(parenMatch.Groups[1].Value));
-                        }
-                    }
 
-                    if (desiredDocs.Count == 0 && rItem.Items.Count > 0)
-                    {
-                        desiredDocs.AddRange(rItem.Items);
-                    }
-
-                    // Khớp với toàn bộ headers (bao gồm cả các cột mới vừa thêm) để tick thành TRUE theo yêu cầu
-                    var desiredHeaders = FindMatchingHeaders(desiredDocs, headers);
-                    foreach (var h in headers)
-                    {
-                        var cell = sheet.Cell(rowIndex, h.ColumnIndex);
-                        bool isCurrentlyTicked = IsCellTicked(cell);
-                        bool isDesired = desiredHeaders.Contains(h);
-
-                        if (isDesired && !isCurrentlyTicked)
-                        {
-                            targetCells.Add($"{h.ColumnLetter}{rowIndex}");
-                        }
-                        else if (!isDesired && isCurrentlyTicked && originalHeaders.Contains(h))
-                        {
-                            untickCells.Add($"{h.ColumnLetter}{rowIndex}");
-                        }
-                    }
-                }
-
+                string statusA = !string.IsNullOrWhiteSpace(rItem.StatusA) ? rItem.StatusA : defaultStatusA;
                 string? formulaH = null;
-                if (request.EnsureFormulaH)
+                if (!string.IsNullOrWhiteSpace(rItem.FormulaH))
+                {
+                    formulaH = rItem.FormulaH;
+                }
+                else if (request.EnsureFormulaH)
                 {
                     bool needsFormulaUpdate = false;
                     var cellH = sheet.Cell(rowIndex, 8);
@@ -804,9 +817,10 @@ public sealed partial class AutoTickService : IAutoTickService
                         formulaH = $"=\"Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài của \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"của \"), \" và\")&\" và  \"&TEXTBEFORE(TEXTAFTER(D{rowIndex}, \"và \"), \".\")&\" (\" & TEXTJOIN(\", \", TRUE, REPT(I$4:{lastColLetter}$4, I{rowIndex}:{lastColLetter}{rowIndex}=TRUE)) & \")\"";
                     }
                 }
-                else if (!string.IsNullOrWhiteSpace(rItem.FormulaH))
+                else
                 {
-                    formulaH = rItem.FormulaH;
+                    // Người dùng yêu cầu: "chỉ cần đánh cột D và H , lấy dữ liệu vừa xong trong web , đẩy dữ liệu vào 2 cột đó"
+                    formulaH = rItem.SummaryText;
                 }
 
                 processedRows.Add(new
@@ -814,9 +828,10 @@ public sealed partial class AutoTickService : IAutoTickService
                     rowIndex,
                     numberLabel = rItem.NumberLabel,
                     summaryText = rItem.SummaryText,
+                    formulaH,
+                    statusA,
                     targetCells,
-                    untickCells,
-                    formulaH
+                    untickCells
                 });
             }
 
@@ -845,25 +860,40 @@ public sealed partial class AutoTickService : IAutoTickService
                     string nLabel = (string)pType.GetProperty("numberLabel")!.GetValue(pObj)!;
                     string sText = (string)pType.GetProperty("summaryText")!.GetValue(pObj)!;
                     string? fH = (string?)pType.GetProperty("formulaH")!.GetValue(pObj);
+                    string? sA = (string?)pType.GetProperty("statusA")?.GetValue(pObj);
                     var tCells = (List<string>)pType.GetProperty("targetCells")!.GetValue(pObj)!;
                     var uCells = (List<string>)pType.GetProperty("untickCells")!.GetValue(pObj)!;
 
+                    if (!string.IsNullOrWhiteSpace(sA))
+                    {
+                        sheet.Cell(rIdx, 1).SetValue(sA);
+                    }
                     if (!string.IsNullOrWhiteSpace(sText))
                     {
                         sheet.Cell(rIdx, 4).SetValue(sText);
                     }
                     if (!string.IsNullOrWhiteSpace(fH))
                     {
-                        sheet.Cell(rIdx, 8).FormulaA1 = fH;
+                        if (fH.StartsWith("="))
+                        {
+                            sheet.Cell(rIdx, 8).FormulaA1 = fH;
+                        }
+                        else
+                        {
+                            sheet.Cell(rIdx, 8).SetValue(fH);
+                        }
                     }
-                    foreach (var c in tCells)
+                    if (!skipTicking)
                     {
-                        sheet.Cell(c).SetValue(true);
-                        localTicked++;
-                    }
-                    foreach (var c in uCells)
-                    {
-                        sheet.Cell(c).SetValue(false);
+                        foreach (var c in tCells)
+                        {
+                            sheet.Cell(c).SetValue(true);
+                            localTicked++;
+                        }
+                        foreach (var c in uCells)
+                        {
+                            sheet.Cell(c).SetValue(false);
+                        }
                     }
 
                     localSynced++;
@@ -871,6 +901,7 @@ public sealed partial class AutoTickService : IAutoTickService
                     {
                         RowIndex = rIdx,
                         NumberLabel = nLabel,
+                        StatusAFilled = !string.IsNullOrWhiteSpace(sA),
                         SummaryFilled = !string.IsNullOrWhiteSpace(sText),
                         FormulaHFilled = !string.IsNullOrWhiteSpace(fH),
                         TickedColumns = tCells,
@@ -880,6 +911,11 @@ public sealed partial class AutoTickService : IAutoTickService
 
                 workbook.SaveAs(downloaded.FilePath);
 
+                string localMsg = skipTicking
+                    ? $"Đã đồng bộ thành công {localSynced} hồ sơ: điền Cột D, H và đánh dấu Cột A là '{defaultStatusA}' vào file!"
+                    : $"Đã đồng bộ thành công {localSynced} hồ sơ, tick {localTicked} ô" +
+                        (newHeadersToAdd.Count > 0 ? $", tự động thêm {newHeadersToAdd.Count} cột mới" : "") + " vào file!";
+
                 return new AutoTickSyncSummaryResponse
                 {
                     Success = true,
@@ -887,8 +923,7 @@ public sealed partial class AutoTickService : IAutoTickService
                     TickedCellsCount = localTicked,
                     NewHeadersCount = newHeadersToAdd.Count,
                     NewHeaderTitles = newHeaderTitles,
-                    Message = $"Đã đồng bộ thành công {localSynced} hồ sơ, tick {localTicked} ô" +
-                        (newHeadersToAdd.Count > 0 ? $", tự động thêm {newHeadersToAdd.Count} cột mới" : "") + " vào file!",
+                    Message = localMsg,
                     Details = localDetails
                 };
             }
@@ -903,6 +938,7 @@ public sealed partial class AutoTickService : IAutoTickService
             {
                 oneDriveUrl = url,
                 sheetName,
+                skipTicking,
                 newHeaders = newHeadersToAdd,
                 rows = processedRows
             };
@@ -1107,6 +1143,9 @@ public sealed partial class AutoTickService : IAutoTickService
         var newHeadersToAddJob = new List<object>();
         bool isOnlineOneDrive = request.OneDriveUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
 
+        bool skipTicking = request.SkipTicking;
+        string statusA = !string.IsNullOrWhiteSpace(request.StatusA) ? request.StatusA : "đã nhập";
+
         foreach (var r in eligibleRowNumbers)
         {
             if (ct.IsCancellationRequested)
@@ -1120,97 +1159,124 @@ public sealed partial class AutoTickService : IAutoTickService
             var citizenNames = ExtractCitizenNames(summary);
             var numLabel = sheet.Cell(r, 2).GetString().Trim();
 
-            var match = ParenthesesRegex.Match(summary);
-            if (!match.Success)
-            {
-                state.ProcessedRows++;
-                state.SkippedRowsCount++;
-                continue;
-            }
-
-            var items = SplitDocumentItems(match.Groups[1].Value);
-            var matchingHeaders = FindMatchingHeaders(items, targetHeaders);
-
             var newlyTickedCols = new List<string>();
             var alreadyTickedCols = new List<string>();
-            var unmatchedItems = items.Where(it => !matchingHeaders.Any(h => IsSmartMatch(h.Title, it))).ToList();
-
-            // Yêu cầu: Tự động thêm cột mới vào dòng 4 và tick ô thành TRUE
-            foreach (var it in unmatchedItems)
-            {
-                var cleanIt = it.Trim();
-                if (string.IsNullOrWhiteSpace(cleanIt)) continue;
-
-                var existingH = allHeaders.FirstOrDefault(h => IsSmartMatch(h.Title, cleanIt));
-                if (existingH is null)
-                {
-                    jobLastColNumber++;
-                    string newColLetter = sheet.Column(jobLastColNumber).ColumnLetter();
-                    sheet.Cell(4, jobLastColNumber).SetValue(cleanIt);
-
-                    existingH = new AutoTickSheetHeader
-                    {
-                        ColumnIndex = jobLastColNumber,
-                        ColumnLetter = newColLetter,
-                        Title = cleanIt,
-                        ExistingTicksCount = 0
-                    };
-                    allHeaders.Add(existingH);
-                    newHeadersToAddJob.Add(new
-                    {
-                        colLetter = newColLetter,
-                        colIndex = jobLastColNumber,
-                        title = cleanIt
-                    });
-                }
-
-                var newCell = sheet.Cell(r, existingH.ColumnIndex);
-                if (!IsCellTicked(newCell))
-                {
-                    newCell.SetValue(true);
-                    newlyTickedCols.Add(existingH.Title);
-                    state.NewlyTickedCellsCount++;
-                }
-            }
-
-            foreach (var h in matchingHeaders)
-            {
-                var cell = sheet.Cell(r, h.ColumnIndex);
-                if (IsCellTicked(cell))
-                {
-                    alreadyTickedCols.Add(h.Title);
-                }
-                else
-                {
-                    // Tick the missing cell
-                    cell.SetValue(true);
-                    newlyTickedCols.Add(h.Title);
-                    state.NewlyTickedCellsCount++;
-                }
-            }
-
+            var unmatchedItems = new List<string>();
+            var items = new List<string>();
             string rowStatus;
-            if (newlyTickedCols.Count > 0)
-            {
-                rowStatus = "Ticked";
-                state.NewlyTickedRowsCount++;
 
-                var targetCells = allHeaders
-                    .Where(h => newlyTickedCols.Contains(h.Title))
-                    .Select(h => $"{h.ColumnLetter}{r}")
-                    .ToList();
+            if (skipTicking)
+            {
+                // Người dùng yêu cầu: "thôi bây giờ thay đổi toàn bộ cách làm , bỏ tick , chỉ cần đánh cột D và H , lấy dữ liệu vừa xong trong web , đẩy dữ liệu vào 2 cột đó , và đánh cột A là đã nhập"
+                sheet.Cell(r, 1).SetValue(statusA);
+                sheet.Cell(r, 4).SetValue(summary);
+                sheet.Cell(r, 8).SetValue(summary);
+
+                newlyTickedCols.Add("Cột A, D, H");
+                state.NewlyTickedRowsCount++;
 
                 cloudRows.Add(new
                 {
                     rowIndex = r,
                     numberLabel = numLabel,
-                    targetCells
+                    summaryText = summary,
+                    formulaH = summary,
+                    statusA
                 });
+
+                rowStatus = "Ticked";
             }
             else
             {
-                rowStatus = "SkippedFullyTicked";
-                state.SkippedRowsCount++;
+                var match = ParenthesesRegex.Match(summary);
+                if (!match.Success)
+                {
+                    state.ProcessedRows++;
+                    state.SkippedRowsCount++;
+                    continue;
+                }
+
+                items = SplitDocumentItems(match.Groups[1].Value);
+                var matchingHeaders = FindMatchingHeaders(items, targetHeaders);
+
+                unmatchedItems = items.Where(it => !matchingHeaders.Any(h => IsSmartMatch(h.Title, it))).ToList();
+
+                // Yêu cầu: Tự động thêm cột mới vào dòng 4 và tick ô thành TRUE
+                foreach (var it in unmatchedItems)
+                {
+                    var cleanIt = it.Trim();
+                    if (string.IsNullOrWhiteSpace(cleanIt)) continue;
+
+                    var existingH = allHeaders.FirstOrDefault(h => IsSmartMatch(h.Title, cleanIt));
+                    if (existingH is null)
+                    {
+                        jobLastColNumber++;
+                        string newColLetter = sheet.Column(jobLastColNumber).ColumnLetter();
+                        sheet.Cell(4, jobLastColNumber).SetValue(cleanIt);
+
+                        existingH = new AutoTickSheetHeader
+                        {
+                            ColumnIndex = jobLastColNumber,
+                            ColumnLetter = newColLetter,
+                            Title = cleanIt,
+                            ExistingTicksCount = 0
+                        };
+                        allHeaders.Add(existingH);
+                        newHeadersToAddJob.Add(new
+                        {
+                            colLetter = newColLetter,
+                            colIndex = jobLastColNumber,
+                            title = cleanIt
+                        });
+                    }
+
+                    var newCell = sheet.Cell(r, existingH.ColumnIndex);
+                    if (!IsCellTicked(newCell))
+                    {
+                        newCell.SetValue(true);
+                        newlyTickedCols.Add(existingH.Title);
+                        state.NewlyTickedCellsCount++;
+                    }
+                }
+
+                foreach (var h in matchingHeaders)
+                {
+                    var cell = sheet.Cell(r, h.ColumnIndex);
+                    if (IsCellTicked(cell))
+                    {
+                        alreadyTickedCols.Add(h.Title);
+                    }
+                    else
+                    {
+                        // Tick the missing cell
+                        cell.SetValue(true);
+                        newlyTickedCols.Add(h.Title);
+                        state.NewlyTickedCellsCount++;
+                    }
+                }
+
+                if (newlyTickedCols.Count > 0)
+                {
+                    rowStatus = "Ticked";
+                    state.NewlyTickedRowsCount++;
+
+                    var targetCells = allHeaders
+                        .Where(h => newlyTickedCols.Contains(h.Title))
+                        .Select(h => $"{h.ColumnLetter}{r}")
+                        .ToList();
+
+                    cloudRows.Add(new
+                    {
+                        rowIndex = r,
+                        numberLabel = numLabel,
+                        targetCells
+                    });
+                }
+                else
+                {
+                    rowStatus = "SkippedFullyTicked";
+                    state.SkippedRowsCount++;
+                }
             }
 
             state.ProcessedRows++;
@@ -1259,10 +1325,10 @@ public sealed partial class AutoTickService : IAutoTickService
         workbook.SaveAs(resultPath);
         state.ResultFilePath = resultPath;
 
-        // Nếu là link OneDrive Online và có các ô cần tick hoặc có cột mới cần thêm: Chạy Robot Playwright thực tế trên cloud
+        // Nếu là link OneDrive Online và có các ô cần cập nhật: Chạy Robot Playwright thực tế trên cloud
         if (isOnlineOneDrive && (cloudRows.Count > 0 || newHeadersToAddJob.Count > 0) && !ct.IsCancellationRequested)
         {
-            await RunCloudPlaywrightJobAsync(jobId, request.OneDriveUrl, sheetName, cloudRows, newHeadersToAddJob, state, ct).ConfigureAwait(false);
+            await RunCloudPlaywrightJobAsync(jobId, request.OneDriveUrl, sheetName, cloudRows, newHeadersToAddJob, skipTicking, state, ct).ConfigureAwait(false);
         }
 
         if (state.Status != "Cancelled")
@@ -1301,6 +1367,7 @@ public sealed partial class AutoTickService : IAutoTickService
         string sheetName,
         List<object> cloudRows,
         List<object> newHeaders,
+        bool skipTicking,
         JobState state,
         CancellationToken ct)
     {
@@ -1313,6 +1380,7 @@ public sealed partial class AutoTickService : IAutoTickService
         {
             oneDriveUrl,
             sheetName,
+            skipTicking,
             newHeaders,
             rows = cloudRows
         };

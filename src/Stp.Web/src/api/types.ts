@@ -834,6 +834,7 @@ export interface AutoTickSyncSummaryItem {
   items: string[]
   targetCells?: string[]
   formulaH?: string
+  statusA?: string
 }
 
 export interface AutoTickSyncSummaryRequest {
@@ -841,11 +842,16 @@ export interface AutoTickSyncSummaryRequest {
   sheetName: string
   rows: AutoTickSyncSummaryItem[]
   ensureFormulaH?: boolean
+  skipTicking?: boolean
+  statusA?: string
+  numberFrom?: number
+  numberTo?: number
 }
 
 export interface AutoTickSyncSummaryRowResult {
   rowIndex: number
   numberLabel: string
+  statusAFilled?: boolean
   summaryFilled: boolean
   formulaHFilled?: boolean
   tickedColumns: string[]

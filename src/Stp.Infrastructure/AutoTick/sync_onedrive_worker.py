@@ -248,9 +248,10 @@ def run_sync(input_file, output_file):
             time.sleep(0.05)
 
         # Tự động thêm các cột mới vào dòng 4 nếu có loại giấy tờ chưa có trên sheet ("tự thêm vào khỏi tick nhé")
-        new_headers = data.get('newHeaders', [])
+        skip_ticking = data.get('skipTicking', True)
+        new_headers = data.get('newHeaders', []) if not skip_ticking else []
         new_headers_created = 0
-        if new_headers:
+        if new_headers and not skip_ticking:
             print(f"INFO:Adding {len(new_headers)} new header columns to sheet {sheet_name}...", flush=True)
             for nh in new_headers:
                 col_letter = nh.get('colLetter')
@@ -269,6 +270,7 @@ def run_sync(input_file, output_file):
             num_label = r_item.get('numberLabel', '')
             summary_text = r_item.get('summaryText', '')
             formula_h = r_item.get('formulaH', '')
+            status_a = r_item.get('statusA', 'đã nhập')
             target_cells = r_item.get('targetCells', [])
             untick_cells = r_item.get('untickCells', [])
 
@@ -277,32 +279,40 @@ def run_sync(input_file, output_file):
             err = None
 
             try:
-                # 1. Fill Column D (Trích yếu nội dung) if provided
+                # 1. Fill Column A (Đánh dấu "đã nhập")
+                # Yêu cầu: "đánh cột A là đã nhập ( đánh theo từ số - đến số )"
+                if status_a:
+                    set_cell_value(f"A{r_idx}", status_a)
+                    print(f"PROGRESS_A:{r_idx}:{num_label}:A{r_idx}:{status_a}", flush=True)
+
+                # 2. Fill Column D (Trích yếu nội dung)
+                # Yêu cầu: "chỉ cần đánh cột D và H , lấy dữ liệu vừa xong trong web , đẩy dữ liệu vào 2 cột đó"
                 if summary_text:
                     set_cell_value(f"D{r_idx}", summary_text)
                     print(f"PROGRESS_D:{r_idx}:{num_label}:D{r_idx}", flush=True)
 
-                # 2. Fill Column H (Công thức tổng hợp trích yếu động) if provided
-                if formula_h:
-                    set_cell_value(f"H{r_idx}", formula_h)
+                # 3. Fill Column H (Trích yếu / công thức tổng hợp)
+                val_h = formula_h if formula_h else summary_text
+                if val_h:
+                    set_cell_value(f"H{r_idx}", val_h)
                     print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
 
-                # 3. Tick checkbox cells in target_cells (bao gồm cả các cột mới)
-                for cell_coord in target_cells:
-                    try:
-                        set_cell_value(cell_coord, "TRUE")
-                        ticked_cols.append(cell_coord)
-                        total_ticked += 1
-                        print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
-                    except Exception as ex_cell:
-                        print(f"WARN:Không thể tick ô {cell_coord}: {ex_cell}", flush=True)
+                # 4. Tick checkbox cells in target_cells (chỉ khi KHÔNG bỏ tick)
+                if not skip_ticking:
+                    for cell_coord in target_cells:
+                        try:
+                            set_cell_value(cell_coord, "TRUE")
+                            ticked_cols.append(cell_coord)
+                            total_ticked += 1
+                            print(f"PROGRESS_TICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
+                        except Exception as ex_cell:
+                            print(f"WARN:Không thể tick ô {cell_coord}: {ex_cell}", flush=True)
 
-                # 4. Untick checkbox cells in untick_cells
-                for cell_coord in untick_cells:
-                    set_cell_value(cell_coord, "FALSE")
-                    unticked_cols.append(cell_coord)
-                    total_ticked += 1
-                    print(f"PROGRESS_UNTICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
+                    for cell_coord in untick_cells:
+                        set_cell_value(cell_coord, "FALSE")
+                        unticked_cols.append(cell_coord)
+                        total_ticked += 1
+                        print(f"PROGRESS_UNTICK:{r_idx}:{num_label}:{cell_coord}:{total_ticked}", flush=True)
 
                 synced_rows += 1
                 print(f"PROGRESS_ROW:{r_idx}:{num_label}:{synced_rows}", flush=True)
@@ -313,8 +323,9 @@ def run_sync(input_file, output_file):
             results.append({
                 "rowIndex": r_idx,
                 "numberLabel": num_label,
+                "statusAFilled": bool(status_a and not err),
                 "summaryFilled": bool(summary_text and not err),
-                "formulaHFilled": bool(formula_h and not err),
+                "formulaHFilled": bool(val_h and not err),
                 "tickedColumns": ticked_cols,
                 "untickedColumns": unticked_cols,
                 "error": err
@@ -380,13 +391,18 @@ def run_sync(input_file, output_file):
 
         browser.close()
 
+    if skip_ticking:
+        sync_msg = f"Đã đồng bộ thành công {synced_rows} hồ sơ: điền Cột D, H và đánh dấu Cột A là 'đã nhập' lên OneDrive!"
+    else:
+        sync_msg = f"Đã đồng bộ thành công {synced_rows} hồ sơ, tick {total_ticked} ô" + (f", tự động thêm {new_headers_created} cột mới" if new_headers_created > 0 else "") + " lên OneDrive!"
+
     output_data = {
         "success": True,
         "syncedRowsCount": synced_rows,
         "tickedCellsCount": total_ticked,
         "newHeadersCount": new_headers_created,
         "newHeaderTitles": [nh.get('title') for nh in new_headers if nh.get('title')],
-        "message": f"Đã đồng bộ thành công {synced_rows} hồ sơ, tick {total_ticked} ô" + (f", tự động thêm {new_headers_created} cột mới" if new_headers_created > 0 else "") + " lên OneDrive!",
+        "message": sync_msg,
         "details": results
     }
 
