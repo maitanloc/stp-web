@@ -354,7 +354,20 @@ public sealed partial class AutoTickService : IAutoTickService
 
             var sheet = workbook.Worksheet(sheetName);
             var headers = ExtractHeaders(sheet);
-            int lastColNumber = sheet.LastColumnUsed()?.ColumnNumber() ?? (headers.Count > 0 ? headers.Max(h => h.ColumnIndex) : 95);
+            int maxUsedColWatcher = 0;
+            if (sheet.LastColumnUsed() is not null)
+            {
+                maxUsedColWatcher = Math.Max(maxUsedColWatcher, sheet.LastColumnUsed()!.ColumnNumber());
+            }
+            if (sheet.Row(4).LastCellUsed() is not null)
+            {
+                maxUsedColWatcher = Math.Max(maxUsedColWatcher, sheet.Row(4).LastCellUsed()!.Address.ColumnNumber);
+            }
+            if (headers.Count > 0)
+            {
+                maxUsedColWatcher = Math.Max(maxUsedColWatcher, headers.Max(h => h.ColumnIndex));
+            }
+            int lastColNumber = maxUsedColWatcher > 0 ? maxUsedColWatcher : 95;
             string lastColLetter = sheet.Column(lastColNumber).ColumnLetter();
             int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 4;
             int newUnticked = 0;
@@ -552,7 +565,23 @@ public sealed partial class AutoTickService : IAutoTickService
             var sheetName = targetSheet.Name;
             var originalHeaders = ExtractHeaders(sheet);
             var headers = originalHeaders.ToList();
-            int lastColNumber = sheet.LastColumnUsed()?.ColumnNumber() ?? (headers.Count > 0 ? headers.Max(h => h.ColumnIndex) : 95);
+
+            // Đảm bảo tuyệt đối: Cột mới luôn được thêm ở ngoài cùng bên phải (sau tất cả các cột của bảng gốc),
+            // không chèn vào giữa, không dịch chuyển cột cũ, không làm xáo trộn dữ liệu hay hỏng các công thức sẵn có.
+            int maxUsedCol = 0;
+            if (sheet.LastColumnUsed() is not null)
+            {
+                maxUsedCol = Math.Max(maxUsedCol, sheet.LastColumnUsed()!.ColumnNumber());
+            }
+            if (sheet.Row(4).LastCellUsed() is not null)
+            {
+                maxUsedCol = Math.Max(maxUsedCol, sheet.Row(4).LastCellUsed()!.Address.ColumnNumber);
+            }
+            if (headers.Count > 0)
+            {
+                maxUsedCol = Math.Max(maxUsedCol, headers.Max(h => h.ColumnIndex));
+            }
+            int lastColNumber = maxUsedCol > 0 ? maxUsedCol : 95;
 
             var newHeadersToAdd = new List<object>();
             var newHeaderTitles = new List<string>();
@@ -1022,7 +1051,22 @@ public sealed partial class AutoTickService : IAutoTickService
 
         var sheet = workbook.Worksheet(sheetName);
         var allHeaders = ExtractHeaders(sheet);
-        int jobLastColNumber = sheet.LastColumnUsed()?.ColumnNumber() ?? (allHeaders.Count > 0 ? allHeaders.Max(h => h.ColumnIndex) : 95);
+
+        // Đảm bảo tuyệt đối: Thêm cột mới ở ngoài cùng bên phải, không chèn vào giữa
+        int maxUsedColJob = 0;
+        if (sheet.LastColumnUsed() is not null)
+        {
+            maxUsedColJob = Math.Max(maxUsedColJob, sheet.LastColumnUsed()!.ColumnNumber());
+        }
+        if (sheet.Row(4).LastCellUsed() is not null)
+        {
+            maxUsedColJob = Math.Max(maxUsedColJob, sheet.Row(4).LastCellUsed()!.Address.ColumnNumber);
+        }
+        if (allHeaders.Count > 0)
+        {
+            maxUsedColJob = Math.Max(maxUsedColJob, allHeaders.Max(h => h.ColumnIndex));
+        }
+        int jobLastColNumber = maxUsedColJob > 0 ? maxUsedColJob : 95;
 
         // Filter selected headers if provided
         var selectedHeaderSet = request.SelectedHeaders is not null && request.SelectedHeaders.Count > 0
@@ -1060,6 +1104,7 @@ public sealed partial class AutoTickService : IAutoTickService
 
         DateTime lastEventTime = DateTime.UtcNow;
         var cloudRows = new List<object>();
+        var newHeadersToAddJob = new List<object>();
         bool isOnlineOneDrive = request.OneDriveUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
 
         foreach (var r in eligibleRowNumbers)
@@ -1111,6 +1156,12 @@ public sealed partial class AutoTickService : IAutoTickService
                         ExistingTicksCount = 0
                     };
                     allHeaders.Add(existingH);
+                    newHeadersToAddJob.Add(new
+                    {
+                        colLetter = newColLetter,
+                        colIndex = jobLastColNumber,
+                        title = cleanIt
+                    });
                 }
 
                 var newCell = sheet.Cell(r, existingH.ColumnIndex);
@@ -1144,7 +1195,7 @@ public sealed partial class AutoTickService : IAutoTickService
                 rowStatus = "Ticked";
                 state.NewlyTickedRowsCount++;
 
-                var targetCells = matchingHeaders
+                var targetCells = allHeaders
                     .Where(h => newlyTickedCols.Contains(h.Title))
                     .Select(h => $"{h.ColumnLetter}{r}")
                     .ToList();
@@ -1208,10 +1259,10 @@ public sealed partial class AutoTickService : IAutoTickService
         workbook.SaveAs(resultPath);
         state.ResultFilePath = resultPath;
 
-        // Nếu là link OneDrive Online và có các ô cần tick: Chạy Robot Playwright thực tế trên cloud
-        if (isOnlineOneDrive && cloudRows.Count > 0 && !ct.IsCancellationRequested)
+        // Nếu là link OneDrive Online và có các ô cần tick hoặc có cột mới cần thêm: Chạy Robot Playwright thực tế trên cloud
+        if (isOnlineOneDrive && (cloudRows.Count > 0 || newHeadersToAddJob.Count > 0) && !ct.IsCancellationRequested)
         {
-            await RunCloudPlaywrightJobAsync(jobId, request.OneDriveUrl, sheetName, cloudRows, state, ct).ConfigureAwait(false);
+            await RunCloudPlaywrightJobAsync(jobId, request.OneDriveUrl, sheetName, cloudRows, newHeadersToAddJob, state, ct).ConfigureAwait(false);
         }
 
         if (state.Status != "Cancelled")
@@ -1249,6 +1300,7 @@ public sealed partial class AutoTickService : IAutoTickService
         string oneDriveUrl,
         string sheetName,
         List<object> cloudRows,
+        List<object> newHeaders,
         JobState state,
         CancellationToken ct)
     {
@@ -1261,6 +1313,7 @@ public sealed partial class AutoTickService : IAutoTickService
         {
             oneDriveUrl,
             sheetName,
+            newHeaders,
             rows = cloudRows
         };
 

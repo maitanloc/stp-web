@@ -478,6 +478,83 @@ public sealed class AutoTickServiceTests
         }
     }
 
+    [Fact]
+    public async Task SyncSummaryRows_AutoAddsMissingColumnHeader_PlacedStrictlyAtOutermostRightEdge_NeverShiftsExistingColumns()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"test_outermost_col_{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.Worksheets.Add("1997");
+                // Existing columns from Col 9 to Col 50
+                for (int c = 9; c <= 50; c++)
+                {
+                    ws.Cell(4, c).SetValue($"Cột {c}");
+                }
+                // Pre-existing column in Col 50
+                ws.Cell(4, 50).SetValue("giấy tờ kiểm chứng cột 50");
+
+                // Row 5 with data
+                ws.Cell(5, 2).SetValue(1);
+                ws.Cell(5, 4).SetValue("Quyết định kết hôn. Năm 1997");
+                ws.Cell(5, 50).SetValue(false);
+
+                wb.SaveAs(tempFile);
+            }
+
+            var storage = new FileStorage(Options.Create(new StorageOptions { RootPath = Path.GetTempPath() }));
+            var publisher = new DummyPublisher();
+            var service = new AutoTickService(storage, publisher, NullLogger<AutoTickService>.Instance);
+
+            var req = new AutoTickSyncSummaryRequest
+            {
+                OneDriveUrl = tempFile,
+                SheetName = "1997",
+                EnsureFormulaH = true,
+                Rows = new List<AutoTickSyncSummaryItem>
+                {
+                    new()
+                    {
+                        RowIndex = 5,
+                        NumberLabel = "1",
+                        SummaryText = "Quyết định kết hôn. (Cột 9, loại giấy tờ mới hoàn toàn)"
+                    }
+                }
+            };
+
+            var res = await service.SyncSummaryRowsToOneDriveAsync(req);
+
+            Assert.True(res.Success);
+            Assert.Equal(1, res.NewHeadersCount);
+            Assert.Contains("loại giấy tờ mới hoàn toàn", res.NewHeaderTitles);
+
+            using var resultWb = new XLWorkbook(tempFile);
+            var resultWs = resultWb.Worksheet("1997");
+
+            // 1. All existing columns 9 to 50 are 100% intact and unshifted
+            for (int c = 9; c < 50; c++)
+            {
+                Assert.Equal($"Cột {c}", resultWs.Cell(4, c).GetString().Trim());
+            }
+            Assert.Equal("giấy tờ kiểm chứng cột 50", resultWs.Cell(4, 50).GetString().Trim());
+
+            // 2. The new column must be strictly placed at outermost edge: Col 51
+            Assert.Equal("loại giấy tờ mới hoàn toàn", resultWs.Cell(4, 51).GetString().Trim());
+
+            // 3. New column in Row 5 is ticked to true
+            Assert.True(resultWs.Cell(5, 51).GetBoolean());
+
+            // 4. Formula H must cover up to the new outermost column (Col 51)
+            string col51Letter = resultWs.Column(51).ColumnLetter();
+            Assert.Contains($"{col51Letter}$4", resultWs.Cell(5, 8).FormulaA1);
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
     private static bool IsSmartMatchInternal(string headerTitle, string documentItem)
     {
         return (bool)typeof(AutoTickService).GetMethod("IsSmartMatch", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
