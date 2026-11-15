@@ -224,6 +224,143 @@ public sealed class AutoTickServiceTests
         }
     }
 
+    [Fact]
+    public async Task SyncSummaryRows_AutoAddsMissingColumnHeader_LeavesUnticked()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"test_autotick_newcol_{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.Worksheets.Add("1997");
+                // Row 4: Only 2 existing headers: Col I (9) and Col J (10)
+                ws.Cell(4, 9).SetValue("phiếu đề xuất");
+                ws.Cell(4, 10).SetValue("bộ công hàm");
+
+                // Row 5: Row with number label "1"
+                ws.Cell(5, 2).SetValue(1);
+                ws.Cell(5, 4).SetValue("Quyết định kết hôn của Bà Nguyễn Thị A và Ông John Smith. Năm 1997");
+
+                wb.SaveAs(tempFile);
+            }
+
+            var storage = new FileStorage(Options.Create(new StorageOptions { RootPath = Path.GetTempPath() }));
+            var publisher = new DummyPublisher();
+            var service = new AutoTickService(storage, publisher, NullLogger<AutoTickService>.Instance);
+
+            // Row contains "chứng nhận hạnh kiểm" which is NOT in Row 4 headers
+            var req = new AutoTickSyncSummaryRequest
+            {
+                OneDriveUrl = tempFile,
+                SheetName = "1997",
+                EnsureFormulaH = true,
+                Rows = new List<AutoTickSyncSummaryItem>
+                {
+                    new()
+                    {
+                        RowIndex = 5,
+                        NumberLabel = "1",
+                        SummaryText = "Quyết định kết hôn của Bà Nguyễn Thị A và Ông John Smith. (phiếu đề xuất, chứng nhận hạnh kiểm)"
+                    }
+                }
+            };
+
+            var res = await service.SyncSummaryRowsToOneDriveAsync(req);
+
+            Assert.True(res.Success);
+            Assert.Equal(1, res.SyncedRowsCount);
+            Assert.Equal(1, res.TickedCellsCount); // Only "phiếu đề xuất" is ticked!
+            Assert.Equal(1, res.NewHeadersCount);
+            Assert.Contains("chứng nhận hạnh kiểm", res.NewHeaderTitles);
+
+            // Verify the saved file
+            using var resultWb = new XLWorkbook(tempFile);
+            var resultWs = resultWb.Worksheet("1997");
+
+            // 1. Col I (9) was matched and ticked
+            Assert.True(resultWs.Cell(5, 9).GetBoolean());
+
+            // 2. Col J (10) was not in summary, remains unticked
+            Assert.True(resultWs.Cell(5, 10).IsEmpty() || !resultWs.Cell(5, 10).GetBoolean());
+
+            // 3. Col K (11) was automatically created with header "chứng nhận hạnh kiểm"
+            Assert.Equal("chứng nhận hạnh kiểm", resultWs.Cell(4, 11).GetString().Trim());
+
+            // 4. "khỏi tick nhé" -> Row 5 Col K (11) MUST NOT be ticked!
+            Assert.True(resultWs.Cell(5, 11).IsEmpty() || !resultWs.Cell(5, 11).GetBoolean());
+
+            // 5. Formula H must cover up to K4 (last column)
+            Assert.True(resultWs.Cell(5, 8).HasFormula);
+            Assert.Contains("K$4", resultWs.Cell(5, 8).FormulaA1);
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteJob_AutoAddsMissingColumnHeader_LeavesUnticked()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"test_job_newcol_{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.Worksheets.Add("1997");
+                ws.Cell(4, 9).SetValue("phiếu đề xuất");
+                ws.Cell(4, 10).SetValue("bộ công hàm");
+
+                // Row 5 has document "tập tục đời sống" which is not in columns
+                ws.Cell(5, 2).SetValue(101);
+                ws.Cell(5, 4).SetValue("Quyết định kết hôn của Bà A và Ông B. Năm 1997 (phiếu đề xuất, tập tục đời sống)");
+
+                wb.SaveAs(tempFile);
+            }
+
+            var storage = new FileStorage(Options.Create(new StorageOptions { RootPath = Path.GetTempPath() }));
+            var publisher = new DummyPublisher();
+            var service = new AutoTickService(storage, publisher, NullLogger<AutoTickService>.Instance);
+
+            var jobId = await service.StartJobAsync(new AutoTickStartRequest
+            {
+                OneDriveUrl = tempFile,
+                SheetName = "1997"
+            });
+
+            AutoTickJobStatusResponse? status = null;
+            for (int i = 0; i < 20; i++)
+            {
+                await Task.Delay(100);
+                status = await service.GetJobStatusAsync(jobId);
+                if (status is not null && status.Status == "Completed") break;
+            }
+
+            Assert.NotNull(status);
+            Assert.Equal("Completed", status.Status);
+            Assert.Equal(1, status.NewlyTickedCellsCount); // Only phiếu đề xuất
+
+            var result = await service.GetResultFileAsync(jobId);
+            Assert.NotNull(result);
+
+            using var resultWb = new XLWorkbook(result.Value.Stream);
+            var resultWs = resultWb.Worksheet("1997");
+
+            // Header created in Col 11
+            Assert.Equal("tập tục đời sống", resultWs.Cell(4, 11).GetString().Trim());
+
+            // Col 9 is ticked
+            Assert.True(resultWs.Cell(5, 9).GetBoolean());
+
+            // Col 11 is NOT ticked ("khỏi tick nhé")
+            Assert.True(resultWs.Cell(5, 11).IsEmpty() || !resultWs.Cell(5, 11).GetBoolean());
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
     private static bool IsSmartMatchInternal(string headerTitle, string documentItem)
     {
         return (bool)typeof(AutoTickService).GetMethod("IsSmartMatch", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!

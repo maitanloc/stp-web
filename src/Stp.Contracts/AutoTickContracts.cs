@@ -149,6 +149,7 @@ public sealed class AutoTickSyncSummaryRowResult
     public bool SummaryFilled { get; set; }
     public bool FormulaHFilled { get; set; }
     public IReadOnlyList<string> TickedColumns { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> UntickedColumns { get; set; } = Array.Empty<string>();
     public string? Error { get; set; }
 }
 
@@ -158,6 +159,8 @@ public sealed class AutoTickSyncSummaryResponse
     public bool IsQueued { get; set; }
     public int SyncedRowsCount { get; set; }
     public int TickedCellsCount { get; set; }
+    public int NewHeadersCount { get; set; }
+    public IReadOnlyList<string> NewHeaderTitles { get; set; } = Array.Empty<string>();
     public string Message { get; set; } = string.Empty;
     public IReadOnlyList<AutoTickSyncSummaryRowResult> Details { get; set; } = Array.Empty<AutoTickSyncSummaryRowResult>();
 }

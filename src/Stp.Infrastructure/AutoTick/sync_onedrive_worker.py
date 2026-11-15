@@ -247,6 +247,23 @@ def run_sync(input_file, output_file):
             page.keyboard.press("Enter")
             time.sleep(0.05)
 
+        # Tự động thêm các cột mới vào dòng 4 nếu có loại giấy tờ chưa có trên sheet ("tự thêm vào khỏi tick nhé")
+        new_headers = data.get('newHeaders', [])
+        new_headers_created = 0
+        if new_headers:
+            print(f"INFO:Adding {len(new_headers)} new header columns to sheet {sheet_name}...", flush=True)
+            for nh in new_headers:
+                col_letter = nh.get('colLetter')
+                h_title = nh.get('title')
+                if col_letter and h_title:
+                    coord = f"{col_letter}4"
+                    try:
+                        set_cell_value(coord, h_title)
+                        new_headers_created += 1
+                        print(f"PROGRESS_NEW_HEADER:{coord}:{h_title}", flush=True)
+                    except Exception as ex_nh:
+                        print(f"WARN:Failed to set new header at {coord}: {ex_nh}", flush=True)
+
         for r_item in rows:
             r_idx = r_item.get('rowIndex')
             num_label = r_item.get('numberLabel', '')
@@ -364,7 +381,9 @@ def run_sync(input_file, output_file):
         "success": True,
         "syncedRowsCount": synced_rows,
         "tickedCellsCount": total_ticked,
-        "message": f"Đã đồng bộ thành công {synced_rows} hồ sơ và tick {total_ticked} ô lên OneDrive!",
+        "newHeadersCount": new_headers_created,
+        "newHeaderTitles": [nh.get('title') for nh in new_headers if nh.get('title')],
+        "message": f"Đã đồng bộ thành công {synced_rows} hồ sơ, tick {total_ticked} ô" + (f", tự động thêm {new_headers_created} cột mới" if new_headers_created > 0 else "") + " lên OneDrive!",
         "details": results
     }
 
