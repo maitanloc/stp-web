@@ -1118,19 +1118,27 @@ public sealed class SummaryToolController : ControllerBase
             : "\"Giấy khai sinh\", \"Căn cước công dân\", \"Giấy xác nhận tình trạng hôn nhân\", \"Giấy chứng nhận kết hôn\", \"Sổ hộ khẩu\", \"Bản sao trích lục khai sinh\", \"Đơn xin đăng ký kết hôn\", \"Giấy khám sức khỏe\", \"Ảnh\", \"Tờ khai đăng ký kết hôn\"";
 
         var prompt = $$"""
-Bạn là trợ lý AI chuyên nghiệp phân tích trích xuất danh mục giấy tờ và lệnh trong nghiệp vụ hồ sơ kết hôn Sở Tư Pháp Việt Nam.
+Bạn là chuyên viên AI phân tích dữ liệu trích yếu hồ sơ kết hôn Sở Tư Pháp Việt Nam.
 Danh mục giấy tờ chuẩn: [{{catalogList}}].
-Các lệnh có thể gặp: "next" (tiếp/kế tiếp), "done" (xong/lưu), "seven" (bộ bảy), "prev" (quay lại).
+Các lệnh có thể gặp: "next" (tiếp/kế tiếp), "done" (xong/lưu dòng), "seven" (bộ bảy), "prev" (quay lại/dòng trước).
 
-Câu nói từ micro:
+Câu nói nhận dạng từ micro (lưu ý: người dùng có thể nói thầm, nói nhỏ, nói tắt hoặc micro bị nghe lệch âm):
 "{{request.Text}}"
 
 Nhiệm vụ:
-1. Nhận diện các loại giấy tờ có trong câu nói và map chính xác về tên chuẩn trong danh mục trên.
-2. Bỏ qua tạp âm, từ đệm ("à", "ừm", "nhé", "cho tôi"), hoặc tiếng trò chuyện ngoài lề trong phòng.
-3. Nếu phát hiện lệnh điều hướng hoặc số tờ (như "01-20"), trích xuất tương ứng.
-4. Trả về DUY NHẤT một chuỗi JSON hợp lệ không kèm giải thích dạng:
-{"items": ["tên giấy tờ 1", "tên giấy tờ 2"], "command": "next" | "done" | "seven" | "prev" | null, "sheetNumber": "01-20" | null}
+1. Nhận diện các loại giấy tờ trong câu nói và map chuẩn xác về tên chuẩn trong danh mục trên.
+2. Tự động sửa lỗi nghe lệch âm/nói tắt do nói nhỏ, nói thầm hoặc micro bắt không rõ:
+   - "cần cước", "cước", "cccd", "chứng minh", "cmnd" -> "Căn cước công dân"
+   - "khai xin", "sinh", "bản sao khai sinh", "trích lục" -> "Giấy khai sinh" (hoặc trích lục tương ứng)
+   - "độc thân", "hôn nhân", "xác nhận độc thân", "tình trạng" -> "Giấy xác nhận tình trạng hôn nhân"
+   - "khẩu", "sổ khẩu", "hộ khẩu gia đình" -> "Sổ hộ khẩu"
+   - "sức khỏe", "khám sức khoẻ" -> "Giấy khám sức khỏe"
+   - "ảnh", "hai ảnh", "ảnh thẻ", "hình" -> "Ảnh"
+   - "đăng ký kết hôn", "chứng nhận kết hôn" -> "Giấy chứng nhận kết hôn"
+3. Nhận diện số tờ (ví dụ "số tờ 05", "tờ 12", "01-20" -> sheetNumber là "05", "12", "01-20").
+4. Bỏ qua từ đệm ("à", "ừm", "nhé", "cho tôi", "của vợ", "của chồng").
+5. Trả về DUY NHẤT một chuỗi JSON hợp lệ không kèm giải thích dạng:
+{"items": ["tên giấy tờ chuẩn 1", "tên giấy tờ chuẩn 2"], "command": "next" | "done" | "seven" | "prev" | null, "sheetNumber": "chuỗi số tờ" | null}
 """;
 
         try

@@ -94,7 +94,9 @@ export function useVoiceInput(options: VoiceInputOptions) {
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          noiseSuppression: true,
+          // Tắt lọc ồn gắt để không triệt tiêu giọng nói nhỏ/nói thầm
+          noiseSuppression: false,
+          // Tự động khuếch đại gain khi âm lượng nói nhỏ
           autoGainControl: true,
         },
       })
@@ -115,7 +117,8 @@ export function useVoiceInput(options: VoiceInputOptions) {
         let sum = 0
         for (let i = 0; i < data.length; i++) sum += data[i]
         const avg = sum / data.length
-        volume.value = Math.min(100, Math.round((avg / 128) * 100))
+        // Tăng độ nhạy hiển thị sóng âm lên gấp đôi để người dùng thấy rõ khi nói nhỏ
+        volume.value = Math.min(100, Math.round((avg / 64) * 100))
         volumeAnimId = requestAnimationFrame(tick)
       }
       volumeAnimId = requestAnimationFrame(tick)

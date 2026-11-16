@@ -1548,6 +1548,7 @@ function startVoice(): void {
     return
   }
   voiceConsoleOpen.value = true
+  playNotificationSound('start')
   startVoiceInput()
 }
 
@@ -1602,6 +1603,97 @@ const voiceLastAiResult = ref<{
   targetRowNumber?: number | null
 } | null>(null)
 
+let vietnameseVoice: SpeechSynthesisVoice | null = null
+const vietnameseVoiceName = ref<string>('')
+
+function detectVietnameseVoice(): SpeechSynthesisVoice | null {
+  if (!('speechSynthesis' in window)) return null
+  const all = window.speechSynthesis.getVoices()
+  if (all.length === 0) return null
+
+  // 1. Ưu tiên các giọng tự nhiên cao cấp: HoaiMy/NamMinh (Edge) hoặc Google tiếng Việt (Chrome)
+  const exact = all.find(
+    (v) =>
+      (v.lang === 'vi-VN' || v.lang === 'vi_VN') &&
+      (v.name.includes('HoaiMy') || v.name.includes('NamMinh') || v.name.includes('Google') || v.name.includes('Natural')),
+  )
+  if (exact) return exact
+
+  // 2. Bất kỳ giọng vi-VN nào
+  const anyViVn = all.find((v) => v.lang === 'vi-VN' || v.lang === 'vi_VN')
+  if (anyViVn) return anyViVn
+
+  // 3. Tiền tố vi hoặc tên có chứa chữ Vietnam / tiếng Việt
+  const anyVi = all.find(
+    (v) =>
+      v.lang.startsWith('vi') ||
+      v.name.toLowerCase().includes('vietnam') ||
+      v.name.toLowerCase().includes('tiếng việt'),
+  )
+  return anyVi ?? null
+}
+
+function initVoices(): void {
+  if (!('speechSynthesis' in window)) return
+  const update = () => {
+    vietnameseVoice = detectVietnameseVoice()
+    if (vietnameseVoice) {
+      const cleanName = vietnameseVoice.name
+        .replace(/(Microsoft|Google|Online|\(Natural\)|Vietnam|Desktop)/gi, '')
+        .trim()
+      vietnameseVoiceName.value = cleanName || 'Tiếng Việt'
+    } else {
+      vietnameseVoiceName.value = ''
+    }
+  }
+  update()
+  if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    window.speechSynthesis.onvoiceschanged = update
+  }
+}
+
+function playNotificationSound(type: 'start' | 'success' = 'success'): void {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    const now = ctx.currentTime
+
+    if (type === 'start') {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(587.33, now) // D5
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.08) // A5
+      gain.gain.setValueAtTime(0.05, now)
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now)
+      osc.stop(now + 0.1)
+    } else if (type === 'success') {
+      // Chuông báo êm dịu (Harp chime) E5 -> B5
+      const notes = [659.25, 987.77]
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'triangle'
+        osc.frequency.setValueAtTime(freq, now + i * 0.07)
+        gain.gain.setValueAtTime(0.07, now + i * 0.07)
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.2)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(now + i * 0.07)
+        osc.stop(now + i * 0.07 + 0.2)
+      })
+    }
+  } catch {
+    // Bỏ qua nếu audio context bị chặn
+  }
+}
+
 function readVoiceTts(): boolean {
   try {
     const val = localStorage.getItem(VOICE_TTS_KEY)
@@ -1625,18 +1717,35 @@ function toggleVoiceTts(): void {
 
 function speakVoiceFeedback(text: string): void {
   if (!voiceTtsEnabled.value) return
+
+  // Luôn phát chuông báo hoàn thành tinh tế (Web Audio chime)
+  playNotificationSound('success')
+
   if (!('speechSynthesis' in window)) return
   try {
     window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'vi-VN'
-    utterance.rate = 1.05
-    utterance.pitch = 1.0
-    const voices = window.speechSynthesis.getVoices()
-    const viVoice = voices.find((v) => v.lang === 'vi-VN' || v.lang.startsWith('vi'))
-    if (viVoice) {
-      utterance.voice = viVoice
+
+    if (!vietnameseVoice) {
+      vietnameseVoice = detectVietnameseVoice()
+      if (vietnameseVoice) {
+        const cleanName = vietnameseVoice.name
+          .replace(/(Microsoft|Google|Online|\(Natural\)|Vietnam|Desktop)/gi, '')
+          .trim()
+        vietnameseVoiceName.value = cleanName || 'Tiếng Việt'
+      }
     }
+
+    // NẾU KHÔNG CÓ GIỌNG TIẾNG VIỆT CHUẨN: TUYỆT ĐỐI KHÔNG DÙNG GIỌNG TIẾNG ANH (Microsoft David) ĐỌC TIẾNG VIỆT
+    if (!vietnameseVoice) {
+      console.warn('Trình duyệt chưa có giọng đọc tiếng Việt — đã phát chuông báo hoàn thành.')
+      return
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.voice = vietnameseVoice
+    utterance.lang = vietnameseVoice.lang || 'vi-VN'
+    utterance.rate = 1.02
+    utterance.pitch = 1.0
     window.speechSynthesis.speak(utterance)
   } catch (err) {
     console.warn('Speech synthesis error:', err)
@@ -3662,6 +3771,7 @@ watch(lastTeamSessionChanged, async (evt) => {
 let presenceCleanTimer: number | undefined
 
 onMounted(() => {
+  initVoices()
   void fetchCatalogPresets()
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('keyup', onGlobalKeyup)
@@ -6113,12 +6223,18 @@ onBeforeUnmount(() => {
                 type="button"
                 class="voice-action-btn"
                 :class="{ active: voiceTtsEnabled }"
-                :title="voiceTtsEnabled ? 'Giọng phản hồi đang BẬT (bấm để tắt tiếng)' : 'Giọng phản hồi đang TẮT (bấm để bật tiếng)'"
+                :title="
+                  voiceTtsEnabled
+                    ? `Phản hồi âm thanh đang BẬT (${vietnameseVoiceName ? 'Giọng ' + vietnameseVoiceName : 'Chuông báo'}) - bấm để tắt`
+                    : 'Phản hồi âm thanh đang TẮT - bấm để bật'
+                "
                 @click="toggleVoiceTts"
               >
                 <Volume2 v-if="voiceTtsEnabled" :size="14" class="text-brand" />
                 <VolumeX v-else :size="14" class="text-muted" />
-                <span class="action-label">{{ voiceTtsEnabled ? 'Giọng đọc' : 'Tắt tiếng' }}</span>
+                <span class="action-label">
+                  {{ voiceTtsEnabled ? (vietnameseVoiceName ? `Giọng Việt (${vietnameseVoiceName})` : 'Chuông báo') : 'Tắt tiếng' }}
+                </span>
               </button>
 
               <!-- Nút thu gọn / đóng hộp thoại -->
