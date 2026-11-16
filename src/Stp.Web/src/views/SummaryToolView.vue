@@ -27,6 +27,10 @@ import {
   Star,
   TriangleExclamationPoint,
   Users,
+  Volume2,
+  VolumeX,
+  ChevronDown,
+  ChevronUp,
   X,
   Zap,
 } from '@lucide/vue'
@@ -1533,6 +1537,7 @@ function startVoice(): void {
     toast.warning('Trình duyệt chưa hỗ trợ', 'Đọc giọng nói cần Chrome hoặc Edge (Web Speech API, tiếng Việt).')
     return
   }
+  voiceConsoleOpen.value = true
   startVoiceInput()
 }
 
@@ -1561,6 +1566,63 @@ function onPttMouseUp(): void {
     voicePttActive.value = false
     stopVoice()
   }
+}
+
+const VOICE_TTS_KEY = 'stp.voiceTts'
+const voiceTtsEnabled = ref<boolean>(readVoiceTts())
+const voiceConsoleOpen = ref(true)
+const voiceLastAiResult = ref<{
+  items: string[]
+  command?: string | null
+  sheetNumber?: string | null
+  model?: string | null
+  targetRowNumber?: number | null
+} | null>(null)
+
+function readVoiceTts(): boolean {
+  try {
+    const val = localStorage.getItem(VOICE_TTS_KEY)
+    return val === null ? true : val === 'true'
+  } catch {
+    return true
+  }
+}
+
+function toggleVoiceTts(): void {
+  voiceTtsEnabled.value = !voiceTtsEnabled.value
+  try {
+    localStorage.setItem(VOICE_TTS_KEY, String(voiceTtsEnabled.value))
+  } catch {}
+  if (voiceTtsEnabled.value) {
+    speakVoiceFeedback('Đã bật giọng nói phản hồi.')
+  } else {
+    window.speechSynthesis?.cancel()
+  }
+}
+
+function speakVoiceFeedback(text: string): void {
+  if (!voiceTtsEnabled.value) return
+  if (!('speechSynthesis' in window)) return
+  try {
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'vi-VN'
+    utterance.rate = 1.05
+    utterance.pitch = 1.0
+    const voices = window.speechSynthesis.getVoices()
+    const viVoice = voices.find((v) => v.lang === 'vi-VN' || v.lang.startsWith('vi'))
+    if (viVoice) {
+      utterance.voice = viVoice
+    }
+    window.speechSynthesis.speak(utterance)
+  } catch (err) {
+    console.warn('Speech synthesis error:', err)
+  }
+}
+
+function onMicPillClick(): void {
+  voiceConsoleOpen.value = true
+  toggleVoice()
 }
 
 /** Học lỗi nghe (I2): {máy nghe sai → người sửa} — tối đa 100 cặp. */
@@ -1624,6 +1686,7 @@ function toggleVoice(): void {
     )
     return
   }
+  voiceConsoleOpen.value = true
   toggleVoiceInput()
   if (!voiceListening.value) {
     voiceInterim.value = ''
@@ -1642,13 +1705,16 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
   if (command === 'commit') {
     if (!current) {
       toast.info('Chưa mở dòng nào', 'Mở "Sửa toàn bộ" một dòng rồi nói "xong".')
+      speakVoiceFeedback('Chưa mở dòng nào để lưu.')
       return
     }
     if (!summaryDraft.value.trim()) {
       toast.info('Khung soạn trống', 'Không có gì để lưu.')
+      speakVoiceFeedback('Khung soạn trống.')
       return
     }
     saveSummaryEditor(current)
+    speakVoiceFeedback('Đã lưu dòng.')
     return
   }
   if (command === 'next') {
@@ -1656,10 +1722,12 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
     const next = nextMissingRow(from)
     if (!next) {
       toast.info('Hết dòng thiếu', 'Không còn dòng thiếu danh mục trong phạm vi đang xem.')
+      speakVoiceFeedback('Không còn dòng thiếu.')
       return
     }
     openSummaryEditor(next)
     void scrollEditorIntoView()
+    speakVoiceFeedback(`Dòng kế tiếp ${next.rowNumber}.`)
     return
   }
   if (command === 'prev') {
@@ -1668,15 +1736,18 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
     const previous = index > 0 ? ordered[index - 1] : null
     if (!previous) {
       toast.info('Đây là dòng đầu', 'Không còn dòng nào phía trước.')
+      speakVoiceFeedback('Đây là dòng đầu tiên.')
       return
     }
     openSummaryEditor(previous)
     void scrollEditorIntoView()
+    speakVoiceFeedback(`Dòng trước ${previous.rowNumber}.`)
     return
   }
   // "bộ bảy" — điền Bộ 7 chuẩn vào dòng đang mở.
   if (!current) {
     toast.info('Chưa mở dòng nào', 'Mở "Sửa toàn bộ" một dòng rồi nói "bộ bảy".')
+    speakVoiceFeedback('Chưa mở dòng nào để điền.')
     return
   }
   voiceSuppressLearn = true
@@ -1684,12 +1755,14 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
   voiceSuppressLearn = false
   openSummaryEditor(current)
   toast.success('Đã điền Bộ 7 chuẩn', 'Kiểm rồi bấm Lưu hoặc nói "xong".')
+  speakVoiceFeedback('Đã điền bộ 7 chuẩn kết hôn.')
 }
 
 async function handleVoiceFinal(text: string): Promise<void> {
   const active = session.value
   if (!active) return
   voiceLastHeard.value = text
+  voiceConsoleOpen.value = true
 
   // 1. Match nhanh các lệnh điều hướng hoặc bộ bảy cơ bản
   const learned = applyLearned(text, voiceLearned.value)
@@ -1711,6 +1784,7 @@ async function handleVoiceFinal(text: string): Promise<void> {
     if (result.type) parts.push(`loại ${result.type}`)
     if (result.year !== null) parts.push(`năm ${result.year}`)
     toast.success('Đã lọc bằng giọng nói', parts.length > 0 ? parts.join(' · ') : 'bỏ lọc loại')
+    speakVoiceFeedback('Đã lọc theo yêu cầu.')
     return
   }
 
@@ -1756,12 +1830,34 @@ async function handleVoiceFinal(text: string): Promise<void> {
             heard: text,
             prefill: summaryFor(row),
           }
+          voiceLastAiResult.value = {
+            items: aiRes.items,
+            command: aiRes.command,
+            sheetNumber: aiRes.sheetNumber,
+            model: aiRes.model || 'qwen2.5:3b',
+            targetRowNumber: row.rowNumber,
+          }
+
           toast.success(
             `⚡ AI (${aiRes.model ?? 'Qwen 2.5'}): Nhận diện ${aiRes.items.length} giấy tờ`,
             `Dòng ${row.rowNumber}: ${aiRes.items.join(', ') || '(giữ nguyên)'}${
               aiRes.sheetNumber ? ' · số tờ ' + aiRes.sheetNumber : ''
             }`,
           )
+
+          // Phát âm thanh phản hồi bằng giọng nói
+          let spokenFeedback = ''
+          if (aiRes.items.length > 0) {
+            spokenFeedback = `Đã nhận diện: ${aiRes.items.join(', ')}`
+            if (aiRes.sheetNumber) spokenFeedback += `, số tờ ${aiRes.sheetNumber}`
+          }
+          if (aiRes.command === 'next') spokenFeedback += spokenFeedback ? ', chuyển dòng kế tiếp.' : 'Chuyển dòng kế tiếp.'
+          else if (aiRes.command === 'done' || aiRes.command === 'commit') spokenFeedback += spokenFeedback ? ', đã lưu dòng.' : 'Đã lưu dòng.'
+          else if (aiRes.command === 'seven') spokenFeedback = 'Đã điền bộ 7 chuẩn kết hôn.'
+
+          if (spokenFeedback) {
+            speakVoiceFeedback(spokenFeedback)
+          }
         }
       }
       return
@@ -1778,6 +1874,7 @@ async function handleVoiceFinal(text: string): Promise<void> {
       'Không hiểu câu này',
       `"${text}" — nói loại hồ sơ + giấy tờ ("kết hôn — căn cước, hộ khẩu") hoặc lệnh "xong", "kế tiếp".`,
     )
+    speakVoiceFeedback('Không nhận diện được giấy tờ trong câu nói.')
     return
   }
 
@@ -1786,6 +1883,7 @@ async function handleVoiceFinal(text: string): Promise<void> {
   if (!row) row = nextMissingRow(rows.value[0]?.rowNumber ?? 0)
   if (!row) {
     toast.info('Không có dòng để điền', 'Bấm "Sửa toàn bộ" một dòng rồi nói tiếp.')
+    speakVoiceFeedback('Chưa chọn dòng để điền.')
     return
   }
 
@@ -1813,12 +1911,29 @@ async function handleVoiceFinal(text: string): Promise<void> {
     heard: text,
     prefill: summaryFor(row),
   }
+  voiceLastAiResult.value = {
+    items: result.items,
+    command: null,
+    sheetNumber: result.sheetNumber,
+    model: 'Bộ tách quy tắc (Regex)',
+    targetRowNumber: row.rowNumber,
+  }
+
   toast.success(
     'Đã điền — kiểm rồi lưu',
     `Dòng ${row.rowNumber}: ${result.items.join(', ') || '(giữ nguyên danh mục)'}${
       result.sheetNumber ? ' · số tờ ' + result.sheetNumber : ''
     }`,
   )
+
+  let spokenRegexFeedback = ''
+  if (result.items.length > 0) {
+    spokenRegexFeedback = `Đã điền: ${result.items.join(', ')}`
+    if (result.sheetNumber) spokenRegexFeedback += `, số tờ ${result.sheetNumber}`
+  }
+  if (spokenRegexFeedback) {
+    speakVoiceFeedback(spokenRegexFeedback)
+  }
 }
 
 /** C2: chép bộ giấy tờ của dòng đứng ngay trên (trong danh sách đang xem). */
@@ -5940,27 +6055,137 @@ onBeforeUnmount(() => {
       </Transition>
     </Teleport>
 
-    <!-- Floating AI Mic & Soundwave widget (góc dưới bên phải, ngay trên / cạnh Chat nhóm) -->
+    <!-- Professional Floating AI Voice Console & Mic widget -->
     <aside
       v-if="session"
       class="floating-voice-widget"
-      :class="{ 'is-listening': voiceListening, 'is-parsing': voiceAiParsing }"
+      :class="{ 'is-listening': voiceListening, 'is-parsing': voiceAiParsing, 'is-open': voiceConsoleOpen }"
     >
-      <!-- Speech bubble nổi lên khi đang nghe hoặc AI đang parse -->
+      <!-- Khung nhận diện giọng nói & Text Box trực tiếp -->
       <Transition name="voice-bubble">
-        <div v-if="voiceListening || voiceAiParsing" class="voice-floating-bubble" role="status" aria-live="polite">
-          <div class="voice-bubble-badge">
-            <Sparkles v-if="voiceAiParsing" :size="12" class="spin-icon" />
-            <span v-else class="voice-pulse-dot" />
-            {{ voiceAiParsing ? 'Ollama AI (Qwen 2.5) đang xử lý…' : (voicePttActive ? 'Đang giữ phím Space để nói…' : 'Đang lắng nghe…') }}
+        <div
+          v-if="voiceConsoleOpen && (voiceListening || voiceAiParsing || voiceLastHeard || voiceInterim || voiceLastAiResult)"
+          class="voice-console-card"
+          role="region"
+          aria-label="Khung nhận diện giọng nói và AI"
+        >
+          <!-- Header thanh công cụ của Hộp thoại -->
+          <div class="voice-console-header">
+            <div class="voice-console-title">
+              <div class="voice-status-indicator" :class="{ live: voiceListening, thinking: voiceAiParsing }">
+                <span v-if="voiceListening" class="live-mic-dot" />
+                <Sparkles v-else-if="voiceAiParsing" :size="13" class="spin-icon text-amber" />
+                <span v-else class="ready-dot" />
+              </div>
+              <strong style="font-size: 13px">Nhận diện giọng nói & AI</strong>
+              <span class="voice-model-pill">{{ voiceLastAiModel || 'Qwen 2.5 3B' }}</span>
+            </div>
+
+            <div class="voice-console-actions">
+              <!-- Nút bật/tắt đọc phản hồi bằng giọng nói (TTS) -->
+              <button
+                type="button"
+                class="voice-action-btn"
+                :class="{ active: voiceTtsEnabled }"
+                :title="voiceTtsEnabled ? 'Giọng phản hồi đang BẬT (bấm để tắt tiếng)' : 'Giọng phản hồi đang TẮT (bấm để bật tiếng)'"
+                @click="toggleVoiceTts"
+              >
+                <Volume2 v-if="voiceTtsEnabled" :size="14" class="text-brand" />
+                <VolumeX v-else :size="14" class="text-muted" />
+                <span class="action-label">{{ voiceTtsEnabled ? 'Giọng đọc' : 'Tắt tiếng' }}</span>
+              </button>
+
+              <!-- Nút thu gọn / đóng hộp thoại -->
+              <button
+                type="button"
+                class="voice-action-btn"
+                title="Thu gọn khung nhận diện"
+                @click="voiceConsoleOpen = false"
+              >
+                <ChevronDown :size="14" />
+              </button>
+            </div>
           </div>
-          <div class="voice-bubble-text">
-            {{ voiceInterim || voiceLastHeard || 'Nói tên giấy tờ (căn cước, khai sinh...), số tờ hoặc lệnh "xong", "kế tiếp"...' }}
+
+          <!-- Thanh đo độ nhạy Micro thực tế (Audio VU Meter) -->
+          <div class="voice-vu-meter-wrap" :title="`Mức âm lượng mic: ${voiceVolume}%`">
+            <div
+              class="voice-vu-meter-bar"
+              :style="{ width: `${Math.max(4, Math.min(100, voiceVolume * 1.2))}%` }"
+              :class="{ hot: voiceVolume > 70 }"
+            />
+          </div>
+
+          <!-- Text Box hiển thị câu thoại người dùng theo thời gian thực -->
+          <div class="voice-speech-textbox-wrap">
+            <div class="textbox-label-row">
+              <span class="textbox-label">Lời nói của bạn:</span>
+              <span v-if="voiceListening" class="stream-badge">Thời gian thực</span>
+              <span v-else-if="voiceAiParsing" class="stream-badge thinking">AI đang bóc tách…</span>
+              <span v-else-if="voiceLastHeard" class="stream-badge success">Đã nghe xong</span>
+            </div>
+
+            <div class="voice-speech-display-box" :class="{ listening: voiceListening }">
+              <template v-if="voiceInterim">
+                <span class="text-interim">{{ voiceInterim }}</span>
+                <span class="live-cursor">|</span>
+              </template>
+              <template v-else-if="voiceLastHeard">
+                <span class="text-final">{{ voiceLastHeard }}</span>
+              </template>
+              <template v-else>
+                <span class="text-placeholder">
+                  {{ voiceListening ? 'Đang lắng nghe... Nói tên giấy tờ hoặc số tờ...' : 'Bấm mic hoặc giữ phím Space để nói...' }}
+                </span>
+              </template>
+            </div>
+          </div>
+
+          <!-- Khung hiển thị kết quả AI đã bóc tách được từ câu thoại -->
+          <div v-if="voiceLastAiResult" class="voice-ai-result-panel">
+            <div class="ai-result-header">
+              <Sparkles :size="12" class="text-brand" />
+              <span class="ai-result-title">AI đã nhận diện và trích xuất:</span>
+            </div>
+
+            <!-- Danh sách chip giấy tờ đã được AI chọn -->
+            <div v-if="voiceLastAiResult.items && voiceLastAiResult.items.length > 0" class="ai-chips-list">
+              <span
+                v-for="item in voiceLastAiResult.items"
+                :key="item"
+                class="badge badge-brand ai-item-chip"
+              >
+                <Check :size="11" /> {{ item }}
+              </span>
+            </div>
+            <div v-else class="hint" style="font-size: 11.5px">
+              (Không có giấy tờ nào trong câu nói)
+            </div>
+
+            <!-- Thông tin bổ sung: Lệnh / Số tờ / Dòng áp dụng -->
+            <div class="ai-meta-row">
+              <span v-if="voiceLastAiResult.targetRowNumber" class="ai-meta-tag">
+                🎯 Dòng {{ voiceLastAiResult.targetRowNumber }}
+              </span>
+              <span v-if="voiceLastAiResult.sheetNumber" class="ai-meta-tag">
+                📄 Số tờ: {{ voiceLastAiResult.sheetNumber }}
+              </span>
+              <span v-if="voiceLastAiResult.command" class="ai-meta-tag command">
+                ⚡ Lệnh: {{ voiceLastAiResult.command }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Hướng dẫn nhanh bên dưới -->
+          <div class="voice-console-footer">
+            <span class="hint" style="font-size: 11px">
+              💡 <strong>Space</strong> để nói · Nói <em>"bộ bảy"</em>, <em>"tiếp"</em>, <em>"xong"</em>
+            </span>
           </div>
         </div>
       </Transition>
 
-      <!-- Nút Mic AI với hiệu ứng sóng âm động -->
+      <!-- Nút Mic AI với hiệu ứng sóng âm động (Click để bật/tắt hoặc mở lại hộp thoại) -->
       <div class="floating-voice-pill-wrap">
         <button
           type="button"
@@ -5974,7 +6199,7 @@ onBeforeUnmount(() => {
               : 'Trình duyệt chưa hỗ trợ Web Speech API'
           "
           :disabled="!voiceSupported"
-          @click="toggleVoice"
+          @click="onMicPillClick"
           @mousedown="onPttMouseDown"
           @mouseup="onPttMouseUp"
           @mouseleave="onPttMouseUp"
@@ -6000,6 +6225,16 @@ onBeforeUnmount(() => {
             {{ voiceAiParsing ? 'AI Đang nghĩ' : (voiceListening ? 'Đang nghe…' : 'Mic AI') }}
           </span>
           <span class="voice-model-badge" title="Tích hợp Local AI Ollama Qwen 2.5">3B</span>
+
+          <!-- Nút nhỏ mở hộp thoại nếu đang đóng -->
+          <span
+            v-if="!voiceConsoleOpen && (voiceLastHeard || voiceLastAiResult)"
+            class="open-box-indicator"
+            title="Mở hộp thoại lời nói"
+            @click.stop="voiceConsoleOpen = true"
+          >
+            <ChevronUp :size="12" />
+          </span>
         </button>
       </div>
     </aside>
