@@ -30,36 +30,103 @@ if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ or not os.path.exists(os.environ
 
 from playwright.sync_api import sync_playwright
 
+import unicodedata
+
+ABBREVIATIONS = {
+    "dkkh": "dang ky ket hon",
+    "kkh": "ket hon",
+    "gcn": "giay chung nhan",
+    "cn": "chung nhan",
+    "gks": "giay khai sinh",
+    "ksk": "kham suc khoe",
+    "shk": "so ho khau",
+    "hk": "ho khau",
+    "nxc": "nhap xuat canh",
+    "xnc": "xuat nhap canh",
+    "xn": "xac nhan",
+    "xndt": "xac nhan doc than",
+    "ttdt": "tinh trang doc than",
+    "tthn": "tinh trang hon nhan",
+    "hntt": "hon nhan thuc te",
+    "cmnd": "chung minh nhan dan",
+    "cccd": "can cuoc cong dan",
+    "syll": "so yeu ly lich",
+    "ll": "ly lich",
+    "uq": "uy quyen",
+    "lh": "ly hon",
+    "tl": "trich luc",
+    "bs": "ban sao",
+    "bc": "ban chinh",
+    "ch": "cong ham",
+    "tt": "thi thuc",
+}
+
+def remove_accents(s):
+    if not s:
+        return ""
+    nfkd = unicodedata.normalize('NFKD', s)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).replace("đ", "d").replace("Đ", "D")
+
+def expand_abbreviations(s):
+    if not s:
+        return ""
+    words = re.split(r'(\b[a-zA-Z0-9]+\b)', s)
+    res = []
+    for w in words:
+        low = w.lower()
+        if low in ABBREVIATIONS:
+            res.append(ABBREVIATIONS[low])
+        else:
+            res.append(w)
+    return "".join(res)
+
 def normalize_text(text):
     if not text:
         return ""
-    s = text.strip().lower()
-    return re.sub(r'[^a-zA-Z0-9\u00C0-\u1EF9]', '', s)
+    s = remove_accents(text).strip().lower()
+    s = expand_abbreviations(s)
+    return re.sub(r'[^a-zA-Z0-9]', '', s)
 
 def is_match(header_title, item):
     h = normalize_text(header_title)
     it = normalize_text(item)
     if h == it:
         return True
-    if (h == 'cmnd' and it == 'chungminhnhandan') or (h == 'chungminhnhandan' and it == 'cmnd'):
+    if ('dexuat' in h and 'dexuat' in it):
         return True
-    if (h == 'hokhau' and 'hokhau' in it) or ('hokhau' in h and it == 'hokhau'):
+    if ('visa' in h and ('thithuc' in it or 'visa' in it)) or ('visa' in it and ('thithuc' in h or 'visa' in h)):
         return True
-    if (h == 'giaykhaisinh' and it == 'khaisinh') or (h == 'khaisinh' and it == 'giaykhaisinh'):
+    if ('chungminh' in h or 'cmnd' in h or 'cccd' in h or 'cancuoc' in h) and ('chungminh' in it or 'cmnd' in it or 'cccd' in it or 'cancuoc' in it):
         return True
-    if (h == 'giaychungnhankethon' and it == 'chungnhankethon') or (h == 'chungnhankethon' and it == 'giaychungnhankethon'):
+    if ('hokhau' in h and 'hokhau' in it):
         return True
-    if ('xacnhandocthan' in h and 'honnhanthucte' in h) and ('xacnhandocthan' in it and 'honnhanthucte' in it):
+    if ('khaisinh' in h and 'khaisinh' in it):
         return True
-    if (h == 'giaychungnhandocthan' and it == 'chungnhandocthan') or (h == 'chungnhandocthan' and it == 'giaychungnhandocthan'):
+    if ('kethon' in h or 'honthu' in h) and ('kethon' in it or 'honthu' in it):
+        h_dn = 'docthan' in h or 'chuakethon' in h
+        it_dn = 'docthan' in it or 'chuakethon' in it
+        if h_dn != it_dn:
+            return False
         return True
-    if (h == 'giayxacnhandocthan' and it == 'xacnhandocthan') or (h == 'xacnhandocthan' and it == 'giayxacnhandocthan'):
+    if ('docthan' in h or 'chuakethon' in h) and ('docthan' in it or 'chuakethon' in it):
+        h_tt = 'honnhanthucte' in h
+        it_tt = 'honnhanthucte' in it
+        if h_tt != it_tt:
+            return False
         return True
-    if (h == 'phieunhapxuatcanh' and it == 'phieuxuatnhapcanh') or (h == 'phieuxuatnhapcanh' and it == 'phieunhapxuatcanh'):
+    if 'chuyenkhoa' in it:
+        return 'chuyenkhoa' in h
+    if 'suckhoe' in it:
+        return 'suckhoe' in h
+    if ('nhapxuatcanh' in h or 'xuatnhapcanh' in h) and ('nhapxuatcanh' in it or 'xuatnhapcanh' in it):
         return True
-    if (h == 'tokhaituyenthe' and it == 'bankhaituyenthe') or (h == 'bankhaituyenthe' and it == 'tokhaituyenthe'):
+    if ('tuyenthe' in h and 'tuyenthe' in it):
         return True
-    if (h == 'giaychungnhandangkykhaisinh' and it == 'chungnhandangkykhaisinh') or (h == 'chungnhandangkykhaisinh' and it == 'giaychungnhandangkykhaisinh'):
+    if ('congham' in h and 'congham' in it):
+        return True
+    if ('lyhon' in h and 'lyhon' in it):
+        return True
+    if ('khaitu' in h or 'chungtu' in h or 'baotu' in h) and ('khaitu' in it or 'chungtu' in it or 'baotu' in it):
         return True
     return False
 

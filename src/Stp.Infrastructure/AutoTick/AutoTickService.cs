@@ -91,9 +91,8 @@ public sealed partial class AutoTickService : IAutoTickService
             if (string.IsNullOrWhiteSpace(summary)) continue;
 
             totalRows++;
-            var match = ParenthesesRegex.Match(summary);
-            bool hasParens = match.Success;
-            List<string> items = new();
+            var items = ExtractDocumentItemsFromSummary(summary);
+            bool hasParens = items.Count > 0;
             int tickedInRow = 0;
 
             // Check tick counts
@@ -108,7 +107,6 @@ public sealed partial class AutoTickService : IAutoTickService
             if (hasParens)
             {
                 rowsWithParens++;
-                items = SplitDocumentItems(match.Groups[1].Value);
 
                 // Match items against headers
                 var requiredHeaders = FindMatchingHeaders(items, headers);
@@ -381,10 +379,9 @@ public sealed partial class AutoTickService : IAutoTickService
                 var summary = sheet.Cell(r, 4).GetString().Trim();
                 if (string.IsNullOrWhiteSpace(summary)) continue;
 
-                var match = ParenthesesRegex.Match(summary);
-                if (!match.Success) continue;
+                var items = ExtractDocumentItemsFromSummary(summary);
+                if (items.Count == 0) continue;
 
-                var items = SplitDocumentItems(match.Groups[1].Value);
                 var requiredHeaders = FindMatchingHeaders(items, headers);
                 if (requiredHeaders.Count > 0 && requiredHeaders.Any(h => !IsCellTicked(sheet.Cell(r, h.ColumnIndex))))
                 {
@@ -597,10 +594,10 @@ public sealed partial class AutoTickService : IAutoTickService
                     var docsInRow = new List<string>();
                     if (!string.IsNullOrWhiteSpace(rItem.SummaryText))
                     {
-                        var parenMatch = ParenthesesRegex.Match(rItem.SummaryText);
-                        if (parenMatch.Success)
+                        var docs = ExtractDocumentItemsFromSummary(rItem.SummaryText);
+                        if (docs.Count > 0)
                         {
-                            docsInRow.AddRange(SplitDocumentItems(parenMatch.Groups[1].Value));
+                            docsInRow.AddRange(docs);
                         }
                     }
                     if (docsInRow.Count == 0 && rItem.Items.Count > 0)
@@ -743,13 +740,13 @@ public sealed partial class AutoTickService : IAutoTickService
                     else
                     {
                         var desiredDocs = new List<string>();
-                        // Người dùng yêu cầu: "đánh tick thì nhìn vào chữ mà làm" - trích xuất trực tiếp giấy tờ trong ngoặc đơn của trích yếu chữ
+                        // Người dùng yêu cầu: "đánh tick thì nhìn vào chữ mà làm" - trích xuất trực tiếp giấy tờ từ trích yếu chữ
                         if (!string.IsNullOrWhiteSpace(rItem.SummaryText))
                         {
-                            var parenMatch = ParenthesesRegex.Match(rItem.SummaryText);
-                            if (parenMatch.Success)
+                            var docs = ExtractDocumentItemsFromSummary(rItem.SummaryText);
+                            if (docs.Count > 0)
                             {
-                                desiredDocs.AddRange(SplitDocumentItems(parenMatch.Groups[1].Value));
+                                desiredDocs.AddRange(docs);
                             }
                         }
 
@@ -1188,15 +1185,14 @@ public sealed partial class AutoTickService : IAutoTickService
             }
             else
             {
-                var match = ParenthesesRegex.Match(summary);
-                if (!match.Success)
+                items = ExtractDocumentItemsFromSummary(summary);
+                if (items.Count == 0)
                 {
                     state.ProcessedRows++;
                     state.SkippedRowsCount++;
                     continue;
                 }
 
-                items = SplitDocumentItems(match.Groups[1].Value);
                 var matchingHeaders = FindMatchingHeaders(items, targetHeaders);
 
                 unmatchedItems = items.Where(it => !matchingHeaders.Any(h => IsSmartMatch(h.Title, it))).ToList();
@@ -1484,22 +1480,81 @@ public sealed partial class AutoTickService : IAutoTickService
         }
     }
 
+    /// <summary>
+    /// Tự động phát hiện dòng tiêu đề cột từ dòng 1 đến 8 dựa trên mật độ từ khóa tư pháp/hộ tịch,
+    /// tránh lỗi gán chết dòng 4 khi người dùng chèn/xóa dòng hoặc tiêu đề bị đẩy lên/xuống.
+    /// </summary>
+    private static int DetectHeaderRow(IXLWorksheet sheet)
+    {
+        int bestRow = 4;
+        int maxKeywordCount = 0;
+        int lastCol = Math.Min(sheet.LastColumnUsed()?.ColumnNumber() ?? 20, 100);
+
+        string[] headerKeywords = new[]
+        {
+            "khai sinh", "kết hôn", "hôn thú", "hộ khẩu", "nhân khẩu", "chứng minh",
+            "căn cước", "cmnd", "cccd", "sức khỏe", "thị thực", "visa", "tuyên thệ",
+            "độc thân", "hôn nhân", "công hàm", "trở ngại", "hộ tịch", "lý lịch",
+            "quốc tịch", "phiếu", "tờ khai", "đơn", "giấy"
+        };
+
+        for (int r = 1; r <= 8; r++)
+        {
+            int kwCount = 0;
+            for (int c = 9; c <= lastCol; c++)
+            {
+                var txt = sheet.Cell(r, c).GetString().Trim().ToLowerInvariant();
+                if (string.IsNullOrWhiteSpace(txt)) continue;
+                foreach (var kw in headerKeywords)
+                {
+                    if (txt.Contains(kw))
+                    {
+                        kwCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (kwCount > maxKeywordCount)
+            {
+                maxKeywordCount = kwCount;
+                bestRow = r;
+            }
+        }
+
+        return maxKeywordCount >= 2 ? bestRow : 4;
+    }
+
     private static List<AutoTickSheetHeader> ExtractHeaders(IXLWorksheet sheet)
     {
         var list = new List<AutoTickSheetHeader>();
         int lastCol = sheet.LastColumnUsed()?.ColumnNumber() ?? 9;
+        int headerRow = DetectHeaderRow(sheet);
         int lastRow = Math.Min(sheet.LastRowUsed()?.RowNumber() ?? 50, 500);
 
         for (int c = 9; c <= lastCol; c++) // Start at Col I
         {
-            var title = sheet.Cell(4, c).GetString().Trim();
+            var cell = sheet.Cell(headerRow, c);
+            var title = cell.GetString().Trim();
+
+            // Xử lý ô gộp (Merged Cells): Nếu ô ở headerRow rỗng, kiểm tra dòng phía trên
+            if (string.IsNullOrWhiteSpace(title) && headerRow > 1)
+            {
+                var cellAbove = sheet.Cell(headerRow - 1, c).GetString().Trim();
+                if (!string.IsNullOrWhiteSpace(cellAbove) && !cellAbove.All(char.IsDigit))
+                {
+                    title = cellAbove;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(title)) continue;
 
             title = NormalizeText(title);
 
             // Count existing ticks
             int tickCount = 0;
-            for (int r = 5; r <= lastRow; r++)
+            int startCheckRow = headerRow + 1;
+            for (int r = startCheckRow; r <= lastRow; r++)
             {
                 if (IsCellTicked(sheet.Cell(r, c))) tickCount++;
             }
@@ -1530,6 +1585,70 @@ public sealed partial class AutoTickService : IAutoTickService
                str.Equals("x", StringComparison.OrdinalIgnoreCase) ||
                str.Equals("v", StringComparison.OrdinalIgnoreCase) ||
                str == "✓";
+    }
+
+    /// <summary>
+    /// Trích xuất danh sách giấy tờ từ trích yếu một cách thông minh và linh hoạt:
+    /// - Hỗ trợ mọi kiểu ngoặc đơn (...), ngoặc vuông [...], ngoặc kép, dấu chấm/phẩy theo sau.
+    /// - Hỗ trợ các từ khóa liệt kê giấy tờ ("gồm:", "kèm theo:", "thành phần hồ sơ:", "giấy tờ:").
+    /// - Quét ngược từ cuối câu (nơi danh sách giấy tờ thường xuất hiện).
+    /// - Tự động tách các mục bằng dấu phẩy, chấm phẩy, dấu cộng, ngắt dòng.
+    /// - Tự động sửa lỗi thiếu dấu phẩy giữa các giấy tờ phổ biến (CMND sơ yếu lý lịch -> CMND, sơ yếu lý lịch).
+    /// </summary>
+    private static List<string> ExtractDocumentItemsFromSummary(string summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary)) return new List<string>();
+
+        string rawInside = string.Empty;
+
+        // 1. Quét tìm khối ngoặc từ cuối câu trở lên: (...) hoặc [...]
+        int lastCloseParen = summary.LastIndexOf(')');
+        if (lastCloseParen > 0)
+        {
+            int openParen = summary.LastIndexOf('(', lastCloseParen - 1);
+            if (openParen >= 0 && lastCloseParen > openParen)
+            {
+                var candidate = summary.Substring(openParen + 1, lastCloseParen - openParen - 1).Trim();
+                if (!string.IsNullOrWhiteSpace(candidate) && (candidate.Contains(',') || candidate.Contains(';') || candidate.Length > 2))
+                {
+                    rawInside = candidate;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(rawInside))
+        {
+            int lastCloseBracket = summary.LastIndexOf(']');
+            if (lastCloseBracket > 0)
+            {
+                int openBracket = summary.LastIndexOf('[', lastCloseBracket - 1);
+                if (openBracket >= 0 && lastCloseBracket > openBracket)
+                {
+                    var candidate = summary.Substring(openBracket + 1, lastCloseBracket - openBracket - 1).Trim();
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                    {
+                        rawInside = candidate;
+                    }
+                }
+            }
+        }
+
+        // 2. Nếu không có ngoặc, tìm theo từ khóa liệt kê: "gồm:", "kèm theo:", "thành phần hồ sơ:"
+        if (string.IsNullOrWhiteSpace(rawInside))
+        {
+            var matchKw = Regex.Match(summary, @"(?:gồm|kèm theo|thành phần hồ sơ|giấy tờ kèm|hồ sơ gồm)\s*[:;-]\s*(.+)$", RegexOptions.IgnoreCase);
+            if (matchKw.Success)
+            {
+                rawInside = matchKw.Groups[1].Value.Trim();
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(rawInside)) return new List<string>();
+
+        // Loại bỏ chú thích đuôi nếu có (ví dụ: "kèm bản chính", "bản gốc đối chiếu", các ký tự chấm cuối...)
+        rawInside = Regex.Replace(rawInside, @"[\.;\s]+$", "");
+
+        return SplitDocumentItems(rawInside);
     }
 
     private static List<string> SplitDocumentItems(string insideParens)
@@ -1585,12 +1704,86 @@ public sealed partial class AutoTickService : IAutoTickService
         return matched;
     }
 
+    private static readonly Dictionary<string, string> AbbreviationMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "đkkh", "đăng ký kết hôn" },
+        { "kkh", "kết hôn" },
+        { "gcn", "giấy chứng nhận" },
+        { "cn", "chứng nhận" },
+        { "gks", "giấy khai sinh" },
+        { "ksk", "khám sức khỏe" },
+        { "shk", "sổ hộ khẩu" },
+        { "hk", "hộ khẩu" },
+        { "nxc", "nhập xuất cảnh" },
+        { "xnc", "xuất nhập cảnh" },
+        { "xn", "xác nhận" },
+        { "xndt", "xác nhận độc thân" },
+        { "ttdt", "tình trạng độc thân" },
+        { "tthn", "tình trạng hôn nhân" },
+        { "hntt", "hôn nhân thực tế" },
+        { "cmnd", "chứng minh nhân dân" },
+        { "cccd", "căn cước công dân" },
+        { "syll", "sơ yếu lý lịch" },
+        { "ll", "lý lịch" },
+        { "uq", "ủy quyền" },
+        { "lh", "ly hôn" },
+        { "tl", "trích lục" },
+        { "bs", "bản sao" },
+        { "bc", "bản chính" },
+        { "ch", "công hàm" },
+        { "gtt", "giấy tờ" },
+        { "gt", "giấy tờ" },
+        { "tt", "thị thực" }
+    };
+
+    private static string ExpandAbbreviations(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        var words = Regex.Split(text, @"(\b[a-zA-ZàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđĐ]+\b)");
+        var sb = new StringBuilder();
+        foreach (var w in words)
+        {
+            if (AbbreviationMap.TryGetValue(w, out var expanded))
+            {
+                sb.Append(expanded);
+            }
+            else
+            {
+                sb.Append(w);
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string RemoveAccents(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        var normalizedString = text.Normalize(NormalizationForm.FormD);
+        var stringBuilder = new StringBuilder(normalizedString.Length);
+
+        foreach (var c in normalizedString)
+        {
+            var unicodeCategory = CharUnicodeInfo.GetUnicodeCategory(c);
+            if (unicodeCategory != UnicodeCategory.NonSpacingMark)
+            {
+                stringBuilder.Append(c);
+            }
+        }
+
+        return stringBuilder
+            .ToString()
+            .Normalize(NormalizationForm.FormC)
+            .Replace('đ', 'd')
+            .Replace('Đ', 'D');
+    }
+
     /// <summary>
     /// So khớp thông minh tên giấy tờ trích yếu với tiêu đề cột hồ sơ theo ngữ cảnh hành chính tư pháp:
     /// 1. Chuẩn hóa Form C, chữ thường, loại bỏ ngắt dòng và dấu cách thừa.
-    /// 2. Khử các lỗi chính tả/gõ nhầm phổ biến (sơ yếu lí/lý lịch, phiều/phiếu khám, đơn xi/đơn xin, thay đổitên...).
-    /// 3. So khớp các biến thể tương đương chính xác của giấy tờ hộ tịch (Visa/Thị thực, Đơn xin kết hôn/Tờ khai đăng ký kết hôn,
-    ///    Không trở ngại kết hôn, Tuyên thệ, Hộ tịch, Độc thân, Khai sinh/Trích lục khai sinh...).
+    /// 2. Mở rộng từ viết tắt hành chính (ĐKKH, GCN, GKS, KSK, SHK, NXC, XNDT, HNTT, CMND...).
+    /// 3. So khớp không phân biệt dấu tiếng Việt (Form D ASCII fallback).
+    /// 4. Khử các lỗi chính tả/gõ nhầm phổ biến (sơ yếu lí/lý lịch, phiều/phiếu khám, đơn xi/đơn xin...).
+    /// 5. So khớp ngữ nghĩa tương đương sâu của các giấy tờ tư pháp hộ tịch.
     /// </summary>
     private static bool IsSmartMatch(string headerTitle, string documentItem)
     {
@@ -1610,10 +1803,20 @@ public sealed partial class AutoTickService : IAutoTickService
             return t.Trim();
         }
 
-        var h = CleanAndNormalize(headerTitle);
-        var it = CleanAndNormalize(documentItem);
+        var hRaw = CleanAndNormalize(headerTitle);
+        var itRaw = CleanAndNormalize(documentItem);
+
+        if (hRaw == itRaw) return true;
+
+        var h = ExpandAbbreviations(hRaw);
+        var it = ExpandAbbreviations(itRaw);
 
         if (h == it) return true;
+
+        // So khớp không dấu
+        var hNoAccent = RemoveAccents(h);
+        var itNoAccent = RemoveAccents(it);
+        if (hNoAccent == itNoAccent) return true;
 
         // Bỏ ký tự đặc biệt, chỉ giữ chữ và số
         var hClean = Regex.Replace(h, @"[^\p{L}\p{Nd}\s]", "");
@@ -1621,30 +1824,36 @@ public sealed partial class AutoTickService : IAutoTickService
         if (hClean == itClean) return true;
 
         // 0. Phiếu đề xuất / Tờ đề xuất / Đề xuất
-        if (h.Contains("đề xuất") && it.Contains("đề xuất")) return true;
+        if ((h.Contains("đề xuất") || hNoAccent.Contains("de xuat")) &&
+            (it.Contains("đề xuất") || itNoAccent.Contains("de xuat"))) return true;
 
         // 1. Visa <-> Thị thực
-        if ((h == "visa" || h.Contains("visa")) && (it.Contains("thị thực") || it == "visa")) return true;
-        if ((it == "visa" || it.Contains("visa")) && (h.Contains("thị thực") || h == "visa")) return true;
+        if ((h.Contains("visa") || hNoAccent.Contains("visa")) && (it.Contains("thị thực") || itNoAccent.Contains("thi thuc") || it.Contains("visa"))) return true;
+        if ((it.Contains("visa") || itNoAccent.Contains("visa")) && (h.Contains("thị thực") || hNoAccent.Contains("thi thuc") || h.Contains("visa"))) return true;
 
         // 2. CMND / CCCD / Căn cước / Chứng minh nhân dân
-        if ((h == "cmnd" || h.Contains("chứng minh nhân dân")) && (it == "cmnd" || it.Contains("chứng minh nhân dân") || it == "cccd" || it.Contains("căn cước"))) return true;
-        if ((it == "cmnd" || it.Contains("chứng minh nhân dân")) && (h == "cmnd" || h.Contains("chứng minh nhân dân"))) return true;
+        bool hCmnd = h.Contains("chứng minh") || h.Contains("cmnd") || h.Contains("cccd") || h.Contains("căn cước") || hNoAccent.Contains("chung minh");
+        bool itCmnd = it.Contains("chứng minh") || it.Contains("cmnd") || it.Contains("cccd") || it.Contains("căn cước") || itNoAccent.Contains("chung minh");
+        if (hCmnd && itCmnd) return true;
 
         // 3. Hộ chiếu / Passport
-        if ((h.Contains("hộ chiếu") || h.Contains("passport")) && (it.Contains("hộ chiếu") || it.Contains("passport"))) return true;
+        if ((h.Contains("hộ chiếu") || h.Contains("passport") || hNoAccent.Contains("ho chieu")) &&
+            (it.Contains("hộ chiếu") || it.Contains("passport") || itNoAccent.Contains("ho chieu"))) return true;
 
         // 4. Bộ công hàm / Bản công hàm / Công hàm
-        if (h.Contains("công hàm") && it.Contains("công hàm")) return true;
+        if ((h.Contains("công hàm") || hNoAccent.Contains("cong ham")) &&
+            (it.Contains("công hàm") || itNoAccent.Contains("cong ham"))) return true;
 
         // 5. Không trở ngại kết hôn
         if ((h.Contains("không") && h.Contains("trở ngại")) && (it.Contains("không") && it.Contains("trở ngại"))) return true;
 
         // 6. Tuyên thệ (Tờ khai tuyên thệ, Bản khai tuyên thệ, Cam kết tuyên thệ, Bản tuyên thệ sự thật...)
-        if (h.Contains("tuyên thệ") && it.Contains("tuyên thệ")) return true;
+        if ((h.Contains("tuyên thệ") || hNoAccent.Contains("tuyen the")) &&
+            (it.Contains("tuyên thệ") || itNoAccent.Contains("tuyen the"))) return true;
 
         // 7. Đăng ký hộ tịch (Tờ đăng ký hộ tịch, Tờ khai đăng ký hộ tịch...)
-        if (h.Contains("hộ tịch") && it.Contains("hộ tịch"))
+        if ((h.Contains("hộ tịch") || hNoAccent.Contains("ho tich")) &&
+            (it.Contains("hộ tịch") || itNoAccent.Contains("ho tich")))
         {
             if (h.Contains("thay đổi") || h.Contains("cải chính")) return it.Contains("thay đổi") || it.Contains("cải chính");
             if (it.Contains("thay đổi") || it.Contains("cải chính")) return false;
@@ -1652,68 +1861,87 @@ public sealed partial class AutoTickService : IAutoTickService
         }
 
         // 8. Độc thân & Hôn nhân thực tế
-        bool hHonNhanThucTe = h.Contains("hôn nhân thực tế");
-        bool itHonNhanThucTe = it.Contains("hôn nhân thực tế");
+        bool hHonNhanThucTe = h.Contains("hôn nhân thực tế") || hNoAccent.Contains("hon nhan thuc te");
+        bool itHonNhanThucTe = it.Contains("hôn nhân thực tế") || itNoAccent.Contains("hon nhan thuc te");
         if (hHonNhanThucTe != itHonNhanThucTe) return false;
         if (hHonNhanThucTe && itHonNhanThucTe) return true;
 
         // 9. Độc thân / Chưa kết hôn (Giấy xác nhận độc thân, Giấy chứng nhận độc thân, Đơn xin xác nhận độc thân...)
-        if ((h.Contains("độc thân") || h.Contains("chưa kết hôn")) && (it.Contains("độc thân") || it.Contains("chưa kết hôn"))) return true;
+        bool hDocThan = h.Contains("độc thân") || h.Contains("chưa kết hôn") || hNoAccent.Contains("doc than") || hNoAccent.Contains("chua ket hon");
+        bool itDocThan = it.Contains("độc thân") || it.Contains("chưa kết hôn") || itNoAccent.Contains("doc than") || itNoAccent.Contains("chua ket hon");
+        if (hDocThan && itDocThan) return true;
 
         // 10. Tình trạng hôn nhân
-        if (h.Contains("tình trạng hôn nhân") && it.Contains("tình trạng hôn nhân")) return true;
+        if ((h.Contains("tình trạng hôn nhân") || hNoAccent.Contains("tinh trang hon nhan")) &&
+            (it.Contains("tình trạng hôn nhân") || itNoAccent.Contains("tinh trang hon nhan"))) return true;
 
         // 11. Đơn xin kết hôn / Tờ khai đăng ký kết hôn / Giấy khai đăng ký kết hôn / Cho phép kết hôn
-        bool hKetHon = h.Contains("kết hôn") || h.Contains("hôn thú");
-        bool itKetHon = it.Contains("kết hôn") || it.Contains("hôn thú");
+        bool hKetHon = h.Contains("kết hôn") || h.Contains("hôn thú") || hNoAccent.Contains("ket hon") || hNoAccent.Contains("hon thu");
+        bool itKetHon = it.Contains("kết hôn") || it.Contains("hôn thú") || itNoAccent.Contains("ket hon") || itNoAccent.Contains("hon thu");
         if (hKetHon && itKetHon)
         {
-            bool hChungNhan = h.Contains("chứng nhận") || h.Contains("xác nhận");
-            bool itChungNhan = it.Contains("chứng nhận") || it.Contains("xác nhận");
-            bool hChoPhep = h.Contains("cho phép") || h.Contains("được phép");
-            bool itChoPhep = it.Contains("cho phép") || it.Contains("được phép");
+            bool hChungNhan = h.Contains("chứng nhận") || h.Contains("xác nhận") || hNoAccent.Contains("chung nhan") || hNoAccent.Contains("xac nhan");
+            bool itChungNhan = it.Contains("chứng nhận") || it.Contains("xác nhận") || itNoAccent.Contains("chung nhan") || itNoAccent.Contains("xac nhan");
+            bool hChoPhep = h.Contains("cho phép") || h.Contains("được phép") || hNoAccent.Contains("cho phep");
+            bool itChoPhep = it.Contains("cho phép") || it.Contains("được phép") || itNoAccent.Contains("cho phep");
 
             if (hChoPhep || itChoPhep) return hChoPhep && itChoPhep;
             if (hChungNhan && itChungNhan) return true;
             if (!hChungNhan && !itChungNhan) return true;
-            if ((h.Contains("tờ khai") || h.Contains("đơn xin") || h.Contains("giấy khai") || h.Contains("tờ báo cáo")) &&
-                (it.Contains("tờ khai") || it.Contains("đơn xin") || it.Contains("giấy khai") || it.Contains("tờ báo cáo")))
+            if ((h.Contains("tờ khai") || h.Contains("đơn xin") || h.Contains("giấy khai") || h.Contains("tờ báo cáo") || hNoAccent.Contains("to khai") || hNoAccent.Contains("don xin")) &&
+                (it.Contains("tờ khai") || it.Contains("đơn xin") || it.Contains("giấy khai") || it.Contains("tờ báo cáo") || itNoAccent.Contains("to khai") || itNoAccent.Contains("don xin")))
             {
                 return true;
             }
         }
 
         // 12. Khai sinh / Khai sanh / Trích bộ lục khai sinh
-        if ((h.Contains("khai sinh") || h.Contains("khai sanh")) && (it.Contains("khai sinh") || it.Contains("khai sanh")))
+        bool hKhaiSinh = h.Contains("khai sinh") || h.Contains("khai sanh") || hNoAccent.Contains("khai sinh") || hNoAccent.Contains("khai sanh");
+        bool itKhaiSinh = it.Contains("khai sinh") || it.Contains("khai sanh") || itNoAccent.Contains("khai sinh") || itNoAccent.Contains("khai sanh");
+        if (hKhaiSinh && itKhaiSinh)
         {
-            bool hDanhDu = h.Contains("danh dự");
-            bool itDanhDu = it.Contains("danh dự");
+            bool hDanhDu = h.Contains("danh dự") || hNoAccent.Contains("danh du");
+            bool itDanhDu = it.Contains("danh dự") || itNoAccent.Contains("danh du");
             if (hDanhDu != itDanhDu) return false;
             return true;
         }
 
         // 13. Hộ khẩu / Nhân khẩu
-        if (h.Contains("nhân khẩu") && it.Contains("nhân khẩu")) return true;
-        if (h.Contains("hộ khẩu") && (it.Contains("hộ khẩu") || it.Contains("sổ hộ khẩu"))) return true;
+        if ((h.Contains("nhân khẩu") || hNoAccent.Contains("nhan khau")) &&
+            (it.Contains("nhân khẩu") || itNoAccent.Contains("nhan khau"))) return true;
+        if ((h.Contains("hộ khẩu") || hNoAccent.Contains("ho khau")) &&
+            (it.Contains("hộ khẩu") || itNoAccent.Contains("ho khau"))) return true;
 
         // 14. Khám sức khỏe & Chứng chỉ chuyên khoa (Tách biệt hoàn toàn - đây là 2 loại giấy tờ độc lập trong bộ đăng ký kết hôn)
-        bool hChuyenKhoa = h.Contains("chuyên khoa");
-        bool itChuyenKhoa = it.Contains("chuyên khoa");
-        bool hSucKhoe = h.Contains("sức khỏe");
-        bool itSucKhoe = it.Contains("sức khỏe");
+        bool hChuyenKhoa = h.Contains("chuyên khoa") || hNoAccent.Contains("chuyen khoa");
+        bool itChuyenKhoa = it.Contains("chuyên khoa") || itNoAccent.Contains("chuyen khoa");
+        bool hSucKhoe = h.Contains("sức khỏe") || hNoAccent.Contains("suc khoe");
+        bool itSucKhoe = it.Contains("sức khỏe") || itNoAccent.Contains("suc khoe");
 
         if (itChuyenKhoa) return hChuyenKhoa;
         if (itSucKhoe) return hSucKhoe;
 
         // 15. Nhập xuất cảnh / Xuất nhập cảnh
-        if ((h.Contains("nhập xuất cảnh") || h.Contains("xuất nhập cảnh")) && (it.Contains("nhập xuất cảnh") || it.Contains("xuất nhập cảnh"))) return true;
+        bool hNxc = h.Contains("nhập xuất cảnh") || h.Contains("xuất nhập cảnh") || hNoAccent.Contains("nhap xuat canh") || hNoAccent.Contains("xuat nhap canh");
+        bool itNxc = it.Contains("nhập xuất cảnh") || it.Contains("xuất nhập cảnh") || itNoAccent.Contains("nhap xuat canh") || itNoAccent.Contains("xuat nhap canh");
+        if (hNxc && itNxc) return true;
 
         // 16. Ly hôn
-        if (h.Contains("ly hôn") && it.Contains("ly hôn")) return true;
+        if ((h.Contains("ly hôn") || hNoAccent.Contains("ly hon")) &&
+            (it.Contains("ly hôn") || itNoAccent.Contains("ly hon"))) return true;
 
         // 17. Khai tử / Chứng tử / Báo tử
-        if ((h.Contains("khai tử") || h.Contains("chứng tử") || h.Contains("báo tử")) &&
-            (it.Contains("khai tử") || it.Contains("chứng tử") || it.Contains("báo tử"))) return true;
+        bool hTu = h.Contains("khai tử") || h.Contains("chứng tử") || h.Contains("báo tử") || hNoAccent.Contains("khai tu") || hNoAccent.Contains("chung tu") || hNoAccent.Contains("bao tu");
+        bool itTu = it.Contains("khai tử") || it.Contains("chứng tử") || it.Contains("báo tử") || itNoAccent.Contains("khai tu") || itNoAccent.Contains("chung tu") || itNoAccent.Contains("bao tu");
+        if (hTu && itTu) return true;
+
+        // 18. Ủy quyền
+        if ((h.Contains("ủy quyền") || hNoAccent.Contains("uy quyen")) &&
+            (it.Contains("ủy quyền") || itNoAccent.Contains("uy quyen"))) return true;
+
+        // 19. Sơ yếu lý lịch / Lý lịch
+        if ((h.Contains("lý lịch") || hNoAccent.Contains("ly lich")) &&
+            (it.Contains("lý lịch") || itNoAccent.Contains("ly lich"))) return true;
 
         return false;
     }

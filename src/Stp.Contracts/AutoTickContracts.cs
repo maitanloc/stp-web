@@ -51,7 +51,7 @@ public sealed class AutoTickStartRequest
     public int? NumberTo { get; set; }
     public IReadOnlyList<string>? SelectedHeaders { get; set; }
     public bool OnlyUnticked { get; set; }
-    public bool SkipTicking { get; set; } = true;
+    public bool SkipTicking { get; set; } = false;
     public string StatusA { get; set; } = "đã nhập";
 }
 
