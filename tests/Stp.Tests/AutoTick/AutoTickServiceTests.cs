@@ -389,9 +389,9 @@ public sealed class AutoTickServiceTests
 
             Assert.True(res.Success);
             Assert.Equal(1, res.SyncedRowsCount);
-            Assert.Equal(2, res.TickedCellsCount); // Cả "phiếu đề xuất" và "chứng nhận hạnh kiểm" đều được tick!
-            Assert.Equal(1, res.NewHeadersCount);
-            Assert.Contains("chứng nhận hạnh kiểm", res.NewHeaderTitles);
+            // Người dùng yêu cầu: Cấm thêm cột mới, chỉ tick những gì đã có sẵn
+            Assert.Equal(1, res.TickedCellsCount); // Chỉ "phiếu đề xuất" (có sẵn ở Col I) được tick!
+            Assert.Equal(0, res.NewHeadersCount); // Không tự ý tạo thêm cột
 
             // Verify the saved file
             using var resultWb = new XLWorkbook(tempFile);
@@ -403,15 +403,9 @@ public sealed class AutoTickServiceTests
             // 2. Col J (10) was not in summary, remains unticked
             Assert.True(resultWs.Cell(5, 10).IsEmpty() || !resultWs.Cell(5, 10).GetBoolean());
 
-            // 3. Col K (11) was automatically created with header "chứng nhận hạnh kiểm"
-            Assert.Equal("chứng nhận hạnh kiểm", resultWs.Cell(4, 11).GetString().Trim());
-
-            // 4. "nếu có thể tick cột mới thành true được thì cứ làm" -> Row 5 Col K (11) IS ticked to TRUE!
-            Assert.True(resultWs.Cell(5, 11).GetBoolean());
-
-            // 5. Formula H must cover up to K4 (last column)
-            Assert.True(resultWs.Cell(5, 8).HasFormula);
-            Assert.Contains("K$4", resultWs.Cell(5, 8).FormulaA1);
+            // 3. Col K (11) must NOT be created
+            Assert.True(resultWs.Cell(4, 11).IsEmpty());
+            Assert.True(resultWs.Cell(5, 11).IsEmpty());
         }
         finally
         {
@@ -420,7 +414,7 @@ public sealed class AutoTickServiceTests
     }
 
     [Fact]
-    public async Task ExecuteJob_AutoAddsMissingColumnHeader_AndTicksTrue()
+    public async Task ExecuteJob_DoesNotAddMissingColumnHeader_OnlyTicksExisting()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), $"test_job_newcol_{Guid.NewGuid():N}.xlsx");
         try
@@ -459,7 +453,7 @@ public sealed class AutoTickServiceTests
 
             Assert.NotNull(status);
             Assert.Equal("Completed", status.Status);
-            Assert.Equal(2, status.NewlyTickedCellsCount); // Cả phiếu đề xuất và tập tục đời sống đều được tick!
+            Assert.Equal(1, status.NewlyTickedCellsCount); // Chỉ phiếu đề xuất được tick; không tự thêm cột
 
             var result = await service.GetResultFileAsync(jobId);
             Assert.NotNull(result);
@@ -467,14 +461,14 @@ public sealed class AutoTickServiceTests
             using var resultWb = new XLWorkbook(result.Value.Stream);
             var resultWs = resultWb.Worksheet("1997");
 
-            // Header created in Col 11
-            Assert.Equal("tập tục đời sống", resultWs.Cell(4, 11).GetString().Trim());
+            // Không tự thêm header ở cột 11
+            Assert.True(string.IsNullOrWhiteSpace(resultWs.Cell(4, 11).GetString()));
 
             // Col 9 is ticked
             Assert.True(resultWs.Cell(5, 9).GetBoolean());
 
-            // Col 11 IS ticked to TRUE!
-            Assert.True(resultWs.Cell(5, 11).GetBoolean());
+            // Col 11 is NOT ticked (empty or false)
+            Assert.True(resultWs.Cell(5, 11).IsEmpty() || (resultWs.Cell(5, 11).DataType == XLDataType.Boolean && !resultWs.Cell(5, 11).GetBoolean()));
         }
         finally
         {
@@ -531,8 +525,7 @@ public sealed class AutoTickServiceTests
             var res = await service.SyncSummaryRowsToOneDriveAsync(req);
 
             Assert.True(res.Success);
-            Assert.Equal(1, res.NewHeadersCount);
-            Assert.Contains("loại giấy tờ mới hoàn toàn", res.NewHeaderTitles);
+            Assert.Equal(0, res.NewHeadersCount); // Tuyệt đối cấm thêm cột mới
 
             using var resultWb = new XLWorkbook(tempFile);
             var resultWs = resultWb.Worksheet("1997");
@@ -544,15 +537,9 @@ public sealed class AutoTickServiceTests
             }
             Assert.Equal("giấy tờ kiểm chứng cột 50", resultWs.Cell(4, 50).GetString().Trim());
 
-            // 2. The new column must be strictly placed at outermost edge: Col 51
-            Assert.Equal("loại giấy tờ mới hoàn toàn", resultWs.Cell(4, 51).GetString().Trim());
-
-            // 3. New column in Row 5 is ticked to true
-            Assert.True(resultWs.Cell(5, 51).GetBoolean());
-
-            // 4. Formula H must cover up to the new outermost column (Col 51)
-            string col51Letter = resultWs.Column(51).ColumnLetter();
-            Assert.Contains($"{col51Letter}$4", resultWs.Cell(5, 8).FormulaA1);
+            // 2. Col 51 must remain empty - NO new column added
+            Assert.True(resultWs.Cell(4, 51).IsEmpty());
+            Assert.True(resultWs.Cell(5, 51).IsEmpty());
         }
         finally
         {

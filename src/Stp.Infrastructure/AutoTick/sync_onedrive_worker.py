@@ -314,23 +314,9 @@ def run_sync(input_file, output_file):
             page.keyboard.press("Enter")
             time.sleep(0.05)
 
-        # Tự động thêm các cột mới vào dòng 4 nếu có loại giấy tờ chưa có trên sheet ("tự thêm vào khỏi tick nhé")
+        # Tuyệt đối không thêm cột mới theo yêu cầu: chỉ làm những gì đã có sẵn
         skip_ticking = data.get('skipTicking', True)
-        new_headers = data.get('newHeaders', []) if not skip_ticking else []
         new_headers_created = 0
-        if new_headers and not skip_ticking:
-            print(f"INFO:Adding {len(new_headers)} new header columns to sheet {sheet_name}...", flush=True)
-            for nh in new_headers:
-                col_letter = nh.get('colLetter')
-                h_title = nh.get('title')
-                if col_letter and h_title:
-                    coord = f"{col_letter}4"
-                    try:
-                        set_cell_value(coord, h_title)
-                        new_headers_created += 1
-                        print(f"PROGRESS_NEW_HEADER:{coord}:{h_title}", flush=True)
-                    except Exception as ex_nh:
-                        print(f"WARN:Failed to set new header at {coord}: {ex_nh}", flush=True)
 
         for r_item in rows:
             r_idx = r_item.get('rowIndex')

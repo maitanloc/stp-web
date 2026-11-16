@@ -583,65 +583,9 @@ public sealed partial class AutoTickService : IAutoTickService
             bool skipTicking = request.SkipTicking;
             string defaultStatusA = !string.IsNullOrWhiteSpace(request.StatusA) ? request.StatusA : "đã nhập";
 
+            // Người dùng yêu cầu: Tuyệt đối không thêm cột mới, có tiêu đề nào thì đánh tiêu đề đó
             var newHeadersToAdd = new List<object>();
             var newHeaderTitles = new List<string>();
-
-            // Pre-scan: Chỉ tìm tất cả các loại giấy tờ xuất hiện trong trích yếu và thêm cột nếu KHÔNG bỏ tick
-            if (!skipTicking)
-            {
-                foreach (var rItem in request.Rows)
-                {
-                    var docsInRow = new List<string>();
-                    if (!string.IsNullOrWhiteSpace(rItem.SummaryText))
-                    {
-                        var docs = ExtractDocumentItemsFromSummary(rItem.SummaryText);
-                        if (docs.Count > 0)
-                        {
-                            docsInRow.AddRange(docs);
-                        }
-                    }
-                    if (docsInRow.Count == 0 && rItem.Items.Count > 0)
-                    {
-                        docsInRow.AddRange(rItem.Items);
-                    }
-
-                    foreach (var doc in docsInRow)
-                    {
-                        var cleanDoc = doc.Trim();
-                        if (string.IsNullOrWhiteSpace(cleanDoc)) continue;
-
-                        // Kiểm tra xem giấy tờ này đã khớp với cột nào trong sheet (cũ hoặc mới thêm) chưa
-                        if (!headers.Any(h => IsSmartMatch(h.Title, cleanDoc)))
-                        {
-                            lastColNumber++;
-                            string newColLetter = sheet.Column(lastColNumber).ColumnLetter();
-
-                            // Thêm tiêu đề vào dòng 4 của sheet
-                            sheet.Cell(4, lastColNumber).SetValue(cleanDoc);
-
-                            var newHeader = new AutoTickSheetHeader
-                            {
-                                ColumnIndex = lastColNumber,
-                                ColumnLetter = newColLetter,
-                                Title = cleanDoc,
-                                ExistingTicksCount = 0
-                            };
-                            headers.Add(newHeader);
-                            newHeaderTitles.Add(cleanDoc);
-
-                            newHeadersToAdd.Add(new
-                            {
-                                colLetter = newColLetter,
-                                colIndex = lastColNumber,
-                                title = cleanDoc
-                            });
-
-                            _logger.LogInformation("Tự động thêm cột mới '{Title}' tại {ColLetter}4 trên sheet '{Sheet}' và sẵn sàng tick",
-                                cleanDoc, newColLetter, sheetName);
-                        }
-                    }
-                }
-            }
 
             string lastColLetter = sheet.Column(lastColNumber).ColumnLetter();
 
@@ -1194,46 +1138,6 @@ public sealed partial class AutoTickService : IAutoTickService
                 }
 
                 var matchingHeaders = FindMatchingHeaders(items, targetHeaders);
-
-                unmatchedItems = items.Where(it => !matchingHeaders.Any(h => IsSmartMatch(h.Title, it))).ToList();
-
-                // Yêu cầu: Tự động thêm cột mới vào dòng 4 và tick ô thành TRUE
-                foreach (var it in unmatchedItems)
-                {
-                    var cleanIt = it.Trim();
-                    if (string.IsNullOrWhiteSpace(cleanIt)) continue;
-
-                    var existingH = allHeaders.FirstOrDefault(h => IsSmartMatch(h.Title, cleanIt));
-                    if (existingH is null)
-                    {
-                        jobLastColNumber++;
-                        string newColLetter = sheet.Column(jobLastColNumber).ColumnLetter();
-                        sheet.Cell(4, jobLastColNumber).SetValue(cleanIt);
-
-                        existingH = new AutoTickSheetHeader
-                        {
-                            ColumnIndex = jobLastColNumber,
-                            ColumnLetter = newColLetter,
-                            Title = cleanIt,
-                            ExistingTicksCount = 0
-                        };
-                        allHeaders.Add(existingH);
-                        newHeadersToAddJob.Add(new
-                        {
-                            colLetter = newColLetter,
-                            colIndex = jobLastColNumber,
-                            title = cleanIt
-                        });
-                    }
-
-                    var newCell = sheet.Cell(r, existingH.ColumnIndex);
-                    if (!IsCellTicked(newCell))
-                    {
-                        newCell.SetValue(true);
-                        newlyTickedCols.Add(existingH.Title);
-                        state.NewlyTickedCellsCount++;
-                    }
-                }
 
                 foreach (var h in matchingHeaders)
                 {
