@@ -1136,8 +1136,8 @@ Nhiệm vụ:
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var timeoutSec = _configuration.GetValue<int>("Ollama:TimeoutSeconds", 5);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(2, timeoutSec)));
+            var timeoutSec = _configuration.GetValue<int>("Ollama:TimeoutSeconds", 25);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, timeoutSec)));
 
             var client = _httpClientFactory.CreateClient();
             client.BaseAddress = new Uri(baseUrl);

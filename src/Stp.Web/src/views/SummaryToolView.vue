@@ -1506,6 +1506,9 @@ async function quickExportFiltered(): Promise<void> {
  * Parser + từ vựng nằm ở lib/voiceParser.ts (thuần, test được).
  */
 
+const voiceInputText = ref('')
+const voiceTextAreaRef = ref<HTMLTextAreaElement | null>(null)
+
 const {
   supported: voiceSupported,
   listening: voiceListening,
@@ -1514,12 +1517,19 @@ const {
   start: startVoiceInput,
   stop: stopVoiceInput,
   toggle: toggleVoiceInput,
+  clear: clearVoiceInput,
 } = useVoiceInput({
   onFinal: (text) => {
     void handleVoiceFinal(text)
   },
   onInterim: (text) => {
     voiceInterim.value = text
+    voiceInputText.value = text
+    nextTick(() => {
+      if (voiceTextAreaRef.value) {
+        voiceTextAreaRef.value.scrollTop = voiceTextAreaRef.value.scrollHeight
+      }
+    })
   },
   onError: (message) => {
     if (message) toast.error('Không nghe được', message)
@@ -1542,10 +1552,23 @@ function startVoice(): void {
 }
 
 function stopVoice(): void {
-  stopVoiceInput()
-  if (!voiceListening.value) {
-    voiceInterim.value = ''
+  stopVoiceInput(true)
+}
+
+function submitVoiceText(): void {
+  const text = (voiceInputText.value || voiceInterim.value || '').trim()
+  if (!text) return
+  if (voiceListening.value) {
+    stopVoiceInput(false)
   }
+  clearVoiceInput()
+  void handleVoiceFinal(text)
+}
+
+function clearVoiceText(): void {
+  clearVoiceInput()
+  voiceInterim.value = ''
+  voiceInputText.value = ''
 }
 
 function onPttMouseDown(): void {
@@ -4095,15 +4118,18 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if="voiceListening" class="voice-bar" role="status" aria-live="polite">
-          <span class="voice-dot" />
+        <div v-if="voiceListening || voiceLastHeard" class="voice-bar" role="status" aria-live="polite">
+          <span class="voice-dot" :class="{ 'is-listening': voiceListening }" />
           <span class="voice-live">
-            {{ voiceInterim || 'Đang nghe… nói “kết hôn — căn cước, hộ khẩu, hai ảnh”, hoặc “xong”, “kế tiếp”, “bộ bảy”, “lọc kết hôn 2025”' }}
+            <strong>{{ voiceListening ? '🎙️ Đang nghe:' : 'Đã nghe:' }}</strong>
+            {{ voiceInputText || voiceInterim || voiceLastHeard || 'Nói tên giấy tờ hoặc lệnh xong, tiếp, bộ bảy...' }}
           </span>
-          <span v-if="voiceLastHeard" class="voice-heard" :title="`Câu vừa nghe: ${voiceLastHeard}`">
-            Đã nghe: {{ voiceLastHeard }}
+          <span v-if="voiceLastHeard && voiceListening" class="voice-heard" :title="`Câu vừa nghe: ${voiceLastHeard}`">
+            (Trước đó: {{ voiceLastHeard }})
           </span>
-          <button class="btn btn-ghost btn-sm" type="button" @click="toggleVoice">Tắt mic</button>
+          <button class="btn btn-ghost btn-sm" type="button" @click="toggleVoice">
+            {{ voiceListening ? 'Tắt mic' : 'Bật mic' }}
+          </button>
         </div>
 
         <div class="card-body stack" style="gap: 14px">
@@ -6064,7 +6090,7 @@ onBeforeUnmount(() => {
       <!-- Khung nhận diện giọng nói & Text Box trực tiếp -->
       <Transition name="voice-bubble">
         <div
-          v-if="voiceConsoleOpen && (voiceListening || voiceAiParsing || voiceLastHeard || voiceInterim || voiceLastAiResult)"
+          v-if="voiceConsoleOpen && (voiceListening || voiceAiParsing || voiceLastHeard || voiceInterim || voiceInputText || voiceLastAiResult)"
           class="voice-console-card"
           role="region"
           aria-label="Khung nhận diện giọng nói và AI"
@@ -6077,7 +6103,7 @@ onBeforeUnmount(() => {
                 <Sparkles v-else-if="voiceAiParsing" :size="13" class="spin-icon text-amber" />
                 <span v-else class="ready-dot" />
               </div>
-              <strong style="font-size: 13px">Nhận diện giọng nói & AI</strong>
+              <strong style="font-size: 13px">Hộp thoại Giọng nói & AI</strong>
               <span class="voice-model-pill">{{ voiceLastAiModel || 'Qwen 2.5 3B' }}</span>
             </div>
 
@@ -6119,25 +6145,72 @@ onBeforeUnmount(() => {
           <!-- Text Box hiển thị câu thoại người dùng theo thời gian thực -->
           <div class="voice-speech-textbox-wrap">
             <div class="textbox-label-row">
-              <span class="textbox-label">Lời nói của bạn:</span>
-              <span v-if="voiceListening" class="stream-badge">Thời gian thực</span>
-              <span v-else-if="voiceAiParsing" class="stream-badge thinking">AI đang bóc tách…</span>
-              <span v-else-if="voiceLastHeard" class="stream-badge success">Đã nghe xong</span>
+              <span class="textbox-label">
+                <span v-if="voiceListening" class="live-recording-dot" />
+                {{ voiceListening ? 'Đang thu âm lời nói (Live):' : 'Khung thoại & Lời nói:' }}
+              </span>
+              <div class="textbox-badge-group">
+                <span v-if="voiceListening" class="stream-badge live-streaming">🔴 Đang nói trực tiếp</span>
+                <span v-else-if="voiceAiParsing" class="stream-badge thinking">⚡ AI đang bóc tách…</span>
+                <span v-else-if="voiceLastHeard" class="stream-badge success">✓ Đã nhận diện</span>
+              </div>
             </div>
 
-            <div class="voice-speech-display-box" :class="{ listening: voiceListening }">
-              <template v-if="voiceInterim">
-                <span class="text-interim">{{ voiceInterim }}</span>
-                <span class="live-cursor">|</span>
-              </template>
-              <template v-else-if="voiceLastHeard">
-                <span class="text-final">{{ voiceLastHeard }}</span>
-              </template>
-              <template v-else>
-                <span class="text-placeholder">
-                  {{ voiceListening ? 'Đang lắng nghe... Nói tên giấy tờ hoặc số tờ...' : 'Bấm mic hoặc giữ phím Space để nói...' }}
+            <!-- Text Box trực tiếp: hiển thị lời nói chạy thời gian thực và cho phép chỉnh sửa/gõ phím -->
+            <div class="voice-speech-input-container" :class="{ 'is-active': voiceListening, 'is-thinking': voiceAiParsing }">
+              <textarea
+                ref="voiceTextAreaRef"
+                v-model="voiceInputText"
+                class="voice-speech-textarea"
+                rows="2"
+                :placeholder="
+                  voiceListening
+                    ? 'Đang lắng nghe... Nói tên giấy tờ hoặc số tờ (ví dụ: căn cước công dân, giấy khai sinh, số tờ 10)...'
+                    : 'Bấm mic hoặc giữ phím Space để nói... (hoặc gõ vào đây rồi Enter)'
+                "
+                @keydown.enter.exact.prevent="submitVoiceText"
+              />
+              <span v-if="voiceListening && !voiceInputText" class="listening-pulse-hint">
+                <Mic :size="13" class="text-pink pulse-anim" /> Đang lắng nghe giọng nói...
+              </span>
+            </div>
+
+            <!-- Thanh công cụ nhỏ ngay dưới Text Box -->
+            <div class="voice-textbox-toolbar">
+              <div class="toolbar-left">
+                <span class="toolbar-hint">
+                  <kbd>Space</kbd> giữ nói · <kbd>Enter</kbd> gửi AI
                 </span>
-              </template>
+              </div>
+              <div class="toolbar-right">
+                <button
+                  v-if="voiceInputText || voiceLastHeard"
+                  type="button"
+                  class="voice-tool-btn text-muted"
+                  title="Xoá ô văn bản"
+                  @click="clearVoiceText"
+                >
+                  <Eraser :size="12" /> Xoá
+                </button>
+                <button
+                  v-if="voiceListening"
+                  type="button"
+                  class="voice-tool-btn btn-listening"
+                  title="Dừng nghe & Chốt câu"
+                  @click="stopVoice"
+                >
+                  <Mic :size="12" /> Dừng nghe
+                </button>
+                <button
+                  type="button"
+                  class="voice-tool-btn btn-submit-ai"
+                  :disabled="voiceAiParsing || (!voiceInputText.trim() && !voiceInterim.trim())"
+                  title="Gửi câu thoại cho AI bóc tách (Enter)"
+                  @click="submitVoiceText"
+                >
+                  <Sparkles :size="12" /> Gửi AI
+                </button>
+              </div>
             </div>
           </div>
 

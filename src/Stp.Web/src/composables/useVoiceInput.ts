@@ -80,6 +80,8 @@ export function useVoiceInput(options: VoiceInputOptions) {
   let recognition: SpeechRecognitionLike | null = null
   let wantListening = false
   let restarting = false
+  let silenceTimer: number | null = null
+  let activeUtterance = ''
 
   let audioCtx: AudioContext | null = null
   let analyser: AnalyserNode | null = null
@@ -144,6 +146,29 @@ export function useVoiceInput(options: VoiceInputOptions) {
     return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null
   }
 
+  function commitUtterance(explicitText?: string): void {
+    if (silenceTimer) {
+      window.clearTimeout(silenceTimer)
+      silenceTimer = null
+    }
+    const textToCommit = (explicitText !== undefined ? explicitText : activeUtterance).trim()
+    activeUtterance = ''
+    interim.value = ''
+    options.onInterim?.('')
+
+    if (textToCommit) {
+      options.onFinal(textToCommit)
+    }
+
+    if (wantListening && recognition) {
+      try {
+        recognition.abort()
+      } catch {
+        // Bỏ qua
+      }
+    }
+  }
+
   function createRecognition(): SpeechRecognitionLike | null {
     const Constructor = detectConstructor()
     if (!Constructor) return null
@@ -159,19 +184,41 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
 
     instance.onresult = (event) => {
-      let interimText = ''
-      for (let index = event.resultIndex; index < event.results.length; index++) {
+      let finalChunk = ''
+      let interimChunk = ''
+
+      // Tích lũy toàn bộ kết quả của câu đang nói (không làm mất từ trước đó)
+      for (let index = 0; index < event.results.length; index++) {
         const result = event.results[index]
         const transcript = result[0]?.transcript ?? ''
         if (result.isFinal) {
-          const finalText = transcript.trim()
-          if (finalText.length > 0) options.onFinal(finalText)
+          finalChunk += transcript + ' '
         } else {
-          interimText += transcript
+          interimChunk += transcript
         }
       }
-      interim.value = interimText.trim()
-      options.onInterim?.(interim.value)
+
+      const fullLiveText = (finalChunk + interimChunk).trim()
+      activeUtterance = fullLiveText
+      interim.value = fullLiveText
+      options.onInterim?.(fullLiveText)
+
+      // Hẹn giờ im lặng (silence detection): nếu ngừng nói 950ms (hoặc 550ms với lệnh ngắn) thì chốt câu
+      if (silenceTimer) {
+        window.clearTimeout(silenceTimer)
+        silenceTimer = null
+      }
+
+      if (fullLiveText.length > 0) {
+        const lower = fullLiveText.toLowerCase()
+        const isQuickCommand = ['xong', 'lưu', 'tiếp', 'kế tiếp', 'bộ bảy', 'quay lại', 'trước'].includes(lower)
+        const delay = isQuickCommand ? 550 : 950
+
+        silenceTimer = window.setTimeout(() => {
+          silenceTimer = null
+          commitUtterance()
+        }, delay)
+      }
     }
 
     instance.onerror = (event) => {
@@ -184,9 +231,21 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
 
     instance.onend = () => {
+      if (silenceTimer) {
+        window.clearTimeout(silenceTimer)
+        silenceTimer = null
+      }
+      const pending = activeUtterance.trim()
+      if (pending) {
+        activeUtterance = ''
+        interim.value = ''
+        options.onInterim?.('')
+        options.onFinal(pending)
+      }
+
       listening.value = false
       options.onStateChange?.(false)
-      interim.value = ''
+
       // Chrome tự ngắt sau khoảng lặng — nối lại nếu người dùng vẫn bật mic.
       if (wantListening && !restarting) {
         restarting = true
@@ -199,7 +258,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
               // Đã chạy rồi — bỏ qua nhịp này.
             }
           }
-        }, 350)
+        }, 150)
       }
     }
 
@@ -226,10 +285,22 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
   }
 
-  function stop(): void {
+  function stop(commitPending = true): void {
     wantListening = false
+    if (silenceTimer) {
+      window.clearTimeout(silenceTimer)
+      silenceTimer = null
+    }
+    const pending = activeUtterance.trim()
+    activeUtterance = ''
     interim.value = ''
+    options.onInterim?.('')
     stopAudioAnalysis()
+
+    if (commitPending && pending) {
+      options.onFinal(pending)
+    }
+
     try {
       recognition?.stop()
     } catch {
@@ -244,8 +315,26 @@ export function useVoiceInput(options: VoiceInputOptions) {
     else start()
   }
 
+  function commitNow(text?: string): void {
+    commitUtterance(text)
+  }
+
+  function clear(): void {
+    if (silenceTimer) {
+      window.clearTimeout(silenceTimer)
+      silenceTimer = null
+    }
+    activeUtterance = ''
+    interim.value = ''
+    options.onInterim?.('')
+  }
+
   onUnmounted(() => {
     wantListening = false
+    if (silenceTimer) {
+      window.clearTimeout(silenceTimer)
+      silenceTimer = null
+    }
     stopAudioAnalysis()
     try {
       recognition?.abort()
@@ -254,5 +343,5 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
   })
 
-  return { supported, listening, interim, volume, start, stop, toggle }
+  return { supported, listening, interim, volume, start, stop, toggle, commitNow, clear }
 }
