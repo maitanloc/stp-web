@@ -49,6 +49,7 @@ import type {
   SummaryRowsResponse,
   SummaryScopeRequest,
   SummarySessionInfoResponse,
+  SummaryAiParseVoiceResponse,
   SyncResponse,
   AutoTickSyncSummaryItem,
   AutoTickSyncSummaryRequest,
@@ -1505,16 +1506,62 @@ const {
   supported: voiceSupported,
   listening: voiceListening,
   interim: voiceInterim,
+  volume: voiceVolume,
+  start: startVoiceInput,
+  stop: stopVoiceInput,
   toggle: toggleVoiceInput,
 } = useVoiceInput({
-  onFinal: (text) => handleVoiceFinal(text),
-  onInterim: () => undefined,
+  onFinal: (text) => {
+    void handleVoiceFinal(text)
+  },
+  onInterim: (text) => {
+    voiceInterim.value = text
+  },
   onError: (message) => {
     if (message) toast.error('Không nghe được', message)
   },
 })
 
 const voiceLastHeard = ref('')
+const voiceAiParsing = ref(false)
+const voicePttActive = ref(false)
+const voiceLastAiModel = ref('')
+let pttMouseDownTimer: number | undefined
+
+function startVoice(): void {
+  if (!voiceSupported.value) {
+    toast.warning('Trình duyệt chưa hỗ trợ', 'Đọc giọng nói cần Chrome hoặc Edge (Web Speech API, tiếng Việt).')
+    return
+  }
+  startVoiceInput()
+}
+
+function stopVoice(): void {
+  stopVoiceInput()
+  if (!voiceListening.value) {
+    voiceInterim.value = ''
+  }
+}
+
+function onPttMouseDown(): void {
+  pttMouseDownTimer = window.setTimeout(() => {
+    if (!voiceListening.value) {
+      voicePttActive.value = true
+      startVoice()
+    }
+  }, 180)
+}
+
+function onPttMouseUp(): void {
+  if (pttMouseDownTimer) {
+    window.clearTimeout(pttMouseDownTimer)
+    pttMouseDownTimer = undefined
+  }
+  if (voicePttActive.value) {
+    voicePttActive.value = false
+    stopVoice()
+  }
+}
 
 /** Học lỗi nghe (I2): {máy nghe sai → người sửa} — tối đa 100 cặp. */
 interface VoiceLearnedPair {
@@ -1639,37 +1686,98 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
   toast.success('Đã điền Bộ 7 chuẩn', 'Kiểm rồi bấm Lưu hoặc nói "xong".')
 }
 
-function handleVoiceFinal(text: string): void {
+async function handleVoiceFinal(text: string): Promise<void> {
   const active = session.value
   if (!active) return
   voiceLastHeard.value = text
 
+  // 1. Match nhanh các lệnh điều hướng hoặc bộ bảy cơ bản
   const learned = applyLearned(text, voiceLearned.value)
   const context = {
     catalog: active.catalog,
     types: active.types.map((item) => item.name),
   }
   const result = parseVoiceTranscript(learned, context)
-  if (!result) {
-    toast.info(
-      'Không hiểu câu này',
-      `"${text}" — nói loại hồ sơ + giấy tờ ("kết hôn — căn cước, hộ khẩu") hoặc lệnh "xong", "kế tiếp".`,
-    )
-    return
-  }
 
-  if (result.kind === 'command') {
+  if (result?.kind === 'command') {
     runVoiceCommand(result.command)
     return
   }
 
-  if (result.kind === 'filter') {
+  if (result?.kind === 'filter') {
     if (result.type !== null) type.value = result.type
     if (result.year !== null) year.value = result.year
     const parts: string[] = []
     if (result.type) parts.push(`loại ${result.type}`)
     if (result.year !== null) parts.push(`năm ${result.year}`)
     toast.success('Đã lọc bằng giọng nói', parts.length > 0 ? parts.join(' · ') : 'bỏ lọc loại')
+    return
+  }
+
+  // 2. Tích hợp AI Local (Ollama Qwen 2.5) để nhận diện danh mục giấy tờ thông minh
+  try {
+    voiceAiParsing.value = true
+    const aiRes = await request<SummaryAiParseVoiceResponse>('/api/summary/ai/parse-voice', {
+      method: 'POST',
+      body: {
+        text,
+        catalog: active.catalog,
+        model: 'qwen2.5:3b',
+      },
+    })
+
+    if (aiRes && aiRes.success && (aiRes.items.length > 0 || aiRes.command || aiRes.sheetNumber)) {
+      voiceLastAiModel.value = aiRes.model || 'qwen2.5:3b'
+
+      if (aiRes.command) {
+        if (aiRes.command === 'seven') runVoiceCommand('seven')
+        else if (aiRes.command === 'next') runVoiceCommand('next')
+        else if (aiRes.command === 'done') runVoiceCommand('commit')
+        else if (aiRes.command === 'prev') runVoiceCommand('prev')
+      }
+
+      if (aiRes.items.length > 0 || aiRes.sheetNumber) {
+        let row = voiceTargetRow.value
+        if (!row) row = nextMissingRow(rows.value[0]?.rowNumber ?? 0)
+        if (row) {
+          voiceSuppressLearn = true
+          if (aiRes.sheetNumber) {
+            commit(row, { sheetNumber: aiRes.sheetNumber })
+          }
+          if (aiRes.items.length > 0) {
+            setRowItems(row, aiRes.items)
+          }
+          voiceSuppressLearn = false
+
+          openSummaryEditor(row)
+          void scrollEditorIntoView()
+          voiceLearnCandidate.value = {
+            rowNumber: row.rowNumber,
+            heard: text,
+            prefill: summaryFor(row),
+          }
+          toast.success(
+            `⚡ AI (${aiRes.model ?? 'Qwen 2.5'}): Nhận diện ${aiRes.items.length} giấy tờ`,
+            `Dòng ${row.rowNumber}: ${aiRes.items.join(', ') || '(giữ nguyên)'}${
+              aiRes.sheetNumber ? ' · số tờ ' + aiRes.sheetNumber : ''
+            }`,
+          )
+        }
+      }
+      return
+    }
+  } catch (err) {
+    console.warn('Ollama AI voice parse fallback to regex parser:', err)
+  } finally {
+    voiceAiParsing.value = false
+  }
+
+  // 3. Dự phòng 100% bằng Parser Regex cục bộ nếu AI không phản hồi hoặc không nhận ra
+  if (!result) {
+    toast.info(
+      'Không hiểu câu này',
+      `"${text}" — nói loại hồ sơ + giấy tờ ("kết hôn — căn cước, hộ khẩu") hoặc lệnh "xong", "kế tiếp".`,
+    )
     return
   }
 
@@ -3134,6 +3242,16 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 
   if (typing) return
 
+  // Push-to-talk: Giữ phím Cách (Space) để nói (khi không đứng trong ô nhập text)
+  if (event.code === 'Space' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (session.value && voiceSupported.value && !voiceListening.value) {
+      event.preventDefault()
+      voicePttActive.value = true
+      startVoice()
+      return
+    }
+  }
+
   if (event.key === '/') {
     event.preventDefault()
     searchInput.value?.focus()
@@ -3148,6 +3266,14 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   if (event.key === 'ArrowRight' && session.value && page.value < totalPages.value) {
     event.preventDefault()
     goToPage(page.value + 1)
+  }
+}
+
+function onGlobalKeyup(event: KeyboardEvent): void {
+  if (event.code === 'Space' && voicePttActive.value) {
+    event.preventDefault()
+    voicePttActive.value = false
+    stopVoice()
   }
 }
 
@@ -3400,6 +3526,7 @@ let presenceCleanTimer: number | undefined
 onMounted(() => {
   void fetchCatalogPresets()
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('keyup', onGlobalKeyup)
   window.addEventListener('keydown', onSpeedKeydown)
   // E1: chuyển tab / thu nhỏ cửa sổ — đẩy bản nháp lên server ngay.
   document.addEventListener('visibilitychange', onVisibilityChange)
@@ -3426,6 +3553,7 @@ function onVisibilityChange(): void {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('keyup', onGlobalKeyup)
   window.removeEventListener('keydown', onSpeedKeydown)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   clearTeamEditingState()
@@ -5811,5 +5939,69 @@ onBeforeUnmount(() => {
       </div>
       </Transition>
     </Teleport>
+
+    <!-- Floating AI Mic & Soundwave widget (góc dưới bên phải, ngay trên / cạnh Chat nhóm) -->
+    <aside
+      v-if="session"
+      class="floating-voice-widget"
+      :class="{ 'is-listening': voiceListening, 'is-parsing': voiceAiParsing }"
+    >
+      <!-- Speech bubble nổi lên khi đang nghe hoặc AI đang parse -->
+      <Transition name="voice-bubble">
+        <div v-if="voiceListening || voiceAiParsing" class="voice-floating-bubble" role="status" aria-live="polite">
+          <div class="voice-bubble-badge">
+            <Sparkles v-if="voiceAiParsing" :size="12" class="spin-icon" />
+            <span v-else class="voice-pulse-dot" />
+            {{ voiceAiParsing ? 'Ollama AI (Qwen 2.5) đang xử lý…' : (voicePttActive ? 'Đang giữ phím Space để nói…' : 'Đang lắng nghe…') }}
+          </div>
+          <div class="voice-bubble-text">
+            {{ voiceInterim || voiceLastHeard || 'Nói tên giấy tờ (căn cước, khai sinh...), số tờ hoặc lệnh "xong", "kế tiếp"...' }}
+          </div>
+        </div>
+      </Transition>
+
+      <!-- Nút Mic AI với hiệu ứng sóng âm động -->
+      <div class="floating-voice-pill-wrap">
+        <button
+          type="button"
+          class="floating-voice-btn"
+          :class="{ listening: voiceListening, parsing: voiceAiParsing, ptt: voicePttActive }"
+          :title="
+            voiceSupported
+              ? (voiceListening
+                  ? 'Bấm để tắt mic (hoặc nhả phím Space)'
+                  : 'Bấm để bật mic · Hoặc GIỮ PHÍM CÁCH (Space) để nói (Push-to-Talk)')
+              : 'Trình duyệt chưa hỗ trợ Web Speech API'
+          "
+          :disabled="!voiceSupported"
+          @click="toggleVoice"
+          @mousedown="onPttMouseDown"
+          @mouseup="onPttMouseUp"
+          @mouseleave="onPttMouseUp"
+        >
+          <!-- Hoạt ảnh sóng âm động hoặc biểu tượng AI / Mic -->
+          <div class="voice-btn-icon-box">
+            <div v-if="voiceListening" class="sound-wave-bars">
+              <span class="bar" :style="{ height: `${Math.max(6, Math.min(22, 6 + (voiceVolume * 0.22)))}px` }" />
+              <span class="bar" :style="{ height: `${Math.max(10, Math.min(26, 10 + (voiceVolume * 0.28)))}px` }" />
+              <span class="bar" :style="{ height: `${Math.max(6, Math.min(20, 6 + (voiceVolume * 0.20)))}px` }" />
+              <span class="bar" :style="{ height: `${Math.max(4, Math.min(16, 4 + (voiceVolume * 0.16)))}px` }" />
+            </div>
+            <Sparkles v-else-if="voiceAiParsing" :size="18" class="spin-icon text-amber" />
+            <div v-else class="brain-mic-combo">
+              <svg class="ai-brain-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </div>
+          </div>
+          <span class="voice-btn-label">
+            {{ voiceAiParsing ? 'AI Đang nghĩ' : (voiceListening ? 'Đang nghe…' : 'Mic AI') }}
+          </span>
+          <span class="voice-model-badge" title="Tích hợp Local AI Ollama Qwen 2.5">3B</span>
+        </button>
+      </div>
+    </aside>
   </div>
 </template>

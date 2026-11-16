@@ -16,11 +16,15 @@ public sealed class AutoTickEndToEndTests
 {
     private sealed class DummyPublisher : IAutoTickEventPublisher
     {
+        private readonly object _lock = new();
         public List<AutoTickProgressEvent> ProgressHistory { get; } = new();
 
         public Task PublishProgressAsync(AutoTickProgressEvent progress, CancellationToken ct = default)
         {
-            ProgressHistory.Add(progress);
+            lock (_lock)
+            {
+                ProgressHistory.Add(progress);
+            }
             return Task.CompletedTask;
         }
 

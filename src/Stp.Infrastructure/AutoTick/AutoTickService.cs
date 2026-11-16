@@ -1233,8 +1233,22 @@ public sealed partial class AutoTickService : IAutoTickService
 
         if (state.Status != "Cancelled")
         {
-            state.Status = "Completed";
             state.FinishedAt = DateTimeOffset.UtcNow;
+
+            await _eventPublisher.PublishProgressAsync(new AutoTickProgressEvent
+            {
+                JobId = jobId,
+                SheetName = sheetName,
+                ProcessedRows = state.ProcessedRows,
+                TotalRows = state.TotalRows,
+                NewlyTickedRowsCount = state.NewlyTickedRowsCount,
+                NewlyTickedCellsCount = state.NewlyTickedCellsCount,
+                SkippedRowsCount = state.SkippedRowsCount,
+                Percent = 100,
+                IsCompleted = true
+            }).ConfigureAwait(false);
+
+            state.Status = "Completed";
 
             // Tự động ghi vào OneDrive máy để sync lên cloud ngay lập tức (nếu có thư mục máy)
             try
@@ -1246,19 +1260,6 @@ public sealed partial class AutoTickService : IAutoTickService
                 _logger.LogWarning(ex, "Không thể tự động đồng bộ OneDrive máy sau khi hoàn thành");
             }
         }
-
-        await _eventPublisher.PublishProgressAsync(new AutoTickProgressEvent
-        {
-            JobId = jobId,
-            SheetName = sheetName,
-            ProcessedRows = state.ProcessedRows,
-            TotalRows = state.TotalRows,
-            NewlyTickedRowsCount = state.NewlyTickedRowsCount,
-            NewlyTickedCellsCount = state.NewlyTickedCellsCount,
-            SkippedRowsCount = state.SkippedRowsCount,
-            Percent = 100,
-            IsCompleted = true
-        }).ConfigureAwait(false);
     }
 
     private async Task RunCloudPlaywrightJobAsync(

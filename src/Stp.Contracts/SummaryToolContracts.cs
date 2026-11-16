@@ -266,3 +266,18 @@ public sealed record SummaryCatalogPresetUpsertRequest(
     IReadOnlyList<string> Items,
     bool IsDefault = false,
     int? Order = null);
+
+/// <summary>Yêu cầu phân tích câu nói trích yếu bằng AI Local (Ollama).</summary>
+public sealed record SummaryAiParseVoiceRequest(
+    string Text,
+    IReadOnlyList<string>? Catalog = null,
+    string? Model = "qwen2.5:3b");
+
+/// <summary>Kết quả phân tích câu nói trích yếu bằng AI Local (Ollama).</summary>
+public sealed record SummaryAiParseVoiceResponse(
+    bool Success,
+    IReadOnlyList<string> Items,
+    string? Command = null,
+    string? SheetNumber = null,
+    string? Model = null,
+    string? Error = null);

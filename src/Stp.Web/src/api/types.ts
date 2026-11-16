@@ -904,5 +904,21 @@ export interface ProfileStatsResponse {
   summarySessionsCount: number
 }
 
+export interface SummaryAiParseVoiceRequest {
+  text: string
+  catalog?: string[]
+  model?: string
+}
+
+export interface SummaryAiParseVoiceResponse {
+  success: boolean
+  items: string[]
+  command?: string | null
+  sheetNumber?: string | null
+  model?: string | null
+  error?: string | null
+}
+
+
 
 

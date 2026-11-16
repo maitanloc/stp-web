@@ -75,10 +75,69 @@ export function useVoiceInput(options: VoiceInputOptions) {
   const supported = ref(false)
   const listening = ref(false)
   const interim = ref('')
+  const volume = ref(0) // 0 - 100
 
   let recognition: SpeechRecognitionLike | null = null
   let wantListening = false
   let restarting = false
+
+  let audioCtx: AudioContext | null = null
+  let analyser: AnalyserNode | null = null
+  let mediaStream: MediaStream | null = null
+  let volumeAnimId: number | null = null
+
+  async function startAudioAnalysis() {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) return
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
+      const AudioCtxConstructor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      if (!AudioCtxConstructor) return
+      audioCtx = new AudioCtxConstructor()
+      const source = audioCtx.createMediaStreamSource(mediaStream)
+      analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 64
+      source.connect(analyser)
+      const data = new Uint8Array(analyser.frequencyBinCount)
+
+      const tick = () => {
+        if (!listening.value && !wantListening) return
+        analyser?.getByteFrequencyData(data)
+        let sum = 0
+        for (let i = 0; i < data.length; i++) sum += data[i]
+        const avg = sum / data.length
+        volume.value = Math.min(100, Math.round((avg / 128) * 100))
+        volumeAnimId = requestAnimationFrame(tick)
+      }
+      volumeAnimId = requestAnimationFrame(tick)
+    } catch {
+      // Bỏ qua nếu getUserMedia không được cấp quyền hoặc không khả dụng,
+      // Web Speech API vẫn tiếp tục chạy độc lập.
+    }
+  }
+
+  function stopAudioAnalysis() {
+    if (volumeAnimId) {
+      cancelAnimationFrame(volumeAnimId)
+      volumeAnimId = null
+    }
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((track) => track.stop())
+      mediaStream = null
+    }
+    if (audioCtx) {
+      audioCtx.close().catch(() => {})
+      audioCtx = null
+    }
+    volume.value = 0
+  }
 
   function detectConstructor(): SpeechRecognitionConstructor | null {
     const scope = window as unknown as SpeechWindow
@@ -155,6 +214,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
       return
     }
     wantListening = true
+    void startAudioAnalysis()
     if (!recognition) recognition = createRecognition()
     if (!recognition) return
     try {
@@ -169,6 +229,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
   function stop(): void {
     wantListening = false
     interim.value = ''
+    stopAudioAnalysis()
     try {
       recognition?.stop()
     } catch {
@@ -185,6 +246,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
 
   onUnmounted(() => {
     wantListening = false
+    stopAudioAnalysis()
     try {
       recognition?.abort()
     } catch {
@@ -192,5 +254,5 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
   })
 
-  return { supported, listening, interim, start, stop, toggle }
+  return { supported, listening, interim, volume, start, stop, toggle }
 }

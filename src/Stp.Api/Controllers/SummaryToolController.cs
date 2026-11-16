@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -35,6 +36,8 @@ public sealed class SummaryToolController : ControllerBase
     private readonly NotificationService _notifications;
     private readonly IArchiveSyncService _sync;
     private readonly IFileStorage _storage;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
 
     public SummaryToolController(
         ISummaryToolService summary,
@@ -43,7 +46,9 @@ public sealed class SummaryToolController : ControllerBase
         IHubContext<TeamHub> hubContext,
         NotificationService notifications,
         IArchiveSyncService sync,
-        IFileStorage storage)
+        IFileStorage storage,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
     {
         _summary = summary;
         _factory = factory;
@@ -52,6 +57,8 @@ public sealed class SummaryToolController : ControllerBase
         _notifications = notifications;
         _sync = sync;
         _storage = storage;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
     }
 
     /// <summary>Mở workbook và tách danh mục giấy tờ trong cột trích yếu.</summary>
@@ -1089,6 +1096,131 @@ public sealed class SummaryToolController : ControllerBase
 
         return true;
     }
+
+    /// <summary>Phân tích câu nói giọng nói bằng AI Local (Ollama Qwen 2.5).</summary>
+    [HttpPost("ai/parse-voice")]
+    public async Task<ActionResult<SummaryAiParseVoiceResponse>> ParseVoice(
+        [FromBody] SummaryAiParseVoiceRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Text))
+        {
+            return Ok(new SummaryAiParseVoiceResponse(false, Array.Empty<string>(), Error: "Chuỗi văn bản rỗng"));
+        }
+
+        var baseUrl = _configuration["Ollama:BaseUrl"] ?? "http://localhost:11434";
+        var model = string.IsNullOrWhiteSpace(request.Model) 
+            ? (_configuration["Ollama:Model"] ?? "qwen2.5:3b") 
+            : request.Model.Trim();
+
+        var catalogList = request.Catalog != null && request.Catalog.Count > 0
+            ? string.Join(", ", request.Catalog.Select(c => $"\"{c}\""))
+            : "\"Giấy khai sinh\", \"Căn cước công dân\", \"Giấy xác nhận tình trạng hôn nhân\", \"Giấy chứng nhận kết hôn\", \"Sổ hộ khẩu\", \"Bản sao trích lục khai sinh\", \"Đơn xin đăng ký kết hôn\", \"Giấy khám sức khỏe\", \"Ảnh\", \"Tờ khai đăng ký kết hôn\"";
+
+        var prompt = $$"""
+Bạn là trợ lý AI chuyên nghiệp phân tích trích xuất danh mục giấy tờ và lệnh trong nghiệp vụ hồ sơ kết hôn Sở Tư Pháp Việt Nam.
+Danh mục giấy tờ chuẩn: [{{catalogList}}].
+Các lệnh có thể gặp: "next" (tiếp/kế tiếp), "done" (xong/lưu), "seven" (bộ bảy), "prev" (quay lại).
+
+Câu nói từ micro:
+"{{request.Text}}"
+
+Nhiệm vụ:
+1. Nhận diện các loại giấy tờ có trong câu nói và map chính xác về tên chuẩn trong danh mục trên.
+2. Bỏ qua tạp âm, từ đệm ("à", "ừm", "nhé", "cho tôi"), hoặc tiếng trò chuyện ngoài lề trong phòng.
+3. Nếu phát hiện lệnh điều hướng hoặc số tờ (như "01-20"), trích xuất tương ứng.
+4. Trả về DUY NHẤT một chuỗi JSON hợp lệ không kèm giải thích dạng:
+{"items": ["tên giấy tờ 1", "tên giấy tờ 2"], "command": "next" | "done" | "seven" | "prev" | null, "sheetNumber": "01-20" | null}
+""";
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var timeoutSec = _configuration.GetValue<int>("Ollama:TimeoutSeconds", 5);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(2, timeoutSec)));
+
+            var client = _httpClientFactory.CreateClient();
+            client.BaseAddress = new Uri(baseUrl);
+
+            var ollamaPayload = new
+            {
+                model = model,
+                prompt = prompt,
+                stream = false,
+                format = "json",
+                options = new
+                {
+                    temperature = 0.1,
+                    top_p = 0.9
+                }
+            };
+
+            var httpResponse = await client.PostAsJsonAsync("/api/generate", ollamaPayload, timeoutCts.Token);
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                return Ok(new SummaryAiParseVoiceResponse(false, Array.Empty<string>(), Model: model, Error: $"Ollama HTTP {(int)httpResponse.StatusCode}"));
+            }
+
+            var ollamaResult = await httpResponse.Content.ReadFromJsonAsync<OllamaVoiceGenerateResponse>(cancellationToken: timeoutCts.Token);
+            if (ollamaResult == null || string.IsNullOrWhiteSpace(ollamaResult.Response))
+            {
+                return Ok(new SummaryAiParseVoiceResponse(false, Array.Empty<string>(), Model: model, Error: "Ollama trả về rỗng"));
+            }
+
+            using var doc = JsonDocument.Parse(ollamaResult.Response);
+            var root = doc.RootElement;
+
+            var items = new List<string>();
+            if (root.TryGetProperty("items", out var itemsElem) && itemsElem.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in itemsElem.EnumerateArray())
+                {
+                    var val = el.GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(val))
+                    {
+                        if (request.Catalog != null)
+                        {
+                            var matched = request.Catalog.FirstOrDefault(c => string.Equals(c, val, StringComparison.OrdinalIgnoreCase));
+                            items.Add(matched ?? val);
+                        }
+                        else
+                        {
+                            items.Add(val);
+                        }
+                    }
+                }
+            }
+
+            string? command = null;
+            if (root.TryGetProperty("command", out var cmdElem) && cmdElem.ValueKind == JsonValueKind.String)
+            {
+                var cmdStr = cmdElem.GetString()?.Trim().ToLowerInvariant();
+                if (cmdStr is "next" or "done" or "seven" or "prev")
+                {
+                    command = cmdStr;
+                }
+            }
+
+            string? sheetNumber = null;
+            if (root.TryGetProperty("sheetNumber", out var sheetElem) && sheetElem.ValueKind == JsonValueKind.String)
+            {
+                sheetNumber = sheetElem.GetString()?.Trim();
+            }
+
+            return Ok(new SummaryAiParseVoiceResponse(true, items, command, sheetNumber, model));
+        }
+        catch (OperationCanceledException)
+        {
+            return Ok(new SummaryAiParseVoiceResponse(false, Array.Empty<string>(), Model: model, Error: "Quá thời gian chờ phản hồi AI (timeout)"));
+        }
+        catch (Exception ex)
+        {
+            return Ok(new SummaryAiParseVoiceResponse(false, Array.Empty<string>(), Model: model, Error: ex.Message));
+        }
+    }
+
+    private sealed record OllamaVoiceGenerateResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("response")] string? Response);
 
     private ObjectResult InvalidProblem(string detail) =>
         BadRequest(new ProblemDetails
