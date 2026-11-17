@@ -1057,24 +1057,94 @@ public sealed partial class AutoTickService : IAutoTickService
         int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 4;
         var eligibleRowNumbers = new List<int>();
 
+        var allCandidates = new List<(int RowNumber, int? RecordNumber)>();
         for (int r = 5; r <= lastRow; r++)
         {
             var summary = sheet.Cell(r, 4).GetString().Trim();
             if (string.IsNullOrWhiteSpace(summary)) continue;
 
-            // Number filter
-            if (request.NumberFrom.HasValue || request.NumberTo.HasValue)
+            var numStr = sheet.Cell(r, 2).GetString().Trim();
+            var numMatch = Regex.Match(numStr, @"^\d+");
+            int? num = null;
+            if (numMatch.Success && int.TryParse(numMatch.Value, out int parsedNum))
             {
-                var numStr = sheet.Cell(r, 2).GetString().Trim();
-                var numMatch = Regex.Match(numStr, @"^\d+");
-                if (numMatch.Success && int.TryParse(numMatch.Value, out int num))
+                num = parsedNum;
+            }
+
+            allCandidates.Add((r, num));
+        }
+
+        if (request.NumberFrom.HasValue || request.NumberTo.HasValue)
+        {
+            int startIndex = 0;
+            if (request.NumberFrom.HasValue)
+            {
+                int idx = allCandidates.FindIndex(c => c.RecordNumber == request.NumberFrom.Value);
+                if (idx >= 0)
                 {
-                    if (request.NumberFrom.HasValue && num < request.NumberFrom.Value) continue;
-                    if (request.NumberTo.HasValue && num > request.NumberTo.Value) continue;
+                    startIndex = idx;
+                }
+                else
+                {
+                    int fallbackIdx = allCandidates.FindIndex(c => c.RecordNumber.HasValue && c.RecordNumber.Value >= request.NumberFrom.Value);
+                    startIndex = fallbackIdx >= 0 ? fallbackIdx : 0;
                 }
             }
 
-            eligibleRowNumbers.Add(r);
+            int endIndex = allCandidates.Count - 1;
+            if (request.NumberTo.HasValue)
+            {
+                int targetTo = request.NumberTo.Value;
+                int foundIdx = -1;
+                for (int i = startIndex; i < allCandidates.Count; i++)
+                {
+                    if (allCandidates[i].RecordNumber == targetTo)
+                    {
+                        foundIdx = i;
+                        break;
+                    }
+                }
+
+                if (foundIdx >= 0)
+                {
+                    endIndex = foundIdx;
+                }
+                else
+                {
+                    int anyIdx = allCandidates.FindIndex(c => c.RecordNumber == targetTo);
+                    if (anyIdx >= startIndex)
+                    {
+                        endIndex = anyIdx;
+                    }
+                    else
+                    {
+                        for (int i = startIndex; i < allCandidates.Count; i++)
+                        {
+                            var recNum = allCandidates[i].RecordNumber;
+                            if (recNum.HasValue && recNum.Value >= targetTo)
+                            {
+                                endIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (startIndex <= endIndex)
+            {
+                for (int i = startIndex; i <= endIndex; i++)
+                {
+                    eligibleRowNumbers.Add(allCandidates[i].RowNumber);
+                }
+            }
+        }
+        else
+        {
+            foreach (var item in allCandidates)
+            {
+                eligibleRowNumbers.Add(item.RowNumber);
+            }
         }
 
         state.TotalRows = eligibleRowNumbers.Count;

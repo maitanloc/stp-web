@@ -1058,14 +1058,6 @@ public sealed class SummaryToolController : ControllerBase
                 error = "Số hồ sơ phải lớn hơn 0.";
                 return false;
             }
-
-            if (request.NumberFrom.HasValue
-                && request.NumberTo.HasValue
-                && request.NumberFrom.Value > request.NumberTo.Value)
-            {
-                error = "Số bắt đầu không được lớn hơn số kết thúc.";
-                return false;
-            }
         }
         else if (mode == SummaryNumberMode.Single)
         {

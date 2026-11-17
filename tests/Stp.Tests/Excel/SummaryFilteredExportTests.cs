@@ -555,6 +555,74 @@ public sealed class SummaryFilteredExportTests
         return reader.ReadToEnd();
     }
 
+    [Fact]
+    public async Task FilteredExport_ByNumberRange_TopToBottom_PreservesNonMonotonicRowOrder()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "source-non-monotonic.xlsx");
+            using (var workbook = new XLWorkbook())
+            {
+                var ml = workbook.AddWorksheet("ML");
+                ml.Cell("B1").Value = "Số hồ sơ";
+                ml.Cell("D1").Value = "Trích yếu nội dung";
+                ml.Cell("E1").Value = "Thời gian tài liệu";
+
+                int[] numbers = [8248, 8249, 8289, 8300, 8135, 8136, 8301, 8302];
+                for (int i = 0; i < numbers.Length; i++)
+                {
+                    int r = i + 2;
+                    ml.Cell(r, 2).Value = numbers[i];
+                    ml.Cell(r, 4).Value = $"Hồ sơ {numbers[i]} (giấy khai sinh)";
+                    ml.Cell(r, 5).Value = new DateTime(1997, 1, 1);
+                }
+
+                workbook.SaveAs(path);
+            }
+
+            var service = CreateService(directory);
+            var session = await OpenSessionAsync(service, path);
+
+            // Test 1: Lấy từ 8248 đến 8302 -> lấy toàn bộ 8 dòng từ trên xuống dưới (kể cả 8135, 8136)
+            var rowsAll = service.GetRows(
+                session.SessionId,
+                new SummaryScope(
+                    NumberMode: SummaryNumberMode.Range,
+                    NumberFrom: 8248,
+                    NumberTo: 8302),
+                1,
+                50);
+            Assert.Equal(8, rowsAll.Total);
+            Assert.Equal(8, rowsAll.Items.Count);
+            Assert.Equal(8248, rowsAll.Items[0].Number);
+            Assert.Equal(8135, rowsAll.Items[4].Number);
+            Assert.Equal(8302, rowsAll.Items[7].Number);
+
+            // Test 2: Lấy từ 8300 đến 8136 (số bắt đầu lớn hơn số kết thúc nhưng nằm trên theo thứ tự dòng)
+            var rowsSub = service.GetRows(
+                session.SessionId,
+                new SummaryScope(
+                    NumberMode: SummaryNumberMode.Range,
+                    NumberFrom: 8300,
+                    NumberTo: 8136),
+                1,
+                50);
+            Assert.Equal(3, rowsSub.Total);
+            Assert.Equal(3, rowsSub.Items.Count);
+            Assert.Equal(8300, rowsSub.Items[0].Number);
+            Assert.Equal(8135, rowsSub.Items[1].Number);
+            Assert.Equal(8136, rowsSub.Items[2].Number);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     private static string CreateTempDirectory()
     {
         var path = Path.Combine(

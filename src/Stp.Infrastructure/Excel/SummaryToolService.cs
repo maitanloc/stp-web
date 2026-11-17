@@ -3103,8 +3103,8 @@ public sealed class SummaryToolService : ISummaryToolService
             case SummaryNumberMode.Range:
                 if (scope.NumberFrom.HasValue || scope.NumberTo.HasValue)
                 {
-                    query = query.Where(row =>
-                        MatchesNumberRange(row, scope.NumberFrom, scope.NumberTo));
+                    var list = query.ToList();
+                    query = SliceByNumberRangeTopToBottom(list, scope.NumberFrom, scope.NumberTo);
                 }
 
                 break;
@@ -3142,6 +3142,90 @@ public sealed class SummaryToolService : ISummaryToolService
         }
 
         return result;
+    }
+
+    private static int? GetRowRecordNumber(SummaryRow row)
+    {
+        return ParseNumberLabel(row.DocumentNumber) ?? ParseNumberLabel(row.NumberLabel) ?? row.Number;
+    }
+
+    private static bool MatchesRowNumber(SummaryRow row, int target)
+    {
+        return GetRowRecordNumber(row) == target;
+    }
+
+    private static List<SummaryRow> SliceByNumberRangeTopToBottom(
+        List<SummaryRow> list,
+        int? fromNum,
+        int? toNum)
+    {
+        if (list.Count == 0) return list;
+        if (!fromNum.HasValue && !toNum.HasValue) return list;
+
+        int startIndex = 0;
+        if (fromNum.HasValue)
+        {
+            int idx = list.FindIndex(r => MatchesRowNumber(r, fromNum.Value));
+            if (idx >= 0)
+            {
+                startIndex = idx;
+            }
+            else
+            {
+                int fallbackIdx = list.FindIndex(r =>
+                {
+                    var n = GetRowRecordNumber(r);
+                    return n.HasValue && n.Value >= fromNum.Value;
+                });
+                startIndex = fallbackIdx >= 0 ? fallbackIdx : 0;
+            }
+        }
+
+        int endIndex = list.Count - 1;
+        if (toNum.HasValue)
+        {
+            int foundIdx = -1;
+            for (int i = startIndex; i < list.Count; i++)
+            {
+                if (MatchesRowNumber(list[i], toNum.Value))
+                {
+                    foundIdx = i;
+                    break;
+                }
+            }
+
+            if (foundIdx >= 0)
+            {
+                endIndex = foundIdx;
+            }
+            else
+            {
+                int anyIdx = list.FindIndex(r => MatchesRowNumber(r, toNum.Value));
+                if (anyIdx >= startIndex)
+                {
+                    endIndex = anyIdx;
+                }
+                else
+                {
+                    for (int i = startIndex; i < list.Count; i++)
+                    {
+                        var n = GetRowRecordNumber(list[i]);
+                        if (n.HasValue && n.Value >= toNum.Value)
+                        {
+                            endIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (startIndex <= endIndex)
+        {
+            return list.GetRange(startIndex, endIndex - startIndex + 1);
+        }
+
+        return new List<SummaryRow>();
     }
 
     private static int? ParseNumberLabel(string label)

@@ -2977,13 +2977,57 @@ function updateSyncRowsPreview(): void {
     const fromNum = syncNumberFrom.value !== '' ? Number(syncNumberFrom.value) : null
     const toNum = syncNumberTo.value !== '' ? Number(syncNumberTo.value) : null
 
-    targetItems = allPool.filter((item) => {
+    const getItemNumber = (item: SyncRowCandidate): number | null => {
       const match = (item.numberLabel || '').match(/\d+/)
-      const n = match ? parseInt(match[0], 10) : item.rowNumber
-      if (fromNum !== null && n < fromNum) return false
-      if (toNum !== null && n > toNum) return false
-      return true
-    })
+      return match ? parseInt(match[0], 10) : (item.rowNumber ?? null)
+    }
+
+    let startIndex = 0
+    if (fromNum !== null) {
+      const idx = allPool.findIndex((item) => getItemNumber(item) === fromNum)
+      if (idx !== -1) {
+        startIndex = idx
+      } else {
+        const fallbackIdx = allPool.findIndex((item) => {
+          const n = getItemNumber(item)
+          return n !== null && n >= fromNum
+        })
+        startIndex = fallbackIdx !== -1 ? fallbackIdx : 0
+      }
+    }
+
+    let endIndex = allPool.length - 1
+    if (toNum !== null) {
+      let foundIdx = -1
+      for (let i = startIndex; i < allPool.length; i++) {
+        if (getItemNumber(allPool[i]) === toNum) {
+          foundIdx = i
+          break
+        }
+      }
+      if (foundIdx !== -1) {
+        endIndex = foundIdx
+      } else {
+        const anyIdx = allPool.findIndex((item) => getItemNumber(item) === toNum)
+        if (anyIdx !== -1 && anyIdx >= startIndex) {
+          endIndex = anyIdx
+        } else {
+          for (let i = startIndex; i < allPool.length; i++) {
+            const n = getItemNumber(allPool[i])
+            if (n !== null && n >= toNum) {
+              endIndex = i
+              break
+            }
+          }
+        }
+      }
+    }
+
+    if (startIndex <= endIndex && allPool.length > 0) {
+      targetItems = allPool.slice(startIndex, endIndex + 1)
+    } else {
+      targetItems = []
+    }
   } else if (oneDriveSyncScope.value === 'selected' && selected.value.size > 0) {
     // 1. Người dùng chọn: Chỉ các dòng đã tích chọn ở checkbox đầu dòng
     if (previewOpen.value && previewRows.value.length > 0) {
@@ -5895,6 +5939,9 @@ onBeforeUnmount(() => {
             <!-- Range Filter Inputs when number_range is chosen -->
             <div v-if="oneDriveSyncScope === 'number_range'" class="card" style="padding: 10px 14px; background: rgba(255, 255, 255, 0.02)">
               <div class="row wrap" style="gap: 16px; align-items: center">
+                <span class="hint" style="font-size: 12px; color: var(--text-muted); width: 100%; margin-bottom: 2px">
+                  * Lấy liên tục từ trên xuống dưới theo thứ tự xuất hiện của hồ sơ trong bảng (kể cả số nhảy quãng).
+                </span>
                 <label class="row" style="gap: 8px; align-items: center">
                   <span class="hint" style="font-weight: 600">Từ số:</span>
                   <input
