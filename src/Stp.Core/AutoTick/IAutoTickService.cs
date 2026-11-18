@@ -28,5 +28,9 @@ public interface IAutoTickService
     bool EnqueueOneDriveJob(string oneDriveUrl);
 
     void DequeueOneDriveJob(string oneDriveUrl);
+
+    Task<CheckPermissionResponse> CheckPermissionAsync(string url, CancellationToken ct = default);
+
+    object OpenInteractiveLogin(string url);
 }
 

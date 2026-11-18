@@ -47,6 +47,12 @@ src/Stp.Api/wwwroot/
 # Windows service wrapper (WinSW) + logs — chỉ giữ trên máy, không commit
 service/
 
+# AI models
+tools/bot_profile/
+src/Stp.Api/tools/
+models/
+Models/
+
 # Python cache
 __pycache__/
 *.pyc

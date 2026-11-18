@@ -749,6 +749,10 @@ export interface AutoTickInspectResponse {
   rowsFullyTicked: number
   rowsPartiallyTicked: number
   rowsUnticked: number
+  minNumber?: number
+  maxNumber?: number
+  untickedMinNumber?: number
+  untickedMaxNumber?: number
   documentHeaders: AutoTickSheetHeader[]
   sampleRows: AutoTickRowPreview[]
 }
@@ -904,10 +908,16 @@ export interface ProfileStatsResponse {
   summarySessionsCount: number
 }
 
+export interface SummaryVoiceLearnedPair {
+  heard: string
+  fixed: string
+}
+
 export interface SummaryAiParseVoiceRequest {
   text: string
   catalog?: string[]
   model?: string
+  learned?: SummaryVoiceLearnedPair[]
 }
 
 export interface SummaryAiParseVoiceResponse {
@@ -915,9 +925,29 @@ export interface SummaryAiParseVoiceResponse {
   items: string[]
   command?: string | null
   sheetNumber?: string | null
+  targetRowNumber?: number | null
+  targetDocumentNumber?: number | null
+  year?: number | null
+  type?: string | null
+  numberFrom?: number | null
+  numberTo?: number | null
+  search?: string | null
+  targetPage?: number | null
+  reply?: string | null
   model?: string | null
   error?: string | null
+  needsConfirmation?: boolean
+  confirmationPrompt?: string | null
 }
+
+export interface SummaryWhisperTranscribeResponse {
+  success: boolean
+  text: string
+  language?: string | null
+  duration?: number
+  error?: string | null
+}
+
 
 
 

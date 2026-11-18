@@ -35,6 +35,13 @@
   năm 1994 phải ra đúng 11 dòng ở dòng 764–774 của sheet `file nhập`.
 - Không đổi cách chọn sheet trở lại `file dán` nếu chưa kiểm bằng file thật.
 
+## Quy tắc Đồng bộ OneDrive / Cloud tại Bổ sung trích yếu (người dùng chốt 18/11/2026)
+- **TUYỆT ĐỐI KHÔNG đánh tick hay đụng vào bất kỳ ô checkbox nào** (`skipTicking` luôn là `true`).
+- **Chỉ điền Cột D & H** (Trích yếu nội dung kèm ngoặc giấy tờ) và đánh dấu **Cột A là "đã nhập"**.
+- Mọi giao diện, tooltip, thông báo và modal đều bỏ hoàn toàn các từ ngữ liên quan đến "đánh tick" (chỉ ghi "Đồng bộ", "Điền Trích yếu Cột D, H và đánh dấu Cột A").
+- Cơ chế chạy ngầm hoàn toàn trên server: người dùng có thể đóng modal hoặc chuyển sang hộp khác ngay lập tức, robot tự động chạy ngầm và gửi thông báo khi hoàn thành.
+
+
 ## Danh mục học được (công cụ trích yếu — người dùng xác nhận 2026-11-10)
 - **Mục giấy tờ người dùng tự gõ = tự lưu database ngay**: gõ Enter thì vừa
   thêm chip vào dòng vừa `POST /api/summary/catalog/items` (bảng `CatalogItems`).

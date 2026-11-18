@@ -9,6 +9,13 @@ echo   Địa chỉ: http://localhost:5215
 echo ========================================================
 echo.
 
+:: 0. Khởi động STP Whisper GPU Service nếu chưa chạy
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:5216/health' -TimeoutSec 1; if ($r.status -eq 'healthy') { exit 0 } } catch {}; exit 1"
+if %errorlevel% neq 0 (
+    echo Đang khởi động STP Whisper GPU Service...
+    start "STP Whisper GPU Service" cmd /k "python tools\whisper_service.py"
+)
+
 :: 1. Kiểm tra nếu chưa build FE thì tự động build một lần
 if not exist "src\Stp.Api\wwwroot\index.html" (
     echo Đang đóng gói giao diện Frontend lần đầu...

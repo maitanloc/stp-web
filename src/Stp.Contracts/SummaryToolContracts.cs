@@ -267,11 +267,15 @@ public sealed record SummaryCatalogPresetUpsertRequest(
     bool IsDefault = false,
     int? Order = null);
 
+/// <summary>Cặp từ máy nghe sai và từ chuẩn người dùng đã sửa/học.</summary>
+public sealed record SummaryVoiceLearnedPair(string Heard, string Fixed);
+
 /// <summary>Yêu cầu phân tích câu nói trích yếu bằng AI Local (Ollama).</summary>
 public sealed record SummaryAiParseVoiceRequest(
     string Text,
     IReadOnlyList<string>? Catalog = null,
-    string? Model = "qwen2.5:3b");
+    string? Model = "qwen2.5:3b",
+    IReadOnlyList<SummaryVoiceLearnedPair>? Learned = null);
 
 /// <summary>Kết quả phân tích câu nói trích yếu bằng AI Local (Ollama).</summary>
 public sealed record SummaryAiParseVoiceResponse(
@@ -279,5 +283,48 @@ public sealed record SummaryAiParseVoiceResponse(
     IReadOnlyList<string> Items,
     string? Command = null,
     string? SheetNumber = null,
+    int? TargetRowNumber = null,
+    int? Year = null,
+    string? Type = null,
+    int? NumberFrom = null,
+    int? NumberTo = null,
     string? Model = null,
+    string? Error = null,
+    int? TargetDocumentNumber = null,
+    string? Search = null,
+    int? TargetPage = null,
+    string? Reply = null,
+    bool NeedsConfirmation = false,
+    string? ConfirmationPrompt = null);
+
+/// <summary>Kết quả nhận diện giọng nói từ Whisper Local.</summary>
+public sealed record SummaryWhisperTranscribeResponse(
+    bool Success,
+    string Text,
+    string? Language = null,
+    double Duration = 0,
     string? Error = null);
+
+/// <summary>Bản ghi ký ức tương tác giọng nói thực tế từ phòng.</summary>
+public sealed record VoiceMemoryDto(
+    long Id,
+    string RawSpeech,
+    string CleanSpeech,
+    string Command,
+    IReadOnlyList<string> Items,
+    string? SheetNumber,
+    int? TargetRowNumber,
+    string? TargetDocumentNumber,
+    string Actor,
+    int UsageCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset LastUsedAt);
+
+/// <summary>Yêu cầu lưu / cập nhật ký ức tương tác giọng nói.</summary>
+public sealed record VoiceMemorySaveRequest(
+    string RawSpeech,
+    string Command,
+    IReadOnlyList<string> Items,
+    string? SheetNumber = null,
+    int? TargetRowNumber = null,
+    string? TargetDocumentNumber = null);

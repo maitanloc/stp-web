@@ -161,6 +161,9 @@ public sealed class AutoTickController : ControllerBase
             }
         }
 
+        bool isGSheet = request.OneDriveUrl?.Contains("docs.google.com", StringComparison.OrdinalIgnoreCase) == true;
+        string platformName = isGSheet ? "Google Sheets" : "OneDrive";
+
         // Chạy ngầm hoàn toàn trên server: Người dùng có thể đóng tab hoặc chuyển trang mà robot vẫn tiếp tục chạy đến khi hoàn tất
         _ = Task.Run(async () =>
         {
@@ -176,18 +179,22 @@ public sealed class AutoTickController : ControllerBase
                             {
                                 sheetName = request.SheetName,
                                 rowCount = request.Rows.Count,
-                                message = $"Robot đã rời hàng chờ và bắt đầu điền {request.Rows.Count} hồ sơ lên OneDrive!"
+                                message = $"Robot đã rời hàng chờ và bắt đầu điền {request.Rows.Count} hồ sơ lên {platformName}!"
                             });
                         }
                     },
                     CancellationToken.None).ConfigureAwait(false);
 
-                if (result.Success)
+                if (result.Success && result.SyncedRowsCount > 0)
                 {
+                    string notifBody = (request.SkipTicking || isGSheet)
+                        ? $"Đã điền trích yếu cho {result.SyncedRowsCount} hồ sơ trên sheet {request.SheetName}."
+                        : $"Đã điền trích yếu và cập nhật tick cho {result.SyncedRowsCount} hồ sơ trên sheet {request.SheetName} ({result.TickedCellsCount} ô thay đổi).";
+
                     _notificationService?.NotifyAll(
                         "system",
-                        "Đồng bộ OneDrive thành công",
-                        $"Đã điền trích yếu và cập nhật tick cho {result.SyncedRowsCount} hồ sơ trên sheet {request.SheetName} ({result.TickedCellsCount} ô thay đổi).",
+                        $"Đồng bộ {platformName} thành công",
+                        notifBody,
                         "/summary-tool");
 
                     if (_hubContext is not null)
@@ -204,10 +211,13 @@ public sealed class AutoTickController : ControllerBase
                 }
                 else
                 {
+                    string errTitle = result.Success ? $"Đồng bộ {platformName} (0 hồ sơ)" : $"Đồng bộ {platformName} chưa hoàn tất";
+                    string errMsg = result.Message ?? "Không có hồ sơ nào được cập nhật.";
+
                     _notificationService?.NotifyAll(
                         "system",
-                        "Đồng bộ OneDrive chưa hoàn tất",
-                        result.Message,
+                        errTitle,
+                        errMsg,
                         "/summary-tool");
 
                     if (_hubContext is not null)
@@ -215,17 +225,17 @@ public sealed class AutoTickController : ControllerBase
                         _ = _hubContext.Clients.All.SendAsync("oneDriveSyncCompleted", new
                         {
                             success = false,
-                            message = result.Message
+                            message = errMsg
                         });
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Lỗi khi chạy ngầm đồng bộ OneDrive");
+                _logger.LogError(ex, "Lỗi khi chạy ngầm đồng bộ {Platform}", platformName);
                 _notificationService?.NotifyAll(
                     "system",
-                    "Lỗi đồng bộ OneDrive",
+                    $"Lỗi đồng bộ {platformName}",
                     ex.Message,
                     "/summary-tool");
 
@@ -254,6 +264,22 @@ public sealed class AutoTickController : ControllerBase
                 ? $"File OneDrive này hiện đang có robot khác đang chạy đồng bộ. Tiến trình của bạn ({request.Rows.Count} hồ sơ) đã được đưa vào HÀNG ĐỢI và sẽ tự động bắt đầu ngay khi robot trước hoàn tất!"
                 : $"Robot đã bắt đầu chạy ngầm trên OneDrive Cloud ({request.Rows.Count} hồ sơ). Bạn có thể yên tâm đóng tab hoặc làm việc khác, hệ thống sẽ tự động gửi thông báo khi hoàn tất!"
         });
+    }
+
+    [HttpPost("check-permission")]
+    public async Task<ActionResult<CheckPermissionResponse>> CheckPermission(
+        [FromBody] CheckPermissionRequest request,
+        CancellationToken ct)
+    {
+        var result = await _autoTick.CheckPermissionAsync(request.Url, ct).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    [HttpPost("open-login")]
+    public IActionResult OpenLogin([FromBody] CheckPermissionRequest request)
+    {
+        var result = _autoTick.OpenInteractiveLogin(request.Url);
+        return Ok(result);
     }
 }
 

@@ -39,6 +39,10 @@ public sealed class AutoTickInspectResponse
     public int RowsFullyTicked { get; set; }
     public int RowsPartiallyTicked { get; set; }
     public int RowsUnticked { get; set; }
+    public int? MinNumber { get; set; }
+    public int? MaxNumber { get; set; }
+    public int? UntickedMinNumber { get; set; }
+    public int? UntickedMaxNumber { get; set; }
     public IReadOnlyList<AutoTickSheetHeader> DocumentHeaders { get; set; } = Array.Empty<AutoTickSheetHeader>();
     public IReadOnlyList<AutoTickRowPreview> SampleRows { get; set; } = Array.Empty<AutoTickRowPreview>();
 }
@@ -171,6 +175,20 @@ public sealed class AutoTickSyncSummaryResponse
     public IReadOnlyList<string> NewHeaderTitles { get; set; } = Array.Empty<string>();
     public string Message { get; set; } = string.Empty;
     public IReadOnlyList<AutoTickSyncSummaryRowResult> Details { get; set; } = Array.Empty<AutoTickSyncSummaryRowResult>();
+}
+
+public sealed class CheckPermissionRequest
+{
+    public string Url { get; set; } = string.Empty;
+}
+
+public sealed class CheckPermissionResponse
+{
+    public bool IsGoogleSheet { get; set; }
+    public bool CanEdit { get; set; }
+    public bool NeedsLogin { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
 }
 
 

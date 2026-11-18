@@ -67,7 +67,36 @@ public sealed partial class AutoTickService : IAutoTickService
         var activeSheetName = request.SheetName;
         if (string.IsNullOrWhiteSpace(activeSheetName) || !workbook.Worksheets.Contains(activeSheetName))
         {
-            activeSheetName = sheets.FirstOrDefault(s => s.Equals("1997", StringComparison.OrdinalIgnoreCase))
+            // Tự động tìm sheet năm nào có chứa dữ liệu danh mục cần đánh tick
+            string? bestSheet = null;
+            var yearSheets = sheets.Where(s => Regex.IsMatch(s, @"^\d{4}")).ToList();
+            foreach (var ys in yearSheets)
+            {
+                var ws = workbook.Worksheet(ys);
+                int lr = ws.LastRowUsed()?.RowNumber() ?? 4;
+                for (int r = 5; r <= lr; r++)
+                {
+                    var sum = ws.Cell(r, 4).GetString().Trim();
+                    if (sum.Contains('(') && sum.Contains(')'))
+                    {
+                        var parensMatch = Regex.Match(sum, @"\(([^)]+)\)");
+                        if (parensMatch.Success)
+                        {
+                            var content = parensMatch.Groups[1].Value.Trim();
+                            // Nếu không phải là toàn bộ chữ hoa (như tên công dân) thì đây là danh mục giấy tờ thực sự
+                            if (!content.All(c => char.IsUpper(c) || char.IsWhiteSpace(c)))
+                            {
+                                bestSheet = ys;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (bestSheet is not null) break;
+            }
+
+            activeSheetName = bestSheet
+                ?? sheets.FirstOrDefault(s => s.Equals("1997", StringComparison.OrdinalIgnoreCase))
                 ?? sheets.FirstOrDefault(s => Regex.IsMatch(s, @"^\d{4}"))
                 ?? sheets.FirstOrDefault(s => s.Equals("file nhập", StringComparison.OrdinalIgnoreCase))
                 ?? workbook.Worksheets.First().Name;
@@ -82,6 +111,10 @@ public sealed partial class AutoTickService : IAutoTickService
         int rowsFullyTicked = 0;
         int rowsPartiallyTicked = 0;
         int rowsUnticked = 0;
+        int? minNum = null;
+        int? maxNum = null;
+        int? untickedMinNum = null;
+        int? untickedMaxNum = null;
         var sampleRows = new List<AutoTickRowPreview>();
 
         int lastRow = sheet.LastRowUsed()?.RowNumber() ?? 4;
@@ -90,8 +123,43 @@ public sealed partial class AutoTickService : IAutoTickService
             var summary = sheet.Cell(r, 4).GetString().Trim(); // Col D
             if (string.IsNullOrWhiteSpace(summary)) continue;
 
+            // Bỏ qua dòng tiêu đề bảng hoặc phân cách năm
+            if (r <= 8 && (summary.Equals("Trích yếu nội dung", StringComparison.OrdinalIgnoreCase) ||
+                           summary.StartsWith("*", StringComparison.OrdinalIgnoreCase) ||
+                           summary.StartsWith("NĂM ", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var numLabel = sheet.Cell(r, 2).GetString().Trim(); // Col B
+            var numMatch = Regex.Match(numLabel, @"^\d+");
+            int? currentNum = null;
+            if (numMatch.Success && int.TryParse(numMatch.Value, out int nVal))
+            {
+                currentNum = nVal;
+                minNum = minNum.HasValue ? Math.Min(minNum.Value, nVal) : nVal;
+                maxNum = maxNum.HasValue ? Math.Max(maxNum.Value, nVal) : nVal;
+            }
+
             totalRows++;
+
+            // Fallback sang Col H nếu Col D không có danh mục trong ngoặc
             var items = ExtractDocumentItemsFromSummary(summary);
+            string effectiveSummary = summary;
+            if (items.Count == 0)
+            {
+                var summaryH = sheet.Cell(r, 8).GetString().Trim();
+                if (!string.IsNullOrWhiteSpace(summaryH))
+                {
+                    var itemsH = ExtractDocumentItemsFromSummary(summaryH);
+                    if (itemsH.Count > 0)
+                    {
+                        items = itemsH;
+                        effectiveSummary = summaryH;
+                    }
+                }
+            }
+
             bool hasParens = items.Count > 0;
             int tickedInRow = 0;
 
@@ -106,8 +174,6 @@ public sealed partial class AutoTickService : IAutoTickService
 
             if (hasParens)
             {
-                rowsWithParens++;
-
                 // Match items against headers
                 var requiredHeaders = FindMatchingHeaders(items, headers);
                 int requiredCount = requiredHeaders.Count;
@@ -115,28 +181,40 @@ public sealed partial class AutoTickService : IAutoTickService
 
                 if (requiredCount > 0 && requiredTicked >= requiredCount)
                 {
+                    rowsWithParens++;
                     rowsFullyTicked++;
                 }
                 else if (requiredTicked > 0)
                 {
+                    rowsWithParens++;
                     rowsPartiallyTicked++;
+                    if (currentNum.HasValue)
+                    {
+                        untickedMinNum = untickedMinNum.HasValue ? Math.Min(untickedMinNum.Value, currentNum.Value) : currentNum.Value;
+                        untickedMaxNum = untickedMaxNum.HasValue ? Math.Max(untickedMaxNum.Value, currentNum.Value) : currentNum.Value;
+                    }
                 }
-                else
+                else if (requiredCount > 0)
                 {
+                    rowsWithParens++;
                     rowsUnticked++;
+                    if (currentNum.HasValue)
+                    {
+                        untickedMinNum = untickedMinNum.HasValue ? Math.Min(untickedMinNum.Value, currentNum.Value) : currentNum.Value;
+                        untickedMaxNum = untickedMaxNum.HasValue ? Math.Max(untickedMaxNum.Value, currentNum.Value) : currentNum.Value;
+                    }
                 }
             }
 
             if (sampleRows.Count < 30)
             {
-                var citizenNames = ExtractCitizenNames(summary);
-                var numLabel = sheet.Cell(r, 2).GetString().Trim(); // Col B
+                var citizenNames = ExtractCitizenNames(effectiveSummary);
                 sampleRows.Add(new AutoTickRowPreview
                 {
                     RowIndex = r,
                     NumberLabel = numLabel,
                     CitizenNames = citizenNames,
-                    SummaryText = summary,
+                    SummaryText = effectiveSummary,
                     HasParentheses = hasParens,
                     ExtractedItems = items,
                     TickedCount = tickedInRow,
@@ -158,6 +236,10 @@ public sealed partial class AutoTickService : IAutoTickService
             RowsFullyTicked = rowsFullyTicked,
             RowsPartiallyTicked = rowsPartiallyTicked,
             RowsUnticked = rowsUnticked,
+            MinNumber = minNum,
+            MaxNumber = maxNum,
+            UntickedMinNumber = untickedMinNum,
+            UntickedMaxNumber = untickedMaxNum,
             DocumentHeaders = headers,
             SampleRows = sampleRows
         };
@@ -379,7 +461,23 @@ public sealed partial class AutoTickService : IAutoTickService
                 var summary = sheet.Cell(r, 4).GetString().Trim();
                 if (string.IsNullOrWhiteSpace(summary)) continue;
 
+                if (r <= 8 && (summary.Equals("Trích yếu nội dung", StringComparison.OrdinalIgnoreCase) ||
+                               summary.StartsWith("*", StringComparison.OrdinalIgnoreCase) ||
+                               summary.StartsWith("NĂM ", StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
                 var items = ExtractDocumentItemsFromSummary(summary);
+                if (items.Count == 0)
+                {
+                    var summaryH = sheet.Cell(r, 8).GetString().Trim();
+                    if (!string.IsNullOrWhiteSpace(summaryH))
+                    {
+                        var itemsH = ExtractDocumentItemsFromSummary(summaryH);
+                        if (itemsH.Count > 0) items = itemsH;
+                    }
+                }
                 if (items.Count == 0) continue;
 
                 var requiredHeaders = FindMatchingHeaders(items, headers);
@@ -1063,6 +1161,14 @@ public sealed partial class AutoTickService : IAutoTickService
             var summary = sheet.Cell(r, 4).GetString().Trim();
             if (string.IsNullOrWhiteSpace(summary)) continue;
 
+            // Bỏ qua dòng tiêu đề bảng hoặc phân cách năm
+            if (r <= 8 && (summary.Equals("Trích yếu nội dung", StringComparison.OrdinalIgnoreCase) ||
+                           summary.StartsWith("*", StringComparison.OrdinalIgnoreCase) ||
+                           summary.StartsWith("NĂM ", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
             var numStr = sheet.Cell(r, 2).GetString().Trim();
             var numMatch = Regex.Match(numStr, @"^\d+");
             int? num = null;
@@ -1135,7 +1241,14 @@ public sealed partial class AutoTickService : IAutoTickService
             {
                 for (int i = startIndex; i <= endIndex; i++)
                 {
-                    eligibleRowNumbers.Add(allCandidates[i].RowNumber);
+                    int row = allCandidates[i].RowNumber;
+                    // Chỉ quét các dòng chưa có tick nào nếu người dùng chọn OnlyUnticked
+                    if (request.OnlyUnticked && !request.SkipTicking)
+                    {
+                        bool hasAnyTick = allHeaders.Any(h => IsCellTicked(sheet.Cell(row, h.ColumnIndex)));
+                        if (hasAnyTick) continue;
+                    }
+                    eligibleRowNumbers.Add(row);
                 }
             }
         }
@@ -1143,7 +1256,13 @@ public sealed partial class AutoTickService : IAutoTickService
         {
             foreach (var item in allCandidates)
             {
-                eligibleRowNumbers.Add(item.RowNumber);
+                int row = item.RowNumber;
+                if (request.OnlyUnticked && !request.SkipTicking)
+                {
+                    bool hasAnyTick = allHeaders.Any(h => IsCellTicked(sheet.Cell(row, h.ColumnIndex)));
+                    if (hasAnyTick) continue;
+                }
+                eligibleRowNumbers.Add(row);
             }
         }
 
@@ -1152,7 +1271,10 @@ public sealed partial class AutoTickService : IAutoTickService
         DateTime lastEventTime = DateTime.UtcNow;
         var cloudRows = new List<object>();
         var newHeadersToAddJob = new List<object>();
-        bool isOnlineOneDrive = request.OneDriveUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+        bool isOnlineOneDrive = request.OneDriveUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            && (request.OneDriveUrl.Contains("onedrive.live.com", StringComparison.OrdinalIgnoreCase)
+                || request.OneDriveUrl.Contains("sharepoint.com", StringComparison.OrdinalIgnoreCase)
+                || request.OneDriveUrl.Contains("1drv.ms", StringComparison.OrdinalIgnoreCase));
 
         bool skipTicking = request.SkipTicking;
         string statusA = !string.IsNullOrWhiteSpace(request.StatusA) ? request.StatusA : "đã nhập";
@@ -1200,6 +1322,19 @@ public sealed partial class AutoTickService : IAutoTickService
             else
             {
                 items = ExtractDocumentItemsFromSummary(summary);
+                if (items.Count == 0)
+                {
+                    var summaryH = sheet.Cell(r, 8).GetString().Trim();
+                    if (!string.IsNullOrWhiteSpace(summaryH))
+                    {
+                        var itemsH = ExtractDocumentItemsFromSummary(summaryH);
+                        if (itemsH.Count > 0)
+                        {
+                            items = itemsH;
+                        }
+                    }
+                }
+
                 if (items.Count == 0)
                 {
                     state.ProcessedRows++;
@@ -1938,12 +2073,77 @@ public sealed partial class AutoTickService : IAutoTickService
 
     private async Task<OneDriveDownloadResult> DownloadOneDriveFileAsync(string oneDriveUrl, CancellationToken ct)
     {
-        // If it's a local file path
+        // 0. If it's a local file path
         if (File.Exists(oneDriveUrl))
         {
             Stp.Infrastructure.Storage.FileStorage.SanitizeExcelPackage(oneDriveUrl);
             var info = new FileInfo(oneDriveUrl);
             return new OneDriveDownloadResult(oneDriveUrl, info.Name, true, null);
+        }
+
+        // 1. Google Sheets URL: https://docs.google.com/spreadsheets/d/{id}/...
+        var gsheetMatch = Regex.Match(oneDriveUrl, @"docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)", RegexOptions.IgnoreCase);
+        if (gsheetMatch.Success)
+        {
+            var sheetId = gsheetMatch.Groups[1].Value;
+            var exportUrl = $"https://docs.google.com/spreadsheets/d/{sheetId}/export?format=xlsx";
+
+            var tempDirG = Path.Combine(Path.GetTempPath(), "stp_onedrive");
+            Directory.CreateDirectory(tempDirG);
+            var tempFileG = Path.Combine(tempDirG, $"{Guid.NewGuid():N}_GoogleSheet_{sheetId}.xlsx");
+
+            using var resp = await _http.GetAsync(exportUrl, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+
+            var cd = resp.Content.Headers.ContentDisposition;
+            string gFileName = cd?.FileName?.Trim('"', '\'') ?? $"GoogleSheet_{sheetId}.xlsx";
+
+            await using (var fsG = File.Create(tempFileG))
+            {
+                await resp.Content.CopyToAsync(fsG, ct).ConfigureAwait(false);
+            }
+
+            Stp.Infrastructure.Storage.FileStorage.SanitizeExcelPackage(tempFileG);
+
+            bool canWrite = false;
+            try
+            {
+                var landingHtml = await _http.GetStringAsync(oneDriveUrl, ct).ConfigureAwait(false);
+                if (!landingHtml.Contains("Chỉ xem", StringComparison.OrdinalIgnoreCase) &&
+                    !landingHtml.Contains("docs-icon-visibility", StringComparison.OrdinalIgnoreCase))
+                {
+                    canWrite = true;
+                }
+            }
+            catch {}
+
+            return new OneDriveDownloadResult(tempFileG, gFileName, canWrite, null);
+        }
+
+        // 2. Google Drive File URL: https://drive.google.com/file/d/([a-zA-Z0-9-_]+)
+        var gdriveMatch = Regex.Match(oneDriveUrl, @"drive\.google\.com/file/d/([a-zA-Z0-9-_]+)", RegexOptions.IgnoreCase);
+        if (gdriveMatch.Success)
+        {
+            var fileId = gdriveMatch.Groups[1].Value;
+            var exportUrl = $"https://drive.google.com/uc?export=download&id={fileId}";
+
+            var tempDirD = Path.Combine(Path.GetTempPath(), "stp_onedrive");
+            Directory.CreateDirectory(tempDirD);
+            var tempFileD = Path.Combine(tempDirD, $"{Guid.NewGuid():N}_GoogleDrive_{fileId}.xlsx");
+
+            using var resp = await _http.GetAsync(exportUrl, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+
+            var cd = resp.Content.Headers.ContentDisposition;
+            string gdFileName = cd?.FileName?.Trim('"', '\'') ?? $"GoogleDrive_{fileId}.xlsx";
+
+            await using (var fsD = File.Create(tempFileD))
+            {
+                await resp.Content.CopyToAsync(fsD, ct).ConfigureAwait(false);
+            }
+
+            Stp.Infrastructure.Storage.FileStorage.SanitizeExcelPackage(tempFileD);
+            return new OneDriveDownloadResult(tempFileD, gdFileName, false, null);
         }
 
         // Fetch landing page
@@ -2268,6 +2468,180 @@ public sealed partial class AutoTickService : IAutoTickService
         }
 
         return count;
+    }
+
+    public async Task<CheckPermissionResponse> CheckPermissionAsync(string url, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return new CheckPermissionResponse { CanEdit = false, Message = "URL trống." };
+        }
+
+        url = url.Trim();
+        bool isGSheet = url.Contains("docs.google.com", StringComparison.OrdinalIgnoreCase) ||
+                        url.Contains("google.com/spreadsheets", StringComparison.OrdinalIgnoreCase);
+
+        if (!isGSheet)
+        {
+            return new CheckPermissionResponse
+            {
+                IsGoogleSheet = false,
+                CanEdit = true,
+                NeedsLogin = false,
+                Message = "Liên kết OneDrive / Excel Online."
+            };
+        }
+
+        var scriptCandidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "tools", "check_perms.py"),
+            Path.Combine(Directory.GetCurrentDirectory(), "tools", "check_perms.py"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "tools", "check_perms.py")
+        };
+        var scriptPath = scriptCandidates.FirstOrDefault(File.Exists) ?? scriptCandidates[0];
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = ResolvePythonExecutable(),
+            Arguments = $"\"{scriptPath}\" \"{url}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        ConfigurePlaywrightEnvironment(psi);
+
+        using var proc = Process.Start(psi);
+        if (proc is null)
+        {
+            return new CheckPermissionResponse { IsGoogleSheet = true, CanEdit = false, NeedsLogin = true, Message = "Không thể khởi động trình duyệt kiểm tra quyền." };
+        }
+
+        var stdoutSb = new StringBuilder();
+        proc.OutputDataReceived += (s, e) => { if (e.Data is not null) stdoutSb.AppendLine(e.Data); };
+        proc.BeginOutputReadLine();
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(35));
+
+        try
+        {
+            await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+            proc.WaitForExit();
+        }
+        catch
+        {
+            try { proc.Kill(true); } catch { }
+            return new CheckPermissionResponse { IsGoogleSheet = true, CanEdit = false, NeedsLogin = true, Message = "Kiểm tra quyền quá thời gian (timeout)." };
+        }
+
+        var outStr = stdoutSb.ToString().Trim();
+        try
+        {
+            var firstBrace = outStr.IndexOf('{');
+            var lastBrace = outStr.LastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace > firstBrace)
+            {
+                var jsonPart = outStr.Substring(firstBrace, lastBrace - firstBrace + 1);
+                var res = JsonSerializer.Deserialize<CheckPermissionResponse>(jsonPart, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (res is not null) return res;
+            }
+        }
+        catch { }
+
+        return new CheckPermissionResponse
+        {
+            IsGoogleSheet = true,
+            CanEdit = false,
+            NeedsLogin = true,
+            Message = !string.IsNullOrWhiteSpace(outStr) ? outStr : "Chưa xác định được quyền truy cập."
+        };
+    }
+
+    public object OpenInteractiveLogin(string url)
+    {
+        string rootDir = Directory.GetCurrentDirectory();
+        if (rootDir.EndsWith("Stp.Api", StringComparison.OrdinalIgnoreCase))
+        {
+            rootDir = Path.GetFullPath(Path.Combine(rootDir, "..", ".."));
+        }
+        var profileDir = Path.Combine(rootDir, "tools", "bot_profile");
+        Directory.CreateDirectory(profileDir);
+
+        var chromeCandidates = new[]
+        {
+            @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Google\Chrome\Application\chrome.exe")
+        };
+        var chromePath = chromeCandidates.FirstOrDefault(File.Exists) ?? "chrome.exe";
+
+        // Tạo file launcher .bat để tránh lỗi quote escaping trong schtasks và Windows Service
+        var batPath = Path.Combine(rootDir, "tools", "launch_login.bat");
+        try
+        {
+            File.WriteAllText(batPath, $"@echo off\r\nstart \"\" \"{chromePath}\" --user-data-dir=\"{profileDir}\" \"{url}\"\r\n");
+        }
+        catch { }
+
+        bool opened = false;
+
+        // Cách 1: Thử mở trực tiếp bằng Process.Start (hoạt động hoàn hảo khi chạy dạng user console/app)
+        try
+        {
+            var pDirect = Process.Start(new ProcessStartInfo
+            {
+                FileName = chromePath,
+                Arguments = $"--user-data-dir=\"{profileDir}\" \"{url}\"",
+                UseShellExecute = true
+            });
+            if (pDirect != null)
+            {
+                opened = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Mở Chrome trực tiếp thất bại, thử schtasks cho Windows Service...");
+        }
+
+        // Cách 2: Nếu mở trực tiếp thất bại (hoặc tiến trình đang chạy dạng Windows Service cách ly Session 0):
+        // Dùng schtasks với cờ /it để ép Windows bắn cửa sổ lên màn hình desktop của người dùng
+        if (!opened && File.Exists(batPath))
+        {
+            try
+            {
+                var pCreate = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "schtasks",
+                    Arguments = $"/create /tn \"StpBotLogin\" /tr \"\\\"{batPath}\\\"\" /sc once /st 00:00 /f /it",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                pCreate?.WaitForExit(3000);
+
+                var pRun = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "schtasks",
+                    Arguments = "/run /tn \"StpBotLogin\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                pRun?.WaitForExit(3000);
+                opened = true;
+            }
+            catch (Exception exSch)
+            {
+                _logger.LogError(exSch, "Mở Chrome qua schtasks thất bại");
+            }
+        }
+
+        if (opened)
+        {
+            return new { success = true, message = "Đã mở cửa sổ Chrome trên màn hình máy chủ để bạn đăng nhập Google!" };
+        }
+
+        return new { success = false, message = "Không thể mở cửa sổ trình duyệt tự động. Vui lòng mở Chrome trên máy chủ và truy cập liên kết Google Sheets." };
     }
 }
 

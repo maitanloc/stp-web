@@ -30,6 +30,35 @@ export interface LearnedPair {
 
 // ---------------------------- Chuẩn hoá ----------------------------
 
+export function preprocessSpokenText(text: string): string {
+  if (!text) return ''
+  let s = text
+
+  // 1. Áp nhanh / app dành / áp dành / áp ranh
+  s = s.replace(/\b(?:app|ap|ep)\s*(?:dành|ranh|nhanh)\b/gi, 'áp nhanh')
+  s = s.replace(/\b(?:áp|app)\s*dành\b/gi, 'áp nhanh')
+  s = s.replace(/\báp\s*ranh\b/gi, 'áp nhanh')
+  s = s.replace(/\báp\s*dành\s*cho\b/gi, 'áp nhanh cho')
+  s = s.replace(/\bapp\s*dành\s*cho\b/gi, 'áp nhanh cho')
+
+  // 2. Kết hôn / Thức hồn
+  s = s.replace(/\bgiấy\s*chứng\s*nhận\s*(?:thức|thực)\s*(?:hồn|hôn)\b/gi, 'giấy chứng nhận kết hôn')
+  s = s.replace(/\bchứng\s*nhận\s*(?:thức|thực)\s*(?:hồn|hôn)\b/gi, 'giấy chứng nhận kết hôn')
+  s = s.replace(/\b(?:thức|thực)\s*(?:hồn|hôn)\b/gi, 'kết hôn')
+  s = s.replace(/\bkết\s*hon\b/gi, 'kết hôn')
+  s = s.replace(/\bhết\s*hôn\b/gi, 'kết hôn')
+
+  // 3. Giấy tờ phổ biến
+  s = s.replace(/\bbộ\s*công\s*an\b/gi, 'bộ công hàm')
+  s = s.replace(/\bbản\s*sao\s*sổ\s*hộ\s*khẩu\b/gi, 'sổ hộ khẩu')
+  s = s.replace(/\bsổ\s*hộ\s*khẩu\s*gia\s*đình\b/gi, 'sổ hộ khẩu')
+  s = s.replace(/\btờ\s*khai\s*kết\s*hôn\b/gi, 'tờ khai đăng ký kết hôn')
+  s = s.replace(/\bchứng\s*minh\s*nhân\s*dân\b/gi, 'chứng minh nhân dân')
+  s = s.replace(/\bcăn\s*cước\s*công\s*dân\b/gi, 'căn cước công dân')
+
+  return s
+}
+
 export function normalizeSpeech(value: string): string {
   return value
     .normalize('NFD')

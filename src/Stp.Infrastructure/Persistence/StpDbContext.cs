@@ -50,6 +50,8 @@ public sealed class StpDbContext : DbContext
 
     public DbSet<DossierComment> DossierComments => Set<DossierComment>();
 
+    public DbSet<VoiceMemory> VoiceMemories => Set<VoiceMemory>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

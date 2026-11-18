@@ -49,7 +49,7 @@ const inspectData = ref<AutoTickInspectResponse | null>(null)
 const inspectError = ref<string | null>(null)
 
 // Filters
-const selectedSheet = ref('1997')
+const selectedSheet = ref('')
 const numberFrom = ref<number | ''>('')
 const numberTo = ref<number | ''>('')
 const selectedHeaderTitles = ref<string[]>([])
@@ -153,7 +153,23 @@ async function inspect(sheetOverride?: string): Promise<void> {
     // Select all headers by default
     selectedHeaderTitles.value = data.documentHeaders.map((h) => h.title)
 
-    toast.success('Quét thành công', `Tìm thấy ${data.totalRows} hồ sơ (${data.rowsWithParentheses} có ngoặc) trên sheet ${data.activeSheet}`)
+    const needTick = data.rowsUnticked + data.rowsPartiallyTicked
+    if (needTick > 0) {
+      toast.success(
+        'Quét thành công',
+        `Tìm thấy ${data.totalRows} hồ sơ (${needTick} hồ sơ cần đánh tick) trên sheet ${data.activeSheet}`
+      )
+    } else if (data.rowsWithParentheses > 0) {
+      toast.info(
+        'Đã quét xong',
+        `Sheet ${data.activeSheet}: ${data.totalRows} hồ sơ (${data.rowsWithParentheses} có ngoặc, tất cả đã đánh tick đủ).`
+      )
+    } else {
+      toast.info(
+        'Đã quét xong',
+        `Sheet ${data.activeSheet} có ${data.totalRows} hồ sơ (chưa có danh mục trong ngoặc). Hãy chọn sheet năm khác nếu có.`
+      )
+    }
   } catch (err) {
     inspectError.value = errorMessage(err)
     toast.error('Lỗi quét file OneDrive', inspectError.value)
@@ -188,6 +204,23 @@ function clearAllHeaders(): void {
 // Start AutoTick Macro
 async function startAutoTick(): Promise<void> {
   if (!oneDriveUrl.value.trim() || isRunning.value) return
+
+  // Kiểm tra nếu người dùng nhập khoảng số nằm ngoài phạm vi sheet
+  if (
+    inspectData.value?.minNumber &&
+    inspectData.value?.maxNumber &&
+    (numberFrom.value !== '' || numberTo.value !== '')
+  ) {
+    const from = numberFrom.value !== '' ? Number(numberFrom.value) : inspectData.value.minNumber
+    const to = numberTo.value !== '' ? Number(numberTo.value) : inspectData.value.maxNumber
+    if (to < inspectData.value.minNumber || from > inspectData.value.maxNumber) {
+      toast.warning(
+        'Khoảng số không khớp',
+        `Số ${from} - ${to} nằm ngoài phạm vi sheet ${selectedSheet.value} (từ ${inspectData.value.minNumber} đến ${inspectData.value.maxNumber}). Vui lòng kiểm tra lại.`
+      )
+      return
+    }
+  }
 
   isRunning.value = true
   startTime.value = Date.now()
@@ -263,11 +296,25 @@ function startPollingJobStatus(jobId: string): void {
           isRunning.value = false
 
           if (status.status === 'Completed') {
-            appendLog(`🎉 HOÀN THÀNH: Đã tick ${status.newlyTickedCellsCount} ô trên ${status.newlyTickedRowsCount} hồ sơ!`)
-            toast.success(
-              'Macro hoàn thành!',
-              `Đã tick ${status.newlyTickedCellsCount} ô trên ${status.newlyTickedRowsCount} hồ sơ. Bấm "Tải file" hoặc "Đồng bộ OneDrive máy" để cập nhật ngay.`,
-            )
+            if (status.totalRows === 0) {
+              appendLog(`⚠ Không tìm thấy hồ sơ nào phù hợp với bộ lọc số trên sheet ${status.sheetName}.`)
+              toast.warning(
+                'Không tìm thấy hồ sơ',
+                `Không có hồ sơ nào trong phạm vi đã chọn trên sheet ${status.sheetName}. Hãy kiểm tra lại số hồ sơ hoặc bấm "Tất cả" để không lọc số.`
+              )
+            } else if (status.newlyTickedRowsCount === 0) {
+              appendLog(`ℹ Hoàn thành: Tất cả ${status.totalRows} hồ sơ đã được đánh tick đủ hoặc không có giấy tờ mới cần tick.`)
+              toast.info(
+                'Hoàn thành đối soát',
+                `Đã kiểm tra ${status.totalRows} hồ sơ: tất cả đã có tick đủ hoặc không có giấy tờ trong ngoặc.`
+              )
+            } else {
+              appendLog(`🎉 HOÀN THÀNH: Đã tick ${status.newlyTickedCellsCount} ô trên ${status.newlyTickedRowsCount} hồ sơ!`)
+              toast.success(
+                'Macro hoàn thành!',
+                `Đã tick ${status.newlyTickedCellsCount} ô trên ${status.newlyTickedRowsCount} hồ sơ. Bấm "Tải file" hoặc "Đồng bộ OneDrive máy" để cập nhật ngay.`,
+              )
+            }
             void inspect()
           } else if (status.status === 'Cancelled') {
             appendLog('⏹ Đã dừng Macro theo yêu cầu.')
@@ -442,7 +489,7 @@ onBeforeUnmount(() => {
                 Live Spreadsheet Studio
               </span>
             </div>
-            <h1 class="page-title" style="margin: 0">Tự Động Đánh Dấu OneDrive</h1>
+            <h1 class="page-title" style="margin: 0">Tự Động Đánh Dấu OneDrive / Google Sheets</h1>
             <p class="page-subtitle" style="margin: 0">
               Đối soát danh mục giấy tờ trong ngoặc trích yếu <code class="tag-code">(...)</code> và chiếu trực tiếp màn hình bảng tính đánh tick tự động.
             </p>
@@ -469,7 +516,7 @@ onBeforeUnmount(() => {
             v-model="oneDriveUrl"
             type="text"
             class="input url-field"
-            placeholder="Dán liên kết chia sẻ file Excel OneDrive tại đây..."
+            placeholder="Dán liên kết OneDrive, Google Sheets hoặc Google Drive tại đây..."
             @keydown.enter="inspect()"
           />
           <button type="button" class="btn btn-secondary btn-sm url-paste-btn" @click="pasteFromClipboard">
@@ -569,6 +616,21 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
+      <!-- Helpful notice if sheet has 0 unticked -->
+      <div
+        v-if="inspectData.rowsUnticked + inspectData.rowsPartiallyTicked === 0"
+        class="card"
+        style="padding: 12px 16px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px"
+      >
+        <div class="row" style="gap: 10px; align-items: center">
+          <span style="font-size: 16px">ℹ️</span>
+          <span style="font-size: 13px; color: var(--text)">
+            Sheet <strong>{{ inspectData.activeSheet }}</strong>: Mọi hồ sơ đã được đánh tick đủ (hoặc không có danh mục trong ngoặc).
+            Nếu bạn muốn đánh tick hồ sơ của năm khác (ví dụ: sheet <strong>2000</strong>), hãy bấm chọn tab sheet ở trên.
+          </span>
+        </div>
+      </div>
+
       <!-- 4 Stat Cards -->
       <div class="stat-grid">
         <div class="card stat-card">
@@ -606,20 +668,52 @@ onBeforeUnmount(() => {
             <div class="row wrap" style="gap: 12px; align-items: flex-end">
               <label class="field" style="margin: 0">
                 <span class="label">Từ số hồ sơ</span>
-                <input v-model="numberFrom" type="number" class="input input-sm" placeholder="VD: 2502" style="width: 110px" />
+                <input
+                  v-model="numberFrom"
+                  type="number"
+                  class="input input-sm"
+                  :placeholder="inspectData?.minNumber ? `Từ ${inspectData.minNumber}` : 'Từ số'"
+                  style="width: 110px"
+                />
               </label>
               <label class="field" style="margin: 0">
                 <span class="label">Đến số hồ sơ</span>
-                <input v-model="numberTo" type="number" class="input input-sm" placeholder="VD: 2504" style="width: 110px" />
+                <input
+                  v-model="numberTo"
+                  type="number"
+                  class="input input-sm"
+                  :placeholder="inspectData?.maxNumber ? `Đến ${inspectData.maxNumber}` : 'Đến số'"
+                  style="width: 110px"
+                />
               </label>
 
               <!-- Quick Presets -->
-              <div class="row" style="gap: 4px; margin-bottom: 2px">
-                <button type="button" class="btn btn-ghost btn-sm preset-btn" @click="applyPresetRange(2502, 2504)">
-                  Mẫu 2502 - 2504
+              <div class="row wrap" style="gap: 4px; margin-bottom: 2px">
+                <button
+                  v-if="inspectData?.untickedMinNumber && inspectData?.untickedMaxNumber"
+                  type="button"
+                  class="btn btn-sm btn-brand preset-btn"
+                  style="font-weight: 700"
+                  :title="`Chọn ${inspectData.rowsUnticked + inspectData.rowsPartiallyTicked} hồ sơ cần đánh tick`"
+                  @click="applyPresetRange(inspectData.untickedMinNumber, inspectData.untickedMaxNumber)"
+                >
+                  ⚡ Cần tick: {{ inspectData.untickedMinNumber }} - {{ inspectData.untickedMaxNumber }}
                 </button>
-                <button type="button" class="btn btn-ghost btn-sm preset-btn" @click="applyPresetRange(1, 100)">
-                  1 - 100
+                <button
+                  v-if="inspectData?.minNumber && inspectData?.maxNumber"
+                  type="button"
+                  class="btn btn-ghost btn-sm preset-btn"
+                  @click="applyPresetRange(inspectData.minNumber, Math.min(inspectData.minNumber + 9, inspectData.maxNumber))"
+                >
+                  10 số đầu
+                </button>
+                <button
+                  v-if="inspectData?.minNumber && inspectData?.maxNumber"
+                  type="button"
+                  class="btn btn-ghost btn-sm preset-btn"
+                  @click="applyPresetRange(inspectData.minNumber, inspectData.maxNumber)"
+                >
+                  Toàn bộ ({{ inspectData.minNumber }} - {{ inspectData.maxNumber }})
                 </button>
                 <button type="button" class="btn btn-ghost btn-sm preset-btn" @click="numberFrom = ''; numberTo = ''">
                   Tất cả

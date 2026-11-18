@@ -255,3 +255,24 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.HasIndex(x => x.CreatedAt);
     }
 }
+
+public sealed class VoiceMemoryConfiguration : IEntityTypeConfiguration<VoiceMemory>
+{
+    public void Configure(EntityTypeBuilder<VoiceMemory> builder)
+    {
+        builder.ToTable("VoiceMemories");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.RawSpeech).HasMaxLength(1000).IsRequired();
+        builder.Property(x => x.CleanSpeech).HasMaxLength(1000).IsRequired();
+        builder.Property(x => x.Command).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.ItemsJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.SheetNumber).HasMaxLength(100);
+        builder.Property(x => x.TargetDocumentNumber).HasMaxLength(100);
+        builder.Property(x => x.Actor).HasMaxLength(100).IsRequired();
+
+        builder.HasIndex(x => x.CleanSpeech);
+        builder.HasIndex(x => x.UsageCount);
+        builder.HasIndex(x => x.LastUsedAt);
+    }
+}

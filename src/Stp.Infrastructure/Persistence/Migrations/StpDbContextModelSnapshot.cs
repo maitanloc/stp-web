@@ -906,6 +906,69 @@ namespace Stp.Infrastructure.Persistence.Migrations
                     b.ToTable("SyncSessions", (string)null);
                 });
 
+            modelBuilder.Entity("Stp.Core.Domain.VoiceMemory", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("CleanSpeech")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Command")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ItemsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("LastUsedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RawSpeech")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("SheetNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("TargetDocumentNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("TargetRowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int>("UsageCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CleanSpeech");
+
+                    b.HasIndex("LastUsedAt");
+
+                    b.HasIndex("UsageCount");
+
+                    b.ToTable("VoiceMemories", (string)null);
+                });
+
             modelBuilder.Entity("Stp.Core.Domain.ArchiveYear", b =>
                 {
                     b.HasOne("Stp.Core.Domain.ArchiveWorkbook", "Workbook")

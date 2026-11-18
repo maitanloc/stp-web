@@ -21,6 +21,13 @@
     <ProjectReference Include="..\Stp.Infrastructure\Stp.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\tools\*.py">
+      <Link>tools\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <!--
     Giao diện SPA: "npm run build" ở src/Stp.Web tạo dist/, target này dồn vào
     wwwroot để API serve trọn gói một cổng (share link được luôn).

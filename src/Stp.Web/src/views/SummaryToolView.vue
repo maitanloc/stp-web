@@ -3,10 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   ArrowRight,
+  Bell,
+  BellOff,
   Check,
   CircleCheck,
   Clock,
   Cloud,
+  Copy,
   Database,
   Download,
   Eraser,
@@ -17,6 +20,7 @@ import {
   FolderClock,
   Info,
   LogOut,
+  MessageSquare,
   Mic,
   Radio,
   RefreshCw,
@@ -65,6 +69,7 @@ import {
   applyLearned,
   normalizeSpeech,
   parseVoiceTranscript,
+  preprocessSpokenText,
 } from '../lib/voiceParser'
 import { useVoiceInput } from '../composables/useVoiceInput'
 import EmptyState from '../components/EmptyState.vue'
@@ -372,6 +377,92 @@ watch(lastOneDriveSyncCompleted, (completed) => {
     toast.success('Đồng bộ OneDrive thành công!', completed.message)
   } else {
     toast.error('Đồng bộ OneDrive chưa hoàn tất', completed.message)
+  }
+})
+
+// Kiểm tra quyền Sửa / Đăng nhập Google tức thì cho link Cloud
+interface LinkPermissionStatus {
+  isGoogleSheet: boolean
+  canEdit: boolean
+  needsLogin: boolean
+  title?: string
+  message: string
+}
+
+const checkingLinkPermission = ref(false)
+const linkPermissionStatus = ref<LinkPermissionStatus | null>(null)
+const openingLoginWindow = ref(false)
+let checkPermissionDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+async function checkLinkPermission(urlToCheck?: string): Promise<void> {
+  const target = (urlToCheck ?? oneDriveUrl.value).trim()
+  if (!target) {
+    linkPermissionStatus.value = null
+    return
+  }
+  checkingLinkPermission.value = true
+  try {
+    const res = await request<LinkPermissionStatus>('/api/auto-tick/check-permission', {
+      method: 'POST',
+      body: { url: target },
+    })
+    linkPermissionStatus.value = res
+  } catch (err) {
+    linkPermissionStatus.value = {
+      isGoogleSheet: target.includes('docs.google.com') || target.includes('google.com/spreadsheets'),
+      canEdit: false,
+      needsLogin: true,
+      message: errorMessage(err) || 'Không thể kiểm tra quyền truy cập link.',
+    }
+  } finally {
+    checkingLinkPermission.value = false
+  }
+}
+
+async function openInteractiveLogin(): Promise<void> {
+  const target = oneDriveUrl.value.trim()
+  if (!target) return
+  openingLoginWindow.value = true
+  try {
+    await request('/api/auto-tick/open-login', {
+      method: 'POST',
+      body: { url: target },
+    })
+    toast.info('Cửa sổ đăng nhập đã mở', 'Sau khi đăng nhập trên cửa sổ Chrome, hệ thống sẽ tự động nhận diện quyền Sửa mà không cần bấm kiểm tra lại.')
+
+    // Tự động kiểm tra liên tục mỗi 3 giây để tự chuyển sang Xanh ngay khi vừa đăng nhập xong
+    let pollCount = 0
+    const pollTimer = setInterval(async () => {
+      pollCount++
+      if (pollCount > 40 || !oneDriveSyncModalOpen.value || linkPermissionStatus.value?.canEdit) {
+        clearInterval(pollTimer)
+        return
+      }
+      await checkLinkPermission(target)
+      if (linkPermissionStatus.value?.canEdit) {
+        clearInterval(pollTimer)
+        toast.success('Đã xác thực thành công!', 'Tài khoản có quyền Chỉnh sửa sẵn sàng.')
+      }
+    }, 3000)
+  } catch (err) {
+    toast.error('Lỗi mở cửa sổ', errorMessage(err))
+  } finally {
+    openingLoginWindow.value = false
+  }
+}
+
+watch(oneDriveUrl, (newVal) => {
+  if (checkPermissionDebounceTimer) clearTimeout(checkPermissionDebounceTimer)
+  checkPermissionDebounceTimer = setTimeout(() => {
+    if (oneDriveSyncModalOpen.value && newVal.trim()) {
+      void checkLinkPermission(newVal)
+    }
+  }, 700)
+})
+
+watch(oneDriveSyncModalOpen, (isOpen) => {
+  if (isOpen && oneDriveUrl.value.trim()) {
+    void checkLinkPermission()
   }
 })
 
@@ -1329,8 +1420,16 @@ function toggleAutoNext(): void {
 /** Dòng chưa có danh mục kế tiếp trong danh sách đang xem (vòng về đầu). */
 function nextMissingRow(afterRowNumber: number): SummaryRowResponse | null {
   const ordered = [...rows.value].sort((a, b) => a.rowNumber - b.rowNumber)
+  if (ordered.length === 0) return null
+  if (afterRowNumber <= 0) {
+    const firstMissing = ordered.find((row) => itemsFor(row).length === 0)
+    return firstMissing ?? ordered[0]
+  }
   const index = ordered.findIndex((row) => row.rowNumber === afterRowNumber)
-  if (index < 0) return null
+  if (index < 0) {
+    const firstMissing = ordered.find((row) => itemsFor(row).length === 0)
+    return firstMissing ?? ordered[0]
+  }
   for (let step = 1; step <= ordered.length; step++) {
     const candidate = ordered[(index + step) % ordered.length]
     if (candidate.rowNumber === afterRowNumber) return null
@@ -1418,8 +1517,7 @@ async function applyToMissingInScope(): Promise<void> {
   const active = session.value
   if (!active || !scopeReady.value) return
   if (bulkItems.value.length === 0) {
-    toast.warning('Chưa chọn giấy tờ', 'Chọn danh mục giấy tờ cần áp dụng trước.')
-    return
+    bulkItems.value = [...STANDARD_SEVEN]
   }
 
   applyingMissing.value = true
@@ -1506,102 +1604,153 @@ async function quickExportFiltered(): Promise<void> {
  * Parser + từ vựng nằm ở lib/voiceParser.ts (thuần, test được).
  */
 
-const voiceInputText = ref('')
-const voiceTextAreaRef = ref<HTMLTextAreaElement | null>(null)
-
-const {
-  supported: voiceSupported,
-  listening: voiceListening,
-  interim: voiceInterim,
-  volume: voiceVolume,
-  start: startVoiceInput,
-  stop: stopVoiceInput,
-  toggle: toggleVoiceInput,
-  clear: clearVoiceInput,
-} = useVoiceInput({
-  onFinal: (text) => {
-    void handleVoiceFinal(text)
-  },
-  onInterim: (text) => {
-    voiceInterim.value = text
-    voiceInputText.value = text
-    nextTick(() => {
-      if (voiceTextAreaRef.value) {
-        voiceTextAreaRef.value.scrollTop = voiceTextAreaRef.value.scrollHeight
-      }
-    })
-  },
-  onError: (message) => {
-    if (message) toast.error('Không nghe được', message)
-  },
-})
-
-const voiceLastHeard = ref('')
-const voiceAiParsing = ref(false)
-const voicePttActive = ref(false)
-const voiceLastAiModel = ref('')
-let pttMouseDownTimer: number | undefined
-
-function startVoice(): void {
-  if (!voiceSupported.value) {
-    toast.warning('Trình duyệt chưa hỗ trợ', 'Đọc giọng nói cần Chrome hoặc Edge (Web Speech API, tiếng Việt).')
-    return
-  }
-  voiceConsoleOpen.value = true
-  playNotificationSound('start')
-  startVoiceInput()
-}
-
-function stopVoice(): void {
-  stopVoiceInput(true)
-}
-
-function submitVoiceText(): void {
-  const text = (voiceInputText.value || voiceInterim.value || '').trim()
-  if (!text) return
-  if (voiceListening.value) {
-    stopVoiceInput(false)
-  }
-  clearVoiceInput()
-  void handleVoiceFinal(text)
-}
-
-function clearVoiceText(): void {
-  clearVoiceInput()
-  voiceInterim.value = ''
-  voiceInputText.value = ''
-}
-
-function onPttMouseDown(): void {
-  pttMouseDownTimer = window.setTimeout(() => {
-    if (!voiceListening.value) {
-      voicePttActive.value = true
-      startVoice()
-    }
-  }, 180)
-}
-
-function onPttMouseUp(): void {
-  if (pttMouseDownTimer) {
-    window.clearTimeout(pttMouseDownTimer)
-    pttMouseDownTimer = undefined
-  }
-  if (voicePttActive.value) {
-    voicePttActive.value = false
-    stopVoice()
-  }
-}
-
 const VOICE_TTS_KEY = 'stp.voiceTts'
+const VOICE_CHIME_KEY = 'stp.voiceChime'
 const voiceTtsEnabled = ref<boolean>(readVoiceTts())
+const voiceChimeEnabled = ref<boolean>(readVoiceChime())
 const voiceConsoleOpen = ref(true)
-const voiceLastAiResult = ref<{
-  items: string[]
-  command?: string | null
-  sheetNumber?: string | null
-  model?: string | null
-  targetRowNumber?: number | null
-} | null>(null)
+
+function readVoiceChime(): boolean {
+  try {
+    const val = localStorage.getItem(VOICE_CHIME_KEY)
+    return val === null ? true : val === 'true'
+  } catch {
+    return true
+  }
+}
+
+function toggleVoiceChime(): void {
+  voiceChimeEnabled.value = !voiceChimeEnabled.value
+  try {
+    localStorage.setItem(VOICE_CHIME_KEY, String(voiceChimeEnabled.value))
+  } catch {}
+  if (voiceChimeEnabled.value) {
+    playNotificationSound('success')
+  }
+}
+
+function readVoiceTts(): boolean {
+  try {
+    const val = localStorage.getItem(VOICE_TTS_KEY)
+    return val === null ? true : val === 'true'
+  } catch {
+    return true
+  }
+}
+
+function toggleVoiceTts(): void {
+  voiceTtsEnabled.value = !voiceTtsEnabled.value
+  try {
+    localStorage.setItem(VOICE_TTS_KEY, String(voiceTtsEnabled.value))
+  } catch {}
+  if (voiceTtsEnabled.value) {
+    speakVoiceFeedback('Đã bật giọng nói phản hồi.')
+  } else {
+    stopAnySpeech()
+  }
+}
+
+function playNotificationSound(type: 'start' | 'success' = 'success'): void {
+  if (!voiceChimeEnabled.value) return
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    const now = ctx.currentTime
+
+    if (type === 'start') {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(587.33, now) // D5
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.08) // A5
+      gain.gain.setValueAtTime(0.05, now)
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now)
+      osc.stop(now + 0.1)
+    } else if (type === 'success') {
+      // Chuông báo êm dịu (Harp chime) E5 -> B5
+      const notes = [659.25, 987.77]
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'triangle'
+        osc.frequency.setValueAtTime(freq, now + i * 0.07)
+        gain.gain.setValueAtTime(0.07, now + i * 0.07)
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.2)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(now + i * 0.07)
+        osc.stop(now + i * 0.07 + 0.2)
+      })
+    }
+  } catch {
+    // Bỏ qua nếu audio context bị chặn
+  }
+}
+
+const isAiSpeaking = ref(false)
+let sharedTtsAudio: HTMLAudioElement | null = null
+let voiceClearOnNextSpeech = false
+let voiceAutoClearTimer: number | null = null
+
+function scheduleVoiceInputClear(): void {
+  voiceClearOnNextSpeech = true
+  if (voiceAutoClearTimer) {
+    window.clearTimeout(voiceAutoClearTimer)
+    voiceAutoClearTimer = null
+  }
+  // Tự động dọn dẹp ô văn bản sau 2.5 giây khi câu lệnh đã được thực thi và người dùng đang im lặng,
+  // tránh tình trạng chữ cũ ("Xin chào", câu trước) bị kẹt mãi trên màn hình!
+  voiceAutoClearTimer = window.setTimeout(() => {
+    voiceAutoClearTimer = null
+    voiceInputText.value = ''
+    voiceInterim.value = ''
+    voiceClearOnNextSpeech = false
+  }, 2500)
+}
+
+function getOrCreateTtsAudio(): HTMLAudioElement {
+  if (!sharedTtsAudio && typeof Audio !== 'undefined') {
+    sharedTtsAudio = new Audio()
+    sharedTtsAudio.preload = 'auto'
+    sharedTtsAudio.addEventListener('playing', () => {
+      isAiSpeaking.value = true
+    })
+    sharedTtsAudio.addEventListener('ended', () => {
+      isAiSpeaking.value = false
+    })
+    sharedTtsAudio.addEventListener('pause', () => {
+      isAiSpeaking.value = false
+    })
+    sharedTtsAudio.addEventListener('error', (e) => {
+      console.warn('[TTS Audio Error]', e)
+      isAiSpeaking.value = false
+    })
+  }
+  return sharedTtsAudio!
+}
+
+function stopAnySpeech(): void {
+  if (sharedTtsAudio) {
+    try {
+      sharedTtsAudio.pause()
+      sharedTtsAudio.removeAttribute('src')
+      sharedTtsAudio.load()
+      sharedTtsAudio.currentTime = 0
+    } catch {}
+  }
+  if ('speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel()
+    } catch {}
+  }
+  isAiSpeaking.value = false
+}
 
 let vietnameseVoice: SpeechSynthesisVoice | null = null
 const vietnameseVoiceName = ref<string>('')
@@ -1652,107 +1801,203 @@ function initVoices(): void {
   }
 }
 
-function playNotificationSound(type: 'start' | 'success' = 'success'): void {
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    if (!AudioCtx) return
-    const ctx = new AudioCtx()
-    const now = ctx.currentTime
-
-    if (type === 'start') {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(587.33, now) // D5
-      osc.frequency.exponentialRampToValueAtTime(880, now + 0.08) // A5
-      gain.gain.setValueAtTime(0.05, now)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1)
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(now)
-      osc.stop(now + 0.1)
-    } else if (type === 'success') {
-      // Chuông báo êm dịu (Harp chime) E5 -> B5
-      const notes = [659.25, 987.77]
-      notes.forEach((freq, i) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.type = 'triangle'
-        osc.frequency.setValueAtTime(freq, now + i * 0.07)
-        gain.gain.setValueAtTime(0.07, now + i * 0.07)
-        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.2)
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        osc.start(now + i * 0.07)
-        osc.stop(now + i * 0.07 + 0.2)
-      })
-    }
-  } catch {
-    // Bỏ qua nếu audio context bị chặn
-  }
-}
-
-function readVoiceTts(): boolean {
-  try {
-    const val = localStorage.getItem(VOICE_TTS_KEY)
-    return val === null ? true : val === 'true'
-  } catch {
-    return true
-  }
-}
-
-function toggleVoiceTts(): void {
-  voiceTtsEnabled.value = !voiceTtsEnabled.value
-  try {
-    localStorage.setItem(VOICE_TTS_KEY, String(voiceTtsEnabled.value))
-  } catch {}
-  if (voiceTtsEnabled.value) {
-    speakVoiceFeedback('Đã bật giọng nói phản hồi.')
-  } else {
-    window.speechSynthesis?.cancel()
-  }
-}
-
 function speakVoiceFeedback(text: string): void {
+  // Chuông báo độc lập: phát ting-ting khi chuông bật
+  if (voiceChimeEnabled.value) {
+    playNotificationSound('success')
+  }
+
+  // Giọng nói AI: nếu tắt tiếng thì không phát âm thanh giọng đọc
   if (!voiceTtsEnabled.value) return
 
-  // Luôn phát chuông báo hoàn thành tinh tế (Web Audio chime)
-  playNotificationSound('success')
+  const cleanText = text.trim()
+  if (!cleanText) return
 
-  if (!('speechSynthesis' in window)) return
+  // Dừng mọi âm thanh TTS đang phát dở trước khi nói câu mới
+  stopAnySpeech()
+
+  // 1. Ưu tiên cao nhất: Phát giọng đọc tiếng Việt chuẩn (Vietnamese TTS qua /api/summary/ai/tts)
   try {
-    window.speechSynthesis.cancel()
-
-    if (!vietnameseVoice) {
-      vietnameseVoice = detectVietnameseVoice()
-      if (vietnameseVoice) {
-        const cleanName = vietnameseVoice.name
-          .replace(/(Microsoft|Google|Online|\(Natural\)|Vietnam|Desktop)/gi, '')
-          .trim()
-        vietnameseVoiceName.value = cleanName || 'Tiếng Việt'
-      }
+    const audio = getOrCreateTtsAudio()
+    audio.src = `/api/summary/ai/tts?text=${encodeURIComponent(cleanText)}`
+    isAiSpeaking.value = true
+    const playPromise = audio.play()
+    if (playPromise !== undefined) {
+      playPromise.catch((playErr) => {
+        console.warn('[TTS] Audio play bị chặn hoặc lỗi:', playErr)
+        isAiSpeaking.value = false
+        // CHỈ fallback sang browser Web Speech nếu máy tính THẬT SỰ CÓ GIỌNG TIẾNG VIỆT
+        // Tuyệt đối không để Microsoft David (tiếng Anh) đọc bậy!
+        fallbackBrowserSpeech(cleanText)
+      })
     }
+  } catch (err) {
+    console.warn('[TTS] Lỗi phát Audio:', err)
+    isAiSpeaking.value = false
+    fallbackBrowserSpeech(cleanText)
+  }
+}
 
-    // NẾU KHÔNG CÓ GIỌNG TIẾNG VIỆT CHUẨN: TUYỆT ĐỐI KHÔNG DÙNG GIỌNG TIẾNG ANH (Microsoft David) ĐỌC TIẾNG VIỆT
-    if (!vietnameseVoice) {
-      console.warn('Trình duyệt chưa có giọng đọc tiếng Việt — đã phát chuông báo hoàn thành.')
-      return
-    }
-
+function fallbackBrowserSpeech(text: string): void {
+  if (!('speechSynthesis' in window)) return
+  if (!vietnameseVoice) {
+    vietnameseVoice = detectVietnameseVoice()
+  }
+  // TUYỆT ĐỐI không gọi nếu không có voice tiếng Việt! Tránh bị Microsoft David (English) đọc tiếng Việt
+  if (!vietnameseVoice) {
+    console.warn('[TTS] Không có voice tiếng Việt cục bộ, bỏ qua Web Speech fallback để tránh tiếng Anh.')
+    return
+  }
+  try {
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.voice = vietnameseVoice
     utterance.lang = vietnameseVoice.lang || 'vi-VN'
     utterance.rate = 1.02
     utterance.pitch = 1.0
+    utterance.onstart = () => {
+      isAiSpeaking.value = true
+    }
+    utterance.onend = () => {
+      isAiSpeaking.value = false
+    }
+    utterance.onerror = () => {
+      isAiSpeaking.value = false
+    }
     window.speechSynthesis.speak(utterance)
   } catch (err) {
     console.warn('Speech synthesis error:', err)
+    isAiSpeaking.value = false
   }
 }
 
+const voiceInputText = ref('')
+const voiceTextAreaRef = ref<HTMLTextAreaElement | null>(null)
+
+const {
+  supported: voiceSupported,
+  listening: voiceListening,
+  interim: voiceInterim,
+  volume: voiceVolume,
+  start: startVoiceInput,
+  stop: stopVoiceInput,
+  toggle: toggleVoiceInput,
+  clear: clearVoiceInput,
+} = useVoiceInput({
+  onFinal: (text) => {
+    void handleVoiceFinal(text)
+  },
+  onSpeechOnset: () => {
+    // 1. CÂM HỌNG AI NGAY LẬP TỨC TRONG 16MS khi micro phát hiện tiếng nói (không đợi transcript, không độ trễ)
+    stopAnySpeech()
+
+    // 2. Xóa sạch text cũ của câu trước ngay khi người dùng mở miệng nói câu mới
+    if (voiceClearOnNextSpeech || voiceAutoClearTimer) {
+      voiceInputText.value = ''
+      voiceInterim.value = ''
+      voiceClearOnNextSpeech = false
+    }
+    if (voiceAutoClearTimer) {
+      window.clearTimeout(voiceAutoClearTimer)
+      voiceAutoClearTimer = null
+    }
+  },
+  onInterim: (text) => {
+    // Nếu AI vẫn đang phát âm thanh thì dập tắt ngay
+    stopAnySpeech()
+
+    voiceInterim.value = text
+    if (text) {
+      voiceClearOnNextSpeech = false
+      voiceInputText.value = text
+      nextTick(() => {
+        if (voiceTextAreaRef.value) {
+          voiceTextAreaRef.value.scrollTop = voiceTextAreaRef.value.scrollHeight
+        }
+      })
+    }
+  },
+  onError: (message) => {
+    if (message) toast.error('Không nghe được', message)
+  },
+})
+
+const voiceLastHeard = ref('')
+const voiceAiParsing = ref(false)
+const voicePttActive = ref(false)
+const voiceLastAiModel = ref('')
+let pttMouseDownTimer: number | undefined
+
+function startVoice(): void {
+  if (!voiceSupported.value) {
+    toast.warning('Trình duyệt chưa hỗ trợ', 'Đọc giọng nói cần Chrome hoặc Edge (Web Speech API, tiếng Việt).')
+    return
+  }
+  // Câm miệng AI ngay lập tức khi mở mic
+  stopAnySpeech()
+  voiceConsoleOpen.value = true
+  playNotificationSound('start')
+  startVoiceInput()
+}
+
+function stopVoice(): void {
+  stopVoiceInput(true)
+}
+
+function submitVoiceText(): void {
+  stopAnySpeech()
+  const text = (voiceInputText.value || voiceInterim.value || '').trim()
+  if (!text) return
+  if (voiceListening.value) {
+    stopVoiceInput(false)
+  }
+  clearVoiceInput()
+  void handleVoiceFinal(text)
+}
+
+function clearVoiceText(): void {
+  stopAnySpeech()
+  clearVoiceInput()
+  voiceInterim.value = ''
+  voiceInputText.value = ''
+  voiceClearOnNextSpeech = false
+  if (voiceAutoClearTimer) {
+    window.clearTimeout(voiceAutoClearTimer)
+    voiceAutoClearTimer = null
+  }
+}
+
+function onPttMouseDown(): void {
+  pttMouseDownTimer = window.setTimeout(() => {
+    if (!voiceListening.value) {
+      voicePttActive.value = true
+      startVoice()
+    }
+  }, 180)
+}
+
+function onPttMouseUp(): void {
+  if (pttMouseDownTimer) {
+    window.clearTimeout(pttMouseDownTimer)
+    pttMouseDownTimer = undefined
+  }
+  if (voicePttActive.value) {
+    voicePttActive.value = false
+    stopVoice()
+  }
+}
+
+const voiceLastAiResult = ref<{
+  items: string[]
+  command?: string | null
+  sheetNumber?: string | null
+  model?: string | null
+  targetRowNumber?: number | null
+  targetLabel?: string | null
+  reply?: string | null
+} | null>(null)
+
 function onMicPillClick(): void {
+  stopAnySpeech()
   voiceConsoleOpen.value = true
   toggleVoice()
 }
@@ -1799,6 +2044,126 @@ function rememberVoiceCorrection(heard: string, fixed: string): void {
       // Học là tiện ích — không lưu được thì bỏ qua.
     }
   }, 700)
+}
+
+/** Hành động chờ người dùng xác nhận (Interactive Confirmation Turn) */
+export interface VoicePendingAction {
+  rawPrompt: string
+  cleanedPrompt: string
+  command: string
+  items: string[]
+  targetRowNumber?: number | null
+  targetDocumentNumber?: number | null
+  sheetNumber?: string | null
+  question: string
+}
+
+const voicePendingAction = ref<VoicePendingAction | null>(null)
+
+/** Bộ nhớ lưu trữ câu prompt & bài học thông minh */
+export interface VoicePromptMemory {
+  id: string
+  time: string
+  raw: string
+  fixed: string
+  action: string
+  items: string[]
+}
+
+const VOICE_MEMORY_KEY = 'stp.voiceMemory'
+const voiceMemoryList = ref<VoicePromptMemory[]>(readVoiceMemory())
+
+function readVoiceMemory(): VoicePromptMemory[] {
+  try {
+    const raw = localStorage.getItem(VOICE_MEMORY_KEY)
+    const list = raw ? (JSON.parse(raw) as unknown) : []
+    if (!Array.isArray(list)) return []
+    return (list as VoicePromptMemory[]).slice(0, 50)
+  } catch {
+    return []
+  }
+}
+
+function saveVoiceMemory(item: VoicePromptMemory): void {
+  voiceMemoryList.value = [item, ...voiceMemoryList.value.filter((m) => m.raw !== item.raw)].slice(0, 50)
+  try {
+    localStorage.setItem(VOICE_MEMORY_KEY, JSON.stringify(voiceMemoryList.value))
+  } catch {
+    // Tiện ích lưu trữ - bỏ qua nếu không lưu được
+  }
+}
+
+async function executeVoicePendingAction(): Promise<void> {
+  const pending = voicePendingAction.value
+  if (!pending) return
+
+  // 1. Thực hiện lệnh tương ứng
+  if (pending.command === 'apply_missing') {
+    selected.value.clear()
+    if (pending.items && pending.items.length > 0) {
+      bulkItems.value = [...pending.items]
+    } else if (bulkItems.value.length === 0) {
+      bulkItems.value = [...STANDARD_SEVEN]
+    }
+    await applyToMissingInScope()
+    const fb = `Đã xác nhận và áp nhanh ${bulkItems.value.length} giấy tờ cho toàn bộ các dòng lọc còn thiếu.`
+    if (voiceLastAiResult.value) {
+      voiceLastAiResult.value.items = [...bulkItems.value]
+      voiceLastAiResult.value.reply = fb
+    }
+    toast.success('⚡ AI: Áp nhanh thành công', fb)
+    speakVoiceFeedback(fb)
+  } else if (pending.command === 'clear_items') {
+    bulkItems.value = []
+    const fb = 'Đã xóa sạch giấy tờ.'
+    if (voiceLastAiResult.value) {
+      voiceLastAiResult.value.items = []
+      voiceLastAiResult.value.reply = fb
+    }
+    toast.info('⚡ AI: ' + fb)
+    speakVoiceFeedback(fb)
+  }
+
+  // 2. Học từ nghe sai (Continuous Learning Memory)
+  if (pending.rawPrompt !== pending.cleanedPrompt) {
+    rememberVoiceCorrection(pending.rawPrompt, pending.cleanedPrompt)
+  }
+  saveVoiceMemory({
+    id: Math.random().toString(36).slice(2, 9),
+    time: new Date().toLocaleTimeString('vi-VN'),
+    raw: pending.rawPrompt,
+    fixed: pending.cleanedPrompt,
+    action: pending.command,
+    items: [...pending.items],
+  })
+
+  // 3. Lưu vĩnh viễn vào CSDL SQL Server để hệ thống tự động học tập (Dynamic Few-Shot Learning)
+  try {
+    void request('/api/summary/ai/memories', {
+      method: 'POST',
+      body: {
+        rawSpeech: pending.rawPrompt,
+        command: pending.command,
+        items: pending.items,
+        sheetNumber: pending.sheetNumber,
+        targetRowNumber: pending.targetRowNumber,
+        targetDocumentNumber: pending.targetDocumentNumber,
+      },
+    })
+  } catch {}
+
+  voicePendingAction.value = null
+  scheduleVoiceInputClear()
+}
+
+function cancelVoicePendingAction(): void {
+  voicePendingAction.value = null
+  const fb = 'Đã hủy thao tác.'
+  if (voiceLastAiResult.value) {
+    voiceLastAiResult.value.reply = fb
+  }
+  toast.info('⚡ AI: ' + fb)
+  speakVoiceFeedback(fb)
 }
 
 /** Dòng vừa được voice điền — nếu người dùng nắn khác thì thành bài học. */
@@ -1890,105 +2255,685 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
   speakVoiceFeedback('Đã điền bộ 7 chuẩn kết hôn.')
 }
 
+function findTargetRow(rowNum?: number | null, docNum?: number | null): SummaryRowResponse | null {
+  if (rows.value.length === 0) return null
+
+  // 1. Kiểm tra số hồ sơ (docNum hoặc rowNum nếu rowNum > 50 hoặc khớp số hồ sơ)
+  const targetDoc = docNum ?? (rowNum != null && rowNum > 50 ? rowNum : null)
+  if (targetDoc != null) {
+    const strDoc = String(targetDoc)
+    const match = rows.value.find((r) => {
+      if (r.numberLabel === strDoc || r.documentNumber === strDoc) return true
+      const m = (r.numberLabel || '').match(/\d+/)
+      if (m && parseInt(m[0], 10) === targetDoc) return true
+      const mDoc = (r.documentNumber || '').match(/\d+/)
+      if (mDoc && parseInt(mDoc[0], 10) === targetDoc) return true
+      return false
+    })
+    if (match) return match
+  }
+
+  // 2. Nếu có chỉ định dòng
+  if (rowNum != null) {
+    // 2.1. Nói "dòng cuối", "dòng cuối cùng" (quy ước 999)
+    if (rowNum === 999 && rows.value.length > 0) {
+      return rows.value[rows.value.length - 1]
+    }
+
+    // 2.2. Dòng 1 / dòng đầu tiên luôn là dòng đầu tiên hiển thị trên màn hình
+    if (rowNum === 1) {
+      return rows.value[0]
+    }
+
+    // 2.3. Dòng theo thứ tự hiển thị trên màn hình hiện tại (dòng 1 -> index 0, dòng 2 -> index 1)
+    if (rowNum >= 1 && rowNum <= rows.value.length && rowNum <= 50) {
+      return rows.value[rowNum - 1]
+    }
+
+    // 2.4. Dòng theo số dòng Excel thật (ví dụ dòng 1601)
+    const byRowNumber = rows.value.find((r) => r.rowNumber === rowNum)
+    if (byRowNumber) return byRowNumber
+
+    // 2.5. Fallback nếu số rowNum trùng với số hồ sơ nào đó
+    const strNum = String(rowNum)
+    const byDocFallback = rows.value.find((r) => r.numberLabel === strNum || r.documentNumber === strNum)
+    if (byDocFallback) return byDocFallback
+  }
+
+  return null
+}
+
 async function handleVoiceFinal(text: string): Promise<void> {
   const active = session.value
   if (!active) return
-  voiceLastHeard.value = text
+
+  const spokenText = text.trim()
+  if (!spokenText) return
   voiceConsoleOpen.value = true
+  voiceLastHeard.value = spokenText
+  voiceInputText.value = spokenText
 
-  // 1. Match nhanh các lệnh điều hướng hoặc bộ bảy cơ bản
-  const learned = applyLearned(text, voiceLearned.value)
-  const context = {
-    catalog: active.catalog,
-    types: active.types.map((item) => item.name),
-  }
-  const result = parseVoiceTranscript(learned, context)
-
-  if (result?.kind === 'command') {
-    runVoiceCommand(result.command)
-    return
-  }
-
-  if (result?.kind === 'filter') {
-    if (result.type !== null) type.value = result.type
-    if (result.year !== null) year.value = result.year
-    const parts: string[] = []
-    if (result.type) parts.push(`loại ${result.type}`)
-    if (result.year !== null) parts.push(`năm ${result.year}`)
-    toast.success('Đã lọc bằng giọng nói', parts.length > 0 ? parts.join(' · ') : 'bỏ lọc loại')
-    speakVoiceFeedback('Đã lọc theo yêu cầu.')
-    return
+  // 0. Nếu đang có thao tác chờ xác nhận (Interactive Confirmation Turn)
+  if (voicePendingAction.value) {
+    const cleaned = preprocessSpokenText(spokenText).toLowerCase().trim()
+    if (/^(?:đúng\s*rồi|đồng\s*ý|áp\s*đi|làm\s*đi|xác\s*nhận|chuẩn\s*rồi|chính\s*xác|có|phải|ok|tiến\s*hành|thực\s*hiện)$/i.test(cleaned)) {
+      await executeVoicePendingAction()
+      return
+    }
+    if (/^(?:không|hủy|thôi|dừng\s*lại|bỏ\s*qua|không\s*phải|đừng\s*làm)$/i.test(cleaned)) {
+      cancelVoicePendingAction()
+      return
+    }
+    // Nếu là câu lệnh mới khác, hủy lệnh chờ cũ để phục vụ câu lệnh mới
+    voicePendingAction.value = null
   }
 
-  // 2. Tích hợp AI Local (Ollama Qwen 2.5) để nhận diện danh mục giấy tờ thông minh
   try {
+    // 1. Chỉ match nhanh các lệnh đơn giản (tiếp, xong, bộ bảy, quay lại)
+    const learned = applyLearned(spokenText, voiceLearned.value)
+    const context = {
+      catalog: active.catalog,
+      types: active.types.map((item) => item.name),
+    }
+    const result = parseVoiceTranscript(learned, context)
+
+    if (result?.kind === 'command') {
+      runVoiceCommand(result.command)
+      return
+    }
+
+    // 2. Toàn bộ lệnh Lọc và Điền giấy tờ đều đưa qua AI Local (Ollama Qwen 2.5) để xử lý thông minh
+    try {
     voiceAiParsing.value = true
     const aiRes = await request<SummaryAiParseVoiceResponse>('/api/summary/ai/parse-voice', {
       method: 'POST',
       body: {
-        text,
+        text: spokenText,
         catalog: active.catalog,
         model: 'qwen2.5:3b',
+        learned: voiceLearned.value,
       },
     })
 
-    if (aiRes && aiRes.success && (aiRes.items.length > 0 || aiRes.command || aiRes.sheetNumber)) {
-      voiceLastAiModel.value = aiRes.model || 'qwen2.5:3b'
+    if (aiRes?.command === 'confirm') {
+      if (voicePendingAction.value) {
+        await executeVoicePendingAction()
+        return
+      }
+    }
+    if (aiRes?.command === 'cancel') {
+      if (voicePendingAction.value) {
+        cancelVoicePendingAction()
+        return
+      }
+    }
 
+    if (aiRes?.needsConfirmation) {
+      voiceLastAiModel.value = aiRes.model || 'qwen2.5:3b'
+      voiceLastAiResult.value = {
+        items: aiRes.items || [],
+        command: aiRes.command,
+        sheetNumber: aiRes.sheetNumber,
+        model: aiRes.model || 'qwen2.5:3b',
+        targetRowNumber: aiRes.targetRowNumber,
+        targetLabel:
+          aiRes.targetDocumentNumber != null
+            ? `Hồ sơ ${aiRes.targetDocumentNumber}`
+            : aiRes.targetRowNumber != null
+            ? `Dòng ${aiRes.targetRowNumber}`
+            : null,
+        reply: aiRes.confirmationPrompt || aiRes.reply || null,
+      }
+
+      voicePendingAction.value = {
+        rawPrompt: spokenText,
+        cleanedPrompt: preprocessSpokenText(spokenText),
+        command: aiRes.command || 'apply_missing',
+        items: [...(aiRes.items || [])],
+        targetRowNumber: aiRes.targetRowNumber,
+        targetDocumentNumber: aiRes.targetDocumentNumber,
+        sheetNumber: aiRes.sheetNumber,
+        question: aiRes.confirmationPrompt || aiRes.reply || 'Bạn có muốn thực hiện thao tác này không?',
+      }
+
+      const promptToSpeak = aiRes.confirmationPrompt || aiRes.reply || 'Bạn có đồng ý áp dụng không?'
+      speakVoiceFeedback(promptToSpeak)
+      return
+    }
+
+    if (
+      aiRes &&
+      aiRes.success &&
+      (aiRes.items.length > 0 ||
+        aiRes.command ||
+        aiRes.sheetNumber ||
+        aiRes.targetRowNumber != null ||
+        aiRes.targetDocumentNumber != null ||
+        aiRes.year != null ||
+        aiRes.type != null ||
+        aiRes.numberFrom != null ||
+        aiRes.numberTo != null ||
+        Boolean(aiRes.reply))
+    ) {
+      voiceLastAiModel.value = aiRes.model || 'qwen2.5:3b'
+      voiceLastAiResult.value = {
+        items: aiRes.items || [],
+        command: aiRes.command,
+        sheetNumber: aiRes.sheetNumber,
+        model: aiRes.model || 'qwen2.5:3b',
+        targetRowNumber: aiRes.targetRowNumber,
+        targetLabel:
+          aiRes.targetDocumentNumber != null
+            ? `Hồ sơ ${aiRes.targetDocumentNumber}`
+            : aiRes.targetRowNumber != null
+            ? `Dòng ${aiRes.targetRowNumber}`
+            : null,
+        reply: aiRes.reply || null,
+      }
+
+      // 1. Xử lý Lọc bảng dữ liệu bằng giọng nói (Năm, Loại, Khoảng số, Tìm kiếm)
+      let filterChanged = false
+      const filterParts: string[] = []
+
+      // Bỏ lọc năm (-1) hoặc đổi năm
+      if (aiRes.year === -1) {
+        if (year.value !== '') {
+          year.value = ''
+          filterParts.push('Tất cả các năm')
+          filterChanged = true
+        }
+      } else if (aiRes.year != null && aiRes.year !== year.value) {
+        year.value = aiRes.year
+        filterParts.push(`Năm ${aiRes.year}`)
+        filterChanged = true
+      }
+
+      // Bỏ lọc loại ("") hoặc đổi loại
+      if (aiRes.type === '') {
+        if (type.value !== '') {
+          type.value = ''
+          filterParts.push('Tất cả loại')
+          filterChanged = true
+        }
+      } else if (aiRes.type != null && aiRes.type !== type.value) {
+        type.value = aiRes.type
+        filterParts.push(`Loại ${aiRes.type}`)
+        filterChanged = true
+      }
+
+      // Bỏ lọc số (-1) hoặc đổi khoảng số
+      if (aiRes.numberFrom === -1 || aiRes.numberTo === -1) {
+        if (numberMode.value !== 'all' || numberFrom.value !== '' || numberTo.value !== '') {
+          numberMode.value = 'all'
+          numberFrom.value = ''
+          numberTo.value = ''
+          singleNumber.value = ''
+          filterParts.push('Tất cả số hồ sơ')
+          filterChanged = true
+        }
+      } else if (aiRes.numberFrom != null || aiRes.numberTo != null) {
+        if (aiRes.numberFrom != null && aiRes.numberTo != null && aiRes.numberFrom === aiRes.numberTo) {
+          numberMode.value = 'single'
+          singleNumber.value = aiRes.numberFrom
+          filterParts.push(`Hồ sơ số ${aiRes.numberFrom}`)
+        } else {
+          numberMode.value = 'range'
+          numberFrom.value = aiRes.numberFrom ?? ''
+          numberTo.value = aiRes.numberTo ?? ''
+          if (aiRes.numberFrom != null && aiRes.numberTo != null) {
+            filterParts.push(`Hồ sơ từ số ${aiRes.numberFrom} đến ${aiRes.numberTo}`)
+          } else if (aiRes.numberFrom != null) {
+            filterParts.push(`Hồ sơ từ số ${aiRes.numberFrom}`)
+          } else if (aiRes.numberTo != null) {
+            filterParts.push(`Hồ sơ đến số ${aiRes.numberTo}`)
+          }
+        }
+        filterChanged = true
+      }
+
+      // Tìm kiếm (Search)
+      if (aiRes.search !== undefined && aiRes.search !== null) {
+        search.value = aiRes.search
+        filterParts.push(aiRes.search ? `Tìm kiếm: "${aiRes.search}"` : 'Xóa tìm kiếm')
+        filterChanged = true
+      }
+
+      if (filterChanged) {
+        page.value = 1
+        void fetchRows()
+        toast.success('⚡ AI: Đã lọc bảng', filterParts.join(' · '))
+        speakVoiceFeedback(`Đã lọc: ${filterParts.join(', ')}.`)
+      }
+
+      // 2. Xử lý các lệnh điều khiển AI thay thế mọi thao tác con người trên trang
       if (aiRes.command) {
+        // Phân trang bằng giọng nói
+        if (aiRes.command === 'next_page') {
+          if (page.value < totalPages.value) {
+            goToPage(page.value + 1)
+            toast.info(`⚡ AI: Trang ${page.value}/${totalPages.value}`)
+            speakVoiceFeedback(`Chuyển sang trang ${page.value}.`)
+          } else {
+            toast.info('⚡ AI: Đang ở trang cuối')
+            speakVoiceFeedback('Hiện đang ở trang cuối cùng.')
+          }
+          return
+        }
+        if (aiRes.command === 'prev_page') {
+          if (page.value > 1) {
+            goToPage(page.value - 1)
+            toast.info(`⚡ AI: Trang ${page.value}/${totalPages.value}`)
+            speakVoiceFeedback(`Lùi về trang ${page.value}.`)
+          } else {
+            toast.info('⚡ AI: Đang ở trang đầu')
+            speakVoiceFeedback('Hiện đang ở trang đầu tiên.')
+          }
+          return
+        }
+        if (aiRes.command === 'first_page') {
+          goToPage(1)
+          toast.info('⚡ AI: Về trang 1')
+          speakVoiceFeedback('Đã về trang đầu tiên.')
+          return
+        }
+        if (aiRes.command === 'last_page') {
+          goToPage(totalPages.value)
+          toast.info(`⚡ AI: Về trang cuối (${totalPages.value})`)
+          speakVoiceFeedback(`Đã chuyển tới trang cuối cùng.`)
+          return
+        }
+        if (aiRes.command === 'goto_page' && aiRes.targetPage) {
+          goToPage(aiRes.targetPage)
+          toast.info(`⚡ AI: Chuyển trang ${aiRes.targetPage}`)
+          speakVoiceFeedback(`Đã chuyển tới trang ${page.value}.`)
+          return
+        }
+
+        // Chọn dòng & checkbox bằng giọng nói
+        if (aiRes.command === 'select_all') {
+          toggleSelectPage()
+          toast.info('⚡ AI: Đã chọn tất cả dòng')
+          speakVoiceFeedback('Đã tích chọn tất cả dòng trên trang.')
+          return
+        }
+        if (aiRes.command === 'clear_selection') {
+          clearSelection()
+          toast.info('⚡ AI: Đã bỏ chọn')
+          speakVoiceFeedback('Đã bỏ tích chọn tất cả dòng.')
+          return
+        }
+        if (aiRes.command === 'select_row') {
+          selected.value.clear()
+          const targetRowNum = aiRes.targetRowNumber ?? 1
+          const row = findTargetRow(targetRowNum, aiRes.targetDocumentNumber) || rows.value[0]
+          if (row) {
+            selected.value.add(row.rowNumber)
+            openSummaryEditor(row)
+            void scrollEditorIntoView()
+            const label = row.numberLabel ? `Hồ sơ ${row.numberLabel}` : `Dòng ${row.rowNumber}`
+            toast.info(`⚡ AI: Đã chọn ${label}`)
+            const fb = `Đã chọn và mở ${label}.`
+            if (voiceLastAiResult.value) {
+              voiceLastAiResult.value.targetLabel = label
+              voiceLastAiResult.value.targetRowNumber = row.rowNumber
+              voiceLastAiResult.value.reply = fb
+            }
+            speakVoiceFeedback(fb)
+          }
+          return
+        }
+        if (aiRes.command === 'toggle_select_current') {
+          const row = voiceTargetRow.value || rows.value[0]
+          if (row) {
+            toggleSelect(row.rowNumber)
+            const isSel = selected.value.has(row.rowNumber)
+            toast.info(isSel ? 'Đã tích dòng' : 'Đã bỏ tích dòng', `Dòng ${row.numberLabel || row.rowNumber}`)
+            speakVoiceFeedback(isSel ? 'Đã tích chọn dòng này.' : 'Đã bỏ tích chọn dòng này.')
+          }
+          return
+        }
+
+        // Sao chép như dòng trên (tương đương phím C)
+        if (aiRes.command === 'copy_above') {
+          const row = voiceTargetRow.value || rows.value[0]
+          if (row) {
+            applyFromAbove(row)
+            speakVoiceFeedback('Đã sao chép như dòng trên.')
+          }
+          return
+        }
+
+        // Bộ lọc dòng thiếu & trạng thái bằng giọng nói
+        if (aiRes.command === 'filter_missing_sheet') {
+          onlyMissingSheetNumber.value = !onlyMissingSheetNumber.value
+          page.value = 1
+          void fetchRows()
+          speakVoiceFeedback(onlyMissingSheetNumber.value ? 'Đã lọc dòng thiếu số tờ.' : 'Đã bỏ lọc thiếu số tờ.')
+          return
+        }
+        if (aiRes.command === 'filter_missing_doc') {
+          onlyMissingDocumentNumber.value = !onlyMissingDocumentNumber.value
+          page.value = 1
+          void fetchRows()
+          speakVoiceFeedback(onlyMissingDocumentNumber.value ? 'Đã lọc dòng thiếu hồ sơ số.' : 'Đã bỏ lọc thiếu hồ sơ số.')
+          return
+        }
+        if (aiRes.command === 'filter_missing_items') {
+          onlyMissingNumber.value = !onlyMissingNumber.value
+          page.value = 1
+          void fetchRows()
+          speakVoiceFeedback(onlyMissingNumber.value ? 'Đã lọc các dòng thiếu giấy tờ.' : 'Đã bỏ lọc thiếu giấy tờ.')
+          return
+        }
+        if (aiRes.command === 'missing_sheet_first') {
+          missingSheetNumberFirst.value = !missingSheetNumberFirst.value
+          page.value = 1
+          void fetchRows()
+          speakVoiceFeedback(missingSheetNumberFirst.value ? 'Đã ưu tiên hiển thị dòng thiếu số tờ.' : 'Bỏ ưu tiên thiếu số tờ.')
+          return
+        }
+        if (aiRes.command === 'filter_existing') {
+          onlyExisting.value = !onlyExisting.value
+          page.value = 1
+          void fetchRows()
+          speakVoiceFeedback(onlyExisting.value ? 'Chỉ xem các dòng đã sửa.' : 'Xem toàn bộ các dòng.')
+          return
+        }
+        if (aiRes.command === 'clear_filter_missing') {
+          onlyMissingSheetNumber.value = false
+          onlyMissingDocumentNumber.value = false
+          onlyMissingNumber.value = false
+          onlyExisting.value = false
+          page.value = 1
+          void fetchRows()
+          speakVoiceFeedback('Đã bỏ tất cả bộ lọc thiếu.')
+          return
+        }
+
+        // Lệnh Áp nhanh: Áp bộ 7 chuẩn trực tiếp vào dòng đang xử lý (ô vàng) hoặc các dòng đã tích
+        if (aiRes.command === 'apply_fast') {
+          const itemsToApply =
+            aiRes.items && aiRes.items.length > 0 ? [...aiRes.items] : [...STANDARD_SEVEN]
+
+          // 1. Nếu có các dòng đã tích checkbox: áp cho các dòng đã tích
+          if (selected.value.size > 0 && aiRes.targetRowNumber == null && aiRes.targetDocumentNumber == null) {
+            bulkItems.value = [...itemsToApply]
+            applyBulk()
+            const fb = `Đã áp nhanh ${itemsToApply.length} giấy tờ cho ${selected.value.size} dòng đã chọn.`
+            if (voiceLastAiResult.value) {
+              voiceLastAiResult.value.items = itemsToApply
+              voiceLastAiResult.value.reply = fb
+            }
+            speakVoiceFeedback(fb)
+            return
+          }
+
+          // 2. Áp cho dòng đích (dòng chỉ định, hoặc dòng đang mở sửa ô vàng, hoặc dòng đầu tiên)
+          const targetRow =
+            aiRes.targetRowNumber != null || aiRes.targetDocumentNumber != null
+              ? findTargetRow(aiRes.targetRowNumber, aiRes.targetDocumentNumber)
+              : voiceTargetRow.value || rows.value[0]
+
+          if (targetRow) {
+            setRowItems(targetRow, itemsToApply)
+            openSummaryEditor(targetRow)
+            void scrollEditorIntoView()
+            const label = targetRow.numberLabel ? `Hồ sơ ${targetRow.numberLabel}` : `Dòng ${targetRow.rowNumber}`
+            toast.success(`⚡ AI: Áp nhanh ${label}`, itemsToApply.join(', '))
+            const fb = `Đã áp nhanh bộ 7 giấy tờ chuẩn vào ${label}.`
+            if (voiceLastAiResult.value) {
+              voiceLastAiResult.value.items = itemsToApply
+              voiceLastAiResult.value.targetLabel = label
+              voiceLastAiResult.value.targetRowNumber = targetRow.rowNumber
+              voiceLastAiResult.value.reply = fb
+            }
+            speakVoiceFeedback(fb)
+          }
+          return
+        }
+
+        // Lệnh Hàng loạt: Áp nhanh / Áp vào dòng lọc còn thiếu (nút '✓ Áp dụng cho dòng lọc còn thiếu' trong thanh Áp nhanh)
+        if (aiRes.command === 'apply_missing') {
+          // Bỏ chọn dòng đơn lẻ để lệnh áp dụng cho TOÀN BỘ các dòng đang lọc còn thiếu
+          selected.value.clear()
+          if (aiRes.items && aiRes.items.length > 0) {
+            bulkItems.value = [...aiRes.items]
+          } else if (bulkItems.value.length === 0) {
+            bulkItems.value = [...STANDARD_SEVEN]
+          }
+          await applyToMissingInScope()
+          const fb = 'Đã áp nhanh bộ 7 giấy tờ chuẩn cho toàn bộ các dòng lọc còn thiếu.'
+          if (voiceLastAiResult.value) {
+            voiceLastAiResult.value.items = [...bulkItems.value]
+            voiceLastAiResult.value.reply = fb
+          }
+          toast.success('⚡ AI: Áp nhanh hàng loạt', `Đã áp dụng ${bulkItems.value.length} giấy tờ vào các dòng còn thiếu trong danh sách đang lọc.`)
+          speakVoiceFeedback(fb)
+          return
+        }
+
+        // Lệnh Hàng loạt: Áp cho các dòng đã chọn
+        if (aiRes.command === 'apply_selected') {
+          if (aiRes.items && aiRes.items.length > 0) {
+            bulkItems.value = [...aiRes.items]
+          }
+          applyBulk()
+          speakVoiceFeedback('Đã áp dụng cho các dòng đã chọn.')
+          return
+        }
+
+        // Lưu / Hoàn tác / Đồng bộ kho / Xuất file
+        if (aiRes.command === 'undo') {
+          undoEdits()
+          toast.info('⚡ AI: Hoàn tác')
+          speakVoiceFeedback('Đã hoàn tác.')
+          return
+        }
+        if (aiRes.command === 'redo') {
+          redoEdits()
+          toast.info('⚡ AI: Làm lại')
+          speakVoiceFeedback('Đã làm lại thao tác.')
+          return
+        }
+        if (aiRes.command === 'revert_edits') {
+          resetEdits()
+          toast.warning('⚡ AI: Đã hủy thay đổi')
+          speakVoiceFeedback('Đã hủy các thay đổi chưa lưu.')
+          return
+        }
+        if (aiRes.command === 'sync_to_archive') {
+          void doDirectSyncToArchive()
+          toast.info('⚡ AI: Đồng bộ vào kho')
+          speakVoiceFeedback('Đang tiến hành đồng bộ vào kho hồ sơ.')
+          return
+        }
+        if (aiRes.command === 'export_file') {
+          void quickExportFiltered()
+          toast.info('⚡ AI: Đang xuất file Excel')
+          speakVoiceFeedback('Đang xuất file Excel bản lọc.')
+          return
+        }
+        if (aiRes.command === 'preview_export') {
+          onlySelectedRows.value = false
+          openPreview()
+          toast.info('⚡ AI: Xem trước bản xuất')
+          speakVoiceFeedback('Đã mở cửa sổ xem trước rồi xuất.')
+          return
+        }
+        if (aiRes.command === 'close_modal') {
+          closeSummaryEditor()
+          previewOpen.value = false
+          toast.info('⚡ AI: Đã đóng cửa sổ')
+          speakVoiceFeedback('Đã đóng.')
+          return
+        }
+
+        // Lệnh điều hướng dòng: Bộ bảy, bỏ bộ bảy, xong, tiếp, lùi
         if (aiRes.command === 'seven') runVoiceCommand('seven')
+        else if (aiRes.command === 'clear_seven') {
+          const row = voiceTargetRow.value || rows.value[0]
+          if (row) {
+            const currentItems = itemsFor(row)
+            const remaining = currentItems.filter(
+              (it) => !STANDARD_SEVEN.some((s) => s.toLowerCase() === it.toLowerCase()),
+            )
+            setRowItems(row, remaining)
+            openSummaryEditor(row)
+            void scrollEditorIntoView()
+          }
+          bulkItems.value = bulkItems.value.filter(
+            (it) => !STANDARD_SEVEN.some((s) => s.toLowerCase() === it.toLowerCase()),
+          )
+          const fb = 'Đã bỏ bộ 7 giấy tờ chuẩn.'
+          if (voiceLastAiResult.value) {
+            voiceLastAiResult.value.items = []
+            voiceLastAiResult.value.reply = fb
+          }
+          toast.info('⚡ AI: Đã bỏ bộ 7', 'Đã xóa bộ 7 giấy tờ chuẩn.')
+          speakVoiceFeedback(fb)
+          return
+        }
         else if (aiRes.command === 'next') runVoiceCommand('next')
         else if (aiRes.command === 'done') runVoiceCommand('commit')
         else if (aiRes.command === 'prev') runVoiceCommand('prev')
       }
 
-      if (aiRes.items.length > 0 || aiRes.sheetNumber) {
-        let row = voiceTargetRow.value
-        if (!row) row = nextMissingRow(rows.value[0]?.rowNumber ?? 0)
+      // 3. Nếu là câu hỏi trò chuyện, chào hỏi, hoặc giải thích của AI (không có lệnh đổi bảng)
+      if (
+        !aiRes.command &&
+        aiRes.items.length === 0 &&
+        !aiRes.sheetNumber &&
+        aiRes.targetRowNumber == null &&
+        aiRes.targetDocumentNumber == null &&
+        aiRes.reply
+      ) {
+        if (voiceLastAiResult.value) {
+          voiceLastAiResult.value.reply = aiRes.reply
+        }
+        speakVoiceFeedback(aiRes.reply)
+        toast.info(`⚡ AI (${aiRes.model ?? 'Qwen 2.5'}): Trả lời`, aiRes.reply)
+        return
+      }
+
+      // 4. Xử lý điền giấy tờ và số tờ vào dòng đích (CỘNG DỒN / XÓA / SỐ TỜ)
+      if (
+        aiRes.items.length > 0 ||
+        aiRes.sheetNumber ||
+        aiRes.targetRowNumber != null ||
+        aiRes.targetDocumentNumber != null ||
+        aiRes.command === 'clear_items' ||
+        aiRes.command === 'remove_item'
+      ) {
+        let row: SummaryRowResponse | null = null
+
+        // Ưu tiên dòng hoặc hồ sơ chỉ định đích danh (ví dụ "hồ sơ 5192", "dòng 1", "dòng đầu tiên")
+        if (aiRes.targetDocumentNumber != null || aiRes.targetRowNumber != null) {
+          row = findTargetRow(aiRes.targetRowNumber, aiRes.targetDocumentNumber)
+          if (!row) {
+            const targetDesc = aiRes.targetDocumentNumber
+              ? `Hồ sơ ${aiRes.targetDocumentNumber}`
+              : `Dòng ${aiRes.targetRowNumber}`
+            toast.warning('Dòng / hồ sơ không có trong trang', `Không tìm thấy ${targetDesc} trong trang hiện tại.`)
+          }
+        }
+
+        // Nếu không chỉ định dòng: dùng dòng đang mở editor
+        if (!row) {
+          row = voiceTargetRow.value
+        }
+        // Nếu vẫn chưa có dòng: tự nhảy vào dòng thiếu kế tiếp bắt đầu từ đầu trang (dòng 1)
+        if (!row) {
+          row = nextMissingRow(0) || rows.value[0]
+        }
+
         if (row) {
           voiceSuppressLearn = true
-          if (aiRes.sheetNumber) {
-            commit(row, { sheetNumber: aiRes.sheetNumber })
+
+          // Xử lý Số tờ (SheetNumber)
+          const validSheet =
+            aiRes.sheetNumber &&
+            aiRes.sheetNumber.trim() &&
+            !/^\d{4}$/.test(aiRes.sheetNumber.trim())
+              ? aiRes.sheetNumber.trim()
+              : null
+          if (validSheet) {
+            commit(row, { sheetNumber: validSheet })
           }
-          if (aiRes.items.length > 0) {
+
+          // Xử lý Giấy tờ (Items): Xóa hết, Gỡ bỏ, Thay bằng, hoặc CỘNG DỒN (Stacking)
+          if (aiRes.command === 'clear_items') {
+            setRowItems(row, [])
+            toast.info('Đã xóa hết giấy tờ', `Dòng ${row.numberLabel || row.rowNumber}`)
+          } else if (aiRes.command === 'remove_item' && aiRes.items.length > 0) {
+            const current = itemsFor(row)
+            const remaining = current.filter((it) => !aiRes.items.includes(it))
+            setRowItems(row, remaining)
+            toast.info('Đã bỏ giấy tờ', `${aiRes.items.join(', ')}`)
+          } else if (aiRes.command === 'replace_items' && aiRes.items.length > 0) {
             setRowItems(row, aiRes.items)
+          } else if (aiRes.items.length > 0) {
+            // MẶC ĐỊNH: CỘNG DỒN (STACKING) — Giữ nguyên giấy tờ cũ và thêm giấy tờ mới vào
+            const current = itemsFor(row)
+            const merged = [...current]
+            for (const it of aiRes.items) {
+              if (!merged.includes(it)) {
+                merged.push(it)
+              }
+            }
+            setRowItems(row, merged)
           }
+
           voiceSuppressLearn = false
 
           openSummaryEditor(row)
           void scrollEditorIntoView()
           voiceLearnCandidate.value = {
             rowNumber: row.rowNumber,
-            heard: text,
+            heard: spokenText,
             prefill: summaryFor(row),
           }
-          voiceLastAiResult.value = {
-            items: aiRes.items,
-            command: aiRes.command,
-            sheetNumber: aiRes.sheetNumber,
-            model: aiRes.model || 'qwen2.5:3b',
-            targetRowNumber: row.rowNumber,
-          }
-
-          toast.success(
-            `⚡ AI (${aiRes.model ?? 'Qwen 2.5'}): Nhận diện ${aiRes.items.length} giấy tờ`,
-            `Dòng ${row.rowNumber}: ${aiRes.items.join(', ') || '(giữ nguyên)'}${
-              aiRes.sheetNumber ? ' · số tờ ' + aiRes.sheetNumber : ''
-            }`,
-          )
-
-          // Phát âm thanh phản hồi bằng giọng nói
+          // Phát âm thanh phản hồi bằng giọng nói tiếng Việt
           let spokenFeedback = ''
-          if (aiRes.items.length > 0) {
-            spokenFeedback = `Đã nhận diện: ${aiRes.items.join(', ')}`
+          if (aiRes.targetDocumentNumber != null) {
+            spokenFeedback = `Hồ sơ ${aiRes.targetDocumentNumber}: `
+          } else if (aiRes.targetRowNumber != null) {
+            spokenFeedback = `Dòng ${row.rowNumber}: `
+          }
+          if (aiRes.command === 'clear_items') {
+            spokenFeedback += 'Đã xóa toàn bộ giấy tờ.'
+          } else if (aiRes.command === 'remove_item') {
+            spokenFeedback += `Đã bỏ ${aiRes.items.join(', ')}.`
+          } else if (aiRes.items.length > 0) {
+            spokenFeedback += `Đã thêm ${aiRes.items.join(', ')}.`
             if (aiRes.sheetNumber) spokenFeedback += `, số tờ ${aiRes.sheetNumber}`
+          } else if (aiRes.sheetNumber) {
+            spokenFeedback += `Số tờ ${aiRes.sheetNumber}`
           }
           if (aiRes.command === 'next') spokenFeedback += spokenFeedback ? ', chuyển dòng kế tiếp.' : 'Chuyển dòng kế tiếp.'
           else if (aiRes.command === 'done' || aiRes.command === 'commit') spokenFeedback += spokenFeedback ? ', đã lưu dòng.' : 'Đã lưu dòng.'
           else if (aiRes.command === 'seven') spokenFeedback = 'Đã điền bộ 7 chuẩn kết hôn.'
 
-          if (spokenFeedback) {
-            speakVoiceFeedback(spokenFeedback)
+          const finalReply = aiRes.reply || spokenFeedback
+          const rowItems = itemsFor(row)
+          voiceLastAiResult.value = {
+            items: rowItems,
+            command: aiRes.command,
+            sheetNumber: validSheet,
+            model: aiRes.model || 'qwen2.5:3b',
+            targetRowNumber: row.rowNumber,
+            targetLabel: row.numberLabel ? `HS ${row.numberLabel}` : `Dòng ${row.rowNumber}`,
+            reply: finalReply,
+          }
+
+          toast.success(
+            `⚡ AI (${aiRes.model ?? 'Qwen 2.5'}): Hồ sơ ${row.numberLabel || row.rowNumber}`,
+            `${rowItems.length > 0 ? rowItems.join(', ') : '(đã mở dòng)'}${
+              validSheet ? ' · số tờ ' + validSheet : ''
+            }`,
+          )
+
+          if (finalReply) {
+            speakVoiceFeedback(finalReply)
           }
         }
       }
@@ -2007,6 +2952,17 @@ async function handleVoiceFinal(text: string): Promise<void> {
       `"${text}" — nói loại hồ sơ + giấy tờ ("kết hôn — căn cước, hộ khẩu") hoặc lệnh "xong", "kế tiếp".`,
     )
     speakVoiceFeedback('Không nhận diện được giấy tờ trong câu nói.')
+    return
+  }
+
+  if (result.kind === 'filter') {
+    if (result.type !== null) type.value = result.type
+    if (result.year !== null) year.value = result.year
+    const parts: string[] = []
+    if (result.type) parts.push(`loại ${result.type}`)
+    if (result.year !== null) parts.push(`năm ${result.year}`)
+    toast.success('Đã lọc bằng giọng nói', parts.length > 0 ? parts.join(' · ') : 'bỏ lọc loại')
+    speakVoiceFeedback('Đã lọc theo yêu cầu.')
     return
   }
 
@@ -2065,6 +3021,9 @@ async function handleVoiceFinal(text: string): Promise<void> {
   }
   if (spokenRegexFeedback) {
     speakVoiceFeedback(spokenRegexFeedback)
+  }
+  } finally {
+    scheduleVoiceInputClear()
   }
 }
 
@@ -3200,6 +4159,20 @@ async function executeOneDriveSync(): Promise<void> {
   }
 }
 
+async function copySyncRowsToClipboard(): Promise<void> {
+  if (rowsToSyncPreview.value.length === 0) return
+  try {
+    const tsvData = rowsToSyncPreview.value.map((r) => r.summaryText).join('\n')
+    await navigator.clipboard.writeText(tsvData)
+    toast.success(
+      'Đã copy Trích yếu vào Clipboard!',
+      `Đã sao chép ${rowsToSyncPreview.value.length} dòng. Chỉ cần click ô đầu tiên trên Cột D của Google Sheets rồi bấm Ctrl + V!`
+    )
+  } catch (err) {
+    toast.error('Không thể copy vào clipboard', errorMessage(err))
+  }
+}
+
 function csvCell(value: string | number | null): string {
   const text = value === null || value === undefined ? '' : String(value)
   return `"${text.replace(/"/g, '""')}"`
@@ -3481,6 +4454,11 @@ function clearDraft(): void {
 }
 
 function onGlobalKeydown(event: KeyboardEvent): void {
+  // Khi AI đang nói mà người dùng bấm phím bất kỳ (Space, Esc, Enter...) -> Câm họng AI ngay lập tức
+  if (isAiSpeaking.value && (event.key === ' ' || event.key === 'Escape' || event.key === 'Enter')) {
+    stopAnySpeech()
+  }
+
   const target = event.target as HTMLElement | null
   const typing =
     !!target &&
@@ -3535,6 +4513,7 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 
   // Push-to-talk: Giữ phím Cách (Space) để nói (khi không đứng trong ô nhập text)
   if (event.code === 'Space' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    stopAnySpeech()
     if (session.value && voiceSupported.value && !voiceListening.value) {
       event.preventDefault()
       voicePttActive.value = true
@@ -4458,7 +5437,7 @@ onBeforeUnmount(() => {
               <button
                 class="btn btn-success btn-sm"
                 type="button"
-                :title="syncingInBackground ? (isQueuedForOneDrive ? 'Tiến trình đang trong hàng chờ do có robot khác đang chạy...' : 'Robot đang chạy ngầm trên OneDrive...') : 'Tự động điền trích yếu và đánh tick trực tiếp lên file Excel OneDrive (chạy ngầm tự động)'"
+                :title="syncingInBackground ? (isQueuedForOneDrive ? 'Tiến trình đang trong hàng chờ do có robot khác đang chạy...' : 'Robot đang chạy ngầm...') : 'Tự động điền Trích yếu Cột D, H và đánh dấu Cột A lên Cloud (chạy ngầm tự động, không đánh tick)'"
                 :disabled="!scopeReady || total === 0 || loadingRows || syncingOneDrive"
                 @click="openOneDriveSyncFromToolbar"
               >
@@ -5363,7 +6342,7 @@ onBeforeUnmount(() => {
               class="btn btn-success"
               type="button"
               :disabled="syncingOneDrive || previewRows.length === 0"
-              title="Tự động điền Trích yếu vào cột D và tick các ô tương ứng trực tiếp lên OneDrive Cloud"
+              title="Tự động điền Trích yếu vào Cột D, H và đánh dấu Cột A lên Cloud (chạy ngầm, không đánh tick)"
               @click="startSyncToOneDriveFromPreview"
             >
               <Cloud :size="16" />
@@ -5848,30 +6827,81 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- OneDrive Link Input -->
+            <!-- Cloud Link Input -->
             <label class="field">
-              <span class="label">Liên kết file Excel Online / OneDrive:</span>
+              <span class="label">Liên kết Google Sheets / Excel Online / OneDrive:</span>
               <input
                 v-model="oneDriveUrl"
                 class="input"
                 type="text"
-                placeholder="Dán liên kết Excel Online hoặc OneDrive vào đây..."
+                placeholder="Dán liên kết Google Sheets hoặc Excel Online / OneDrive vào đây..."
                 :disabled="syncingOneDrive"
               />
             </label>
+
+            <!-- Permission Check Status Card -->
+            <div v-if="oneDriveUrl.trim()" style="margin-top: -6px; margin-bottom: 4px">
+              <div v-if="checkingLinkPermission" class="row" style="gap: 8px; align-items: center; font-size: 13px; color: var(--muted); padding: 6px 4px">
+                <RefreshCw :size="14" class="spin" />
+                <span>Đang kiểm tra quyền truy cập và phiên đăng nhập của Robot...</span>
+              </div>
+              <div v-else-if="linkPermissionStatus" class="card" :style="{
+                padding: '10px 14px',
+                background: linkPermissionStatus.canEdit ? 'rgba(34, 197, 94, 0.08)' : 'rgba(234, 179, 8, 0.12)',
+                border: linkPermissionStatus.canEdit ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(234, 179, 8, 0.4)',
+                borderRadius: '8px'
+              }">
+                <div class="row-between wrap" style="gap: 10px; align-items: center">
+                  <div class="row" style="gap: 8px; align-items: center">
+                    <CircleCheck v-if="linkPermissionStatus.canEdit" :size="18" style="color: var(--success); flex-shrink: 0" />
+                    <TriangleExclamationPoint v-else :size="18" style="color: var(--warning); flex-shrink: 0" />
+                    <div>
+                      <strong :style="{ color: linkPermissionStatus.canEdit ? 'var(--success)' : 'var(--warning)', fontSize: '13px' }">
+                        {{ linkPermissionStatus.canEdit ? 'Quyền Chỉnh sửa (Editor) sẵn sàng' : 'Chưa đăng nhập / Chỉ có quyền Xem' }}
+                      </strong>
+                      <div class="hint" style="font-size: 12px; margin-top: 2px">
+                        {{ linkPermissionStatus.message }}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row" style="gap: 8px; align-items: center">
+                    <button
+                      v-if="!linkPermissionStatus.canEdit"
+                      type="button"
+                      class="btn btn-warning btn-sm"
+                      :disabled="openingLoginWindow"
+                      @click="openInteractiveLogin"
+                    >
+                      <Zap :size="14" />
+                      {{ openingLoginWindow ? 'Đang mở Chrome...' : '🔑 Đăng nhập Google' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      :disabled="checkingLinkPermission"
+                      title="Kiểm tra lại quyền truy cập"
+                      @click="checkLinkPermission()"
+                    >
+                      <RefreshCw :size="13" :class="{ spin: checkingLinkPermission }" />
+                      Kiểm tra lại
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <!-- Sheet & Count Summary Card -->
             <div class="card" style="padding: 12px 16px; background: var(--surface)">
               <div class="row-between wrap" style="gap: 10px">
                 <div class="row" style="gap: 16px; align-items: center">
                   <div>
-                    <label class="hint" style="display: block; margin-bottom: 2px">Sheet đích trên OneDrive:</label>
+                    <label class="hint" style="display: block; margin-bottom: 2px">Sheet đích (VD: 2001, 2002):</label>
                     <input
                       v-model="selectedSyncSheet"
                       type="text"
                       class="input input-sm"
                       style="width: 120px; font-weight: 700; color: var(--brand)"
-                      placeholder="1997"
+                      placeholder="2002"
                       :disabled="syncingOneDrive"
                     />
                   </div>
@@ -6046,25 +7076,38 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="modal-footer">
+          <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 10px; flex-wrap: wrap">
             <button
-              class="btn btn-secondary"
-              type="button"
-              :disabled="syncingOneDrive"
-              @click="oneDriveSyncModalOpen = false"
-            >
-              {{ oneDriveSyncResult ? 'Đóng' : 'Huỷ' }}
-            </button>
-            <button
-              v-if="!oneDriveSyncResult"
-              class="btn btn-success"
+              class="btn btn-secondary btn-sm"
               type="button"
               :disabled="syncingOneDrive || rowsToSyncPreview.length === 0"
-              @click="executeOneDriveSync"
+              title="Sao chép toàn bộ cột Trích yếu (kèm ngoặc) vào Clipboard để mở Google Sheets dán ngay"
+              @click="copySyncRowsToClipboard"
             >
-              <Zap :size="16" />
-              {{ syncingOneDrive ? 'Đang thực thi robot...' : 'Bắt đầu Điền Cột A, D, H vào OneDrive' }}
+              <Copy :size="15" />
+              Copy Cột D (Dán vào Google Sheets)
             </button>
+
+            <div class="row" style="gap: 8px">
+              <button
+                class="btn btn-secondary"
+                type="button"
+                :disabled="syncingOneDrive"
+                @click="oneDriveSyncModalOpen = false"
+              >
+                {{ oneDriveSyncResult ? 'Đóng' : 'Huỷ' }}
+              </button>
+              <button
+                v-if="!oneDriveSyncResult"
+                class="btn btn-success"
+                type="button"
+                :disabled="syncingOneDrive || rowsToSyncPreview.length === 0"
+                @click="executeOneDriveSync"
+              >
+                <Zap :size="16" />
+                {{ syncingOneDrive ? 'Đang thực thi robot...' : 'Bắt đầu Điền Cột A, D, H vào Cloud' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -6261,37 +7304,55 @@ onBeforeUnmount(() => {
                 <span v-else class="ready-dot" />
               </div>
               <strong style="font-size: 13px">Hộp thoại Giọng nói & AI</strong>
-              <span class="voice-model-pill">{{ voiceLastAiModel || 'Qwen 2.5 3B' }}</span>
             </div>
 
             <div class="voice-console-actions">
+              <!-- Nút bật/tắt chuông báo ting ting -->
+              <button
+                type="button"
+                class="voice-action-btn voice-chime-btn"
+                :class="{ active: voiceChimeEnabled }"
+                :title="
+                  voiceChimeEnabled
+                    ? 'Chuông âm thanh đang BẬT - bấm để tắt chuông'
+                    : 'Chuông âm thanh đang TẮT - bấm để bật chuông'
+                "
+                @click="toggleVoiceChime"
+              >
+                <Bell v-if="voiceChimeEnabled" :size="13" class="text-amber" />
+                <BellOff v-else :size="13" class="text-muted" />
+                <span class="action-label">
+                  {{ voiceChimeEnabled ? 'Chuông' : 'Tắt chuông' }}
+                </span>
+              </button>
+
               <!-- Nút bật/tắt đọc phản hồi bằng giọng nói (TTS) -->
               <button
                 type="button"
-                class="voice-action-btn"
+                class="voice-action-btn voice-tts-btn"
                 :class="{ active: voiceTtsEnabled }"
                 :title="
                   voiceTtsEnabled
-                    ? `Phản hồi âm thanh đang BẬT (${vietnameseVoiceName ? 'Giọng ' + vietnameseVoiceName : 'Chuông báo'}) - bấm để tắt`
-                    : 'Phản hồi âm thanh đang TẮT - bấm để bật'
+                    ? `Giọng nói AI đang BẬT ${vietnameseVoiceName ? '(' + vietnameseVoiceName + ')' : ''} - bấm để tắt tiếng`
+                    : 'Giọng nói AI đang TẮT - bấm để bật giọng nói phản hồi'
                 "
                 @click="toggleVoiceTts"
               >
-                <Volume2 v-if="voiceTtsEnabled" :size="14" class="text-brand" />
-                <VolumeX v-else :size="14" class="text-muted" />
+                <Volume2 v-if="voiceTtsEnabled" :size="13" class="text-brand" />
+                <VolumeX v-else :size="13" class="text-muted" />
                 <span class="action-label">
-                  {{ voiceTtsEnabled ? (vietnameseVoiceName ? `Giọng Việt (${vietnameseVoiceName})` : 'Chuông báo') : 'Tắt tiếng' }}
+                  {{ voiceTtsEnabled ? 'Giọng nói' : 'Tắt tiếng' }}
                 </span>
               </button>
 
               <!-- Nút thu gọn / đóng hộp thoại -->
               <button
                 type="button"
-                class="voice-action-btn"
+                class="voice-action-btn voice-chevron-btn"
                 title="Thu gọn khung nhận diện"
                 @click="voiceConsoleOpen = false"
               >
-                <ChevronDown :size="14" />
+                <ChevronDown :size="13" />
               </button>
             </div>
           </div>
@@ -6315,6 +7376,7 @@ onBeforeUnmount(() => {
               <div class="textbox-badge-group">
                 <span v-if="voiceListening" class="stream-badge live-streaming">🔴 Đang nói trực tiếp</span>
                 <span v-else-if="voiceAiParsing" class="stream-badge thinking">⚡ AI đang bóc tách…</span>
+                <span v-else-if="isAiSpeaking" class="stream-badge speaking">🔊 AI đang nói…</span>
                 <span v-else-if="voiceLastHeard" class="stream-badge success">✓ Đã nhận diện</span>
               </div>
             </div>
@@ -6326,6 +7388,8 @@ onBeforeUnmount(() => {
                 v-model="voiceInputText"
                 class="voice-speech-textarea"
                 rows="2"
+                @focus="stopAnySpeech"
+                @input="stopAnySpeech"
                 :placeholder="
                   voiceListening
                     ? 'Đang lắng nghe... Nói tên giấy tờ hoặc số tờ (ví dụ: căn cước công dân, giấy khai sinh, số tờ 10)...'
@@ -6377,6 +7441,51 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- Khung Xác nhận thao tác bằng giọng nói / click (Interactive Confirmation Card) -->
+          <div v-if="voicePendingAction" class="voice-confirmation-card">
+            <div class="confirmation-header">
+              <span class="confirmation-badge">
+                <TriangleExclamationPoint :size="13" class="text-amber" /> CẦN XÁC NHẬN THAO TÁC HÀNG LOẠT
+              </span>
+              <span class="confirmation-hint">AI đang chờ bạn trả lời (Nói "Đúng rồi" hoặc "Hủy")</span>
+            </div>
+
+            <div class="confirmation-body">
+              <div class="confirmation-question">{{ voicePendingAction.question }}</div>
+              
+              <div v-if="voicePendingAction.items.length > 0" class="confirmation-chips">
+                <span v-for="it in voicePendingAction.items" :key="it" class="badge badge-brand confirmation-chip">
+                  <Check :size="11" /> {{ it }}
+                </span>
+              </div>
+
+              <div class="confirmation-prompt-preview">
+                <span class="text-muted" style="font-size: 11px">
+                  Câu vừa nghe: <em>"{{ voicePendingAction.rawPrompt }}"</em>
+                </span>
+              </div>
+            </div>
+
+            <div class="confirmation-actions">
+              <button
+                type="button"
+                class="btn-confirm-action btn-cancel"
+                title="Hủy thao tác này (Nói 'Hủy' hoặc 'Không')"
+                @click="cancelVoicePendingAction"
+              >
+                <X :size="12" /> Hủy bỏ (Nói "Hủy")
+              </button>
+              <button
+                type="button"
+                class="btn-confirm-action btn-agree"
+                title="Đồng ý thực hiện ngay (Nói 'Đúng rồi' hoặc Enter)"
+                @click="executeVoicePendingAction"
+              >
+                <Check :size="12" /> ✓ Đồng ý áp dụng (Nói "Đúng rồi")
+              </button>
+            </div>
+          </div>
+
           <!-- Khung hiển thị kết quả AI đã bóc tách được từ câu thoại -->
           <div v-if="voiceLastAiResult" class="voice-ai-result-panel">
             <div class="ai-result-header">
@@ -6400,8 +7509,8 @@ onBeforeUnmount(() => {
 
             <!-- Thông tin bổ sung: Lệnh / Số tờ / Dòng áp dụng -->
             <div class="ai-meta-row">
-              <span v-if="voiceLastAiResult.targetRowNumber" class="ai-meta-tag">
-                🎯 Dòng {{ voiceLastAiResult.targetRowNumber }}
+              <span v-if="voiceLastAiResult.targetLabel || voiceLastAiResult.targetRowNumber" class="ai-meta-tag">
+                🎯 {{ voiceLastAiResult.targetLabel || ('Dòng ' + voiceLastAiResult.targetRowNumber) }}
               </span>
               <span v-if="voiceLastAiResult.sheetNumber" class="ai-meta-tag">
                 📄 Số tờ: {{ voiceLastAiResult.sheetNumber }}
@@ -6410,12 +7519,21 @@ onBeforeUnmount(() => {
                 ⚡ Lệnh: {{ voiceLastAiResult.command }}
               </span>
             </div>
+
+            <!-- Phản hồi đối thoại của AI (hiển thị rõ ràng kể cả khi TẮT GIỌNG NÓI để đọc trong văn phòng) -->
+            <div v-if="voiceLastAiResult.reply" class="ai-reply-bubble">
+              <div class="ai-reply-header">
+                <MessageSquare :size="12" class="text-brand" />
+                <span class="ai-reply-sender">AI Phản hồi:</span>
+              </div>
+              <div class="ai-reply-text">{{ voiceLastAiResult.reply }}</div>
+            </div>
           </div>
 
           <!-- Hướng dẫn nhanh bên dưới -->
           <div class="voice-console-footer">
             <span class="hint" style="font-size: 11px">
-              💡 <strong>Space</strong> để nói · Nói <em>"bộ bảy"</em>, <em>"tiếp"</em>, <em>"xong"</em>
+              💡 <strong>Space</strong> để nói · Lệnh: <em>"bộ bảy"</em>, <em>"áp dòng thiếu"</em>, <em>"như dòng trên"</em>, <em>"trang sau"</em>, <em>"xuất excel"</em>...
             </span>
           </div>
         </div>

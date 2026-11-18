@@ -43,6 +43,8 @@ interface SpeechRecognitionLike {
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null
   onend: (() => void) | null
   onstart: (() => void) | null
+  onspeechstart?: (() => void) | null
+  onsoundstart?: (() => void) | null
 }
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
@@ -57,6 +59,8 @@ export interface VoiceInputOptions {
   onFinal: (text: string) => void
   /** Câu đang nói dở — dùng hiển thị live. */
   onInterim?: (text: string) => void
+  /** Bắt đầu phát hiện tiếng nói/âm lượng micro (dùng để câm họng AI tức thì 16ms). */
+  onSpeechOnset?: () => void
   /** Lỗi nghe (mic bị chặn, mạng đứt...) — UI hiện toast. */
   onError?: (message: string) => void
   /** Mic thực sự bắt đầu nghe / dừng nghe. */
@@ -82,43 +86,96 @@ export function useVoiceInput(options: VoiceInputOptions) {
   let restarting = false
   let silenceTimer: number | null = null
   let activeUtterance = ''
+  let resultOffset = 0
 
   let audioCtx: AudioContext | null = null
   let analyser: AnalyserNode | null = null
   let mediaStream: MediaStream | null = null
   let volumeAnimId: number | null = null
+  let analysisSessionId = 0
 
   async function startAudioAnalysis() {
+    const sessionId = ++analysisSessionId
     try {
       if (!navigator.mediaDevices?.getUserMedia) return
-      mediaStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          // Tắt lọc ồn gắt để không triệt tiêu giọng nói nhỏ/nói thầm
+          // Không bật noiseSuppression gắt để tránh triệt tiêu tiếng thì thầm (whisper).
+          // Việc lọc ồn máy tính/quạt/điều hòa được xử lý thông minh qua bộ lọc dải tần giọng nói (Bandpass VAD).
           noiseSuppression: false,
-          // Tự động khuếch đại gain khi âm lượng nói nhỏ
           autoGainControl: true,
         },
       })
+
+      // Ngăn chặn race-condition rò rỉ microphone: Nếu trong lúc chờ getUserMedia người dùng đã bấm tắt mic
+      if (!wantListening || sessionId !== analysisSessionId) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+
+      mediaStream = stream
+
       const AudioCtxConstructor =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       if (!AudioCtxConstructor) return
+
+      if (!wantListening || sessionId !== analysisSessionId) {
+        stream.getTracks().forEach((track) => track.stop())
+        mediaStream = null
+        return
+      }
+
       audioCtx = new AudioCtxConstructor()
       const source = audioCtx.createMediaStreamSource(mediaStream)
       analyser = audioCtx.createAnalyser()
-      analyser.fftSize = 64
+      // FFT 256 -> 128 dải tần số (độ phân giải ~187Hz/bin ở 48kHz)
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.3
       source.connect(analyser)
       const data = new Uint8Array(analyser.frequencyBinCount)
+
+      // VAD thích ứng: theo dõi mức ồn nền động (Ambient Noise Floor)
+      let ambientNoiseFloor = 10
+      let consecutiveSpeechFrames = 0
 
       const tick = () => {
         if (!listening.value && !wantListening) return
         analyser?.getByteFrequencyData(data)
-        let sum = 0
-        for (let i = 0; i < data.length; i++) sum += data[i]
-        const avg = sum / data.length
-        // Tăng độ nhạy hiển thị sóng âm lên gấp đôi để người dùng thấy rõ khi nói nhỏ
-        volume.value = Math.min(100, Math.round((avg / 64) * 100))
+
+        // 1. Lọc bỏ dải tần siêu trầm (< 250Hz, Bins 0-1): nơi tập trung tiếng ù quạt, máy lạnh, rung bàn
+        // 2. Tách riêng dải tần giọng nói người & tiếng thì thầm (Vocal Formants ~ 350Hz - 3400Hz, Bins 2 đến 18)
+        let vocalSum = 0
+        const startBin = 2
+        const endBin = Math.min(18, data.length - 1)
+        const binCount = endBin - startBin + 1
+
+        for (let i = startBin; i <= endBin; i++) {
+          vocalSum += data[i]
+        }
+        const vocalAvg = vocalSum / binCount
+
+        // 3. Đo delta năng lượng giọng nói so với mức ồn nền thực tế của phòng (hỗ trợ cả tiếng thì thầm)
+        const delta = vocalAvg - ambientNoiseFloor
+        const isSpeechActivity = (delta > 3.5 && vocalAvg > 8) || (vocalAvg > 14)
+
+        if (isSpeechActivity) {
+          consecutiveSpeechFrames++
+          // Kích hoạt ngay trong 1-2 khung hình (~16-32ms) để ngắt giọng đọc AI (Barge-in) không độ trễ
+          if (consecutiveSpeechFrames >= 1) {
+            options.onSpeechOnset?.()
+          }
+        } else {
+          consecutiveSpeechFrames = 0
+          // Cập nhật mức ồn nền phòng (Exponential Moving Average) khi đang im lặng
+          ambientNoiseFloor = ambientNoiseFloor * 0.95 + vocalAvg * 0.05
+        }
+
+        // 4. Hiển thị sóng âm trên giao diện theo dải tần giọng nói thực
+        const displayEnergy = Math.max(0, vocalAvg - (ambientNoiseFloor * 0.4))
+        volume.value = Math.min(100, Math.round((displayEnergy / 45) * 100))
+
         volumeAnimId = requestAnimationFrame(tick)
       }
       volumeAnimId = requestAnimationFrame(tick)
@@ -129,6 +186,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
   }
 
   function stopAudioAnalysis() {
+    analysisSessionId++
     if (volumeAnimId) {
       cancelAnimationFrame(volumeAnimId)
       volumeAnimId = null
@@ -157,18 +215,19 @@ export function useVoiceInput(options: VoiceInputOptions) {
     const textToCommit = (explicitText !== undefined ? explicitText : activeUtterance).trim()
     activeUtterance = ''
     interim.value = ''
+    resultOffset = 0
     options.onInterim?.('')
 
     if (textToCommit) {
       options.onFinal(textToCommit)
     }
 
+    // Tự động ngắt và khởi động lại SpeechRecognition bằng abort() để Chrome xóa sạch 100% bộ đệm
+    // kết quả cũ, câu nói tiếp theo luôn bắt đầu mới 100%, không bao giờ bị dính index cũ hay kẹt chữ!
     if (wantListening && recognition) {
       try {
         recognition.abort()
-      } catch {
-        // Bỏ qua
-      }
+      } catch {}
     }
   }
 
@@ -182,16 +241,26 @@ export function useVoiceInput(options: VoiceInputOptions) {
     instance.maxAlternatives = 1
 
     instance.onstart = () => {
+      resultOffset = 0
       listening.value = true
       options.onStateChange?.(true)
+    }
+
+    instance.onspeechstart = () => {
+      options.onSpeechOnset?.()
+    }
+
+    instance.onsoundstart = () => {
+      options.onSpeechOnset?.()
     }
 
     instance.onresult = (event) => {
       let finalChunk = ''
       let interimChunk = ''
 
-      // Tích lũy toàn bộ kết quả của câu đang nói (không làm mất từ trước đó)
-      for (let index = 0; index < event.results.length; index++) {
+      // Chỉ đọc results từ resultOffset trở đi, ngăn chặn tuyệt đối Chrome nối các câu trước đó vào câu mới
+      const startIdx = Math.min(resultOffset, event.results.length)
+      for (let index = startIdx; index < event.results.length; index++) {
         const result = event.results[index]
         const transcript = result[0]?.transcript ?? ''
         if (result.isFinal) {
@@ -206,20 +275,63 @@ export function useVoiceInput(options: VoiceInputOptions) {
       interim.value = fullLiveText
       options.onInterim?.(fullLiveText)
 
-      // Hẹn giờ im lặng (silence detection): nếu ngừng nói 950ms (hoặc 550ms với lệnh ngắn) thì chốt câu
+      // Hẹn giờ chốt câu thông minh (Semantic Endpointing / Dynamic Silence Window):
+      // Người dùng không bị ngắt lời khi đang ngập ngừng hoặc đọc danh sách dài mười mấy giấy tờ
       if (silenceTimer) {
         window.clearTimeout(silenceTimer)
         silenceTimer = null
       }
 
       if (fullLiveText.length > 0) {
-        const lower = fullLiveText.toLowerCase()
-        const isQuickCommand = ['xong', 'lưu', 'tiếp', 'kế tiếp', 'bộ bảy', 'quay lại', 'trước'].includes(lower)
-        const delay = isQuickCommand ? 550 : 950
+        const lower = fullLiveText.toLowerCase().trim()
+        const wordCount = lower.split(/\s+/).filter(Boolean).length
+
+        // 1. Nếu câu kết thúc bằng "xong" hoặc "lưu" -> Người dùng đã chủ động chốt lệnh -> gửi ngay trong 350ms
+        const endsWithCommit =
+          lower.endsWith(' xong') ||
+          lower === 'xong' ||
+          lower.endsWith(' lưu') ||
+          lower === 'lưu'
+
+        // 2. Lệnh điều hướng siêu ngắn (1-2 từ): "tiếp", "quay lại", "dòng 1" -> chốt nhanh sau 700ms
+        const isQuickCommand =
+          wordCount <= 2 &&
+          ['tiếp', 'kế tiếp', 'bộ bảy', 'quay lại', 'trước', 'dòng 1', 'dòng 2'].some(
+            (cmd) => lower.includes(cmd),
+          )
+
+        // 3. Đang đọc danh sách giấy tờ hoặc câu dài (có từ nối "và", "với", "gồm", "bao gồm", "giấy", "hồ sơ", "áp"...)
+        // Cho khoảng nghỉ hào phóng 2400ms để người dùng thoải mái nhìn hồ sơ, lấy hơi, ngập ngừng đọc mười mấy giấy tờ mà không bị cắt!
+        const isListingOrComplex =
+          wordCount >= 3 ||
+          lower.includes('gồm') ||
+          lower.includes('bao gồm') ||
+          lower.includes('và') ||
+          lower.includes('với') ||
+          lower.includes('có') ||
+          lower.includes('áp') ||
+          lower.includes('giấy') ||
+          lower.includes(',')
+
+        let delay = 1600
+        if (endsWithCommit) {
+          delay = 350
+        } else if (isQuickCommand) {
+          delay = 700
+        } else if (isListingOrComplex) {
+          delay = 2400
+        }
 
         silenceTimer = window.setTimeout(() => {
           silenceTimer = null
-          commitUtterance()
+          // Cắt bỏ chữ "xong" / "lưu" ở cuối nếu có trước khi chuyển AI
+          let cleanedCommit = fullLiveText
+          if (cleanedCommit.toLowerCase().endsWith(' xong')) {
+            cleanedCommit = cleanedCommit.slice(0, -5).trim()
+          } else if (cleanedCommit.toLowerCase().endsWith(' lưu')) {
+            cleanedCommit = cleanedCommit.slice(0, -4).trim()
+          }
+          commitUtterance(cleanedCommit)
         }, delay)
       }
     }
@@ -234,6 +346,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
 
     instance.onend = () => {
+      resultOffset = 0
       if (silenceTimer) {
         window.clearTimeout(silenceTimer)
         silenceTimer = null
@@ -249,7 +362,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
       listening.value = false
       options.onStateChange?.(false)
 
-      // Chrome tự ngắt sau khoảng lặng — nối lại nếu người dùng vẫn bật mic.
+      // Tự động khởi động lại trong 40ms khi người dùng vẫn bật mic
       if (wantListening && !restarting) {
         restarting = true
         window.setTimeout(() => {
@@ -261,7 +374,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
               // Đã chạy rồi — bỏ qua nhịp này.
             }
           }
-        }, 150)
+        }, 40)
       }
     }
 
@@ -329,7 +442,13 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
     activeUtterance = ''
     interim.value = ''
+    resultOffset = 0
     options.onInterim?.('')
+    if (wantListening && recognition) {
+      try {
+        recognition.abort()
+      } catch {}
+    }
   }
 
   onUnmounted(() => {

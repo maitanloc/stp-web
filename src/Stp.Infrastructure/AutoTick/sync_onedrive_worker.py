@@ -180,11 +180,274 @@ def launch_browser(p):
 
     raise RuntimeError(f"Could not launch any browser (Chromium, Edge, or Chrome). Last error: {last_err}")
 
+def run_sync_google_sheet(data, output_file):
+    url = data.get('oneDriveUrl', '')
+    sheet_name = data.get('sheetName', '1997')
+    rows = data.get('rows', [])
+    screenshot_path = data.get('screenshotPath')
+
+    results = []
+    synced_rows = 0
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    profile_candidates = [
+        os.path.abspath(os.path.join(base_dir, "..", "..", "..", "tools", "bot_profile")),
+        os.path.abspath(os.path.join(base_dir, "..", "..", "tools", "bot_profile")),
+        os.path.abspath(os.path.join(base_dir, "tools", "bot_profile")),
+        os.path.abspath(r"d:\A\stp-web\tools\bot_profile"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "stp_bot_profile"),
+    ]
+    profile_dir = next((p for p in profile_candidates if os.path.isdir(p)), profile_candidates[0])
+    os.makedirs(profile_dir, exist_ok=True)
+
+    with sync_playwright() as p:
+        print(f"INFO:Opening Google Sheets with persistent profile: {profile_dir}...", flush=True)
+        chrome_args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--enable-clipboard-read-write",
+        ]
+
+        ctx = None
+        for channel in ["chrome", "msedge", None]:
+            try:
+                launch_kwargs = {
+                    "headless": True,
+                    "viewport": {"width": 1400, "height": 900},
+                    "permissions": ["clipboard-read", "clipboard-write"],
+                    "args": chrome_args,
+                }
+                if channel:
+                    launch_kwargs["channel"] = channel
+                ctx = p.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
+                print(f"INFO:Launched browser for Google Sheets with channel={channel}", flush=True)
+                break
+            except Exception as e_launch:
+                print(f"WARN:Failed persistent launch with channel={channel}: {e_launch}", flush=True)
+
+        # Fallback: Nếu persistent profile bị khóa hoặc lỗi, mở context sạch (cho phép điền trên link Bất kỳ ai có quyền sửa)
+        if not ctx:
+            for channel in ["chrome", "msedge", None]:
+                try:
+                    b_clean = p.chromium.launch(headless=True, channel=channel, args=chrome_args)
+                    ctx = b_clean.new_context(
+                        viewport={"width": 1400, "height": 900},
+                        permissions=["clipboard-read", "clipboard-write"]
+                    )
+                    print(f"INFO:Launched fallback clean browser for Google Sheets with channel={channel}", flush=True)
+                    break
+                except Exception as e_clean:
+                    print(f"WARN:Failed clean launch with channel={channel}: {e_clean}", flush=True)
+
+        if not ctx:
+            raise RuntimeError("Không thể khởi động trình duyệt cho Google Sheets.")
+
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        page.set_default_timeout(15000)
+
+        print(f"INFO:Navigating to Google Sheets URL: {url}...", flush=True)
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            print(f"WARN:page.goto warning: {e}", flush=True)
+
+        page.wait_for_timeout(3500)
+
+        # 1. Kiểm tra quyền Sửa (Editor) hay Chỉ xem (View Only)
+        def check_can_edit(p_page):
+            try:
+                view_badges = p_page.locator(".docs-gm-view-only, [aria-label*='Chỉ xem'], [aria-label*='View only'], .docs-material-view-only-badge, button:has-text('Yêu cầu quyền chỉnh sửa'), button:has-text('Request edit access')").all()
+                if len(view_badges) > 0:
+                    return False
+                editor = p_page.locator("#t-formula-bar-input .cell-input, #t-formula-bar-input [contenteditable='true'], #t-formula-bar-input [role='textbox'], .cell-input[contenteditable='true']").first
+                if editor.count() > 0:
+                    return True
+            except Exception:
+                pass
+            return False
+
+        def check_needs_login(p_page):
+            try:
+                signin = p_page.locator("a[href*='accounts.google.com/ServiceLogin'], a[aria-label*='Đăng nhập'], a[aria-label*='Sign in'], button:has-text('Đăng nhập'), button:has-text('Sign in')").all()
+                return len(signin) > 0
+            except Exception:
+                return False
+
+        can_edit = check_can_edit(page)
+
+        # Nếu file bị Chỉ xem, chưa đăng nhập hoặc tài khoản không có quyền sửa:
+        # Báo lỗi ngay lập tức để người dùng kiểm tra hoặc bấm Đăng nhập trên web, tuyệt đối không treo robot
+        if not can_edit:
+            ctx.close()
+            error_msg = (
+                "File đang ở chế độ 'Chỉ xem'. "
+                "Vui lòng mở Google Sheets -> Bấm nút 'Chia sẻ' -> Chuyển sang 'Bất kỳ ai có đường liên kết: Người chỉnh sửa' để robot có thể điền."
+            )
+            print(f"ERROR:{error_msg}", flush=True)
+            output_data = {
+                "success": False,
+                "needsLogin": True,
+                "syncedRowsCount": 0,
+                "tickedCellsCount": 0,
+                "newHeadersCount": 0,
+                "message": error_msg,
+                "details": []
+            }
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(output_data, f, ensure_ascii=False, indent=2)
+            return
+
+        # 2. Chuyển tab sheet nếu cần
+        if sheet_name:
+            try:
+                tab = page.locator(".docs-sheet-tab-name").filter(has_text=sheet_name).first
+                if tab.count() > 0:
+                    tab.click()
+                    page.wait_for_timeout(1500)
+                    print(f"INFO:Switched to Google Sheet tab '{sheet_name}'", flush=True)
+                else:
+                    # Thử lọc theo số năm nếu tên có dạng 'Năm 2002' -> '2002'
+                    year_match = re.search(r'\d{4}', sheet_name)
+                    if year_match:
+                        y_tab = page.locator(".docs-sheet-tab-name").filter(has_text=year_match.group(0)).first
+                        if y_tab.count() > 0:
+                            y_tab.click()
+                            page.wait_for_timeout(1500)
+                            print(f"INFO:Switched to tab by year '{year_match.group(0)}'", flush=True)
+            except Exception as e_tab:
+                print(f"WARN:Could not switch to tab '{sheet_name}': {e_tab}", flush=True)
+
+        name_box = page.locator("#t-name-box").first
+        try:
+            name_box.wait_for(state="attached", timeout=15000)
+        except Exception as e_nb:
+            print(f"WARN:name_box wait error: {e_nb}", flush=True)
+
+        def set_cell_gsheet(coord, val):
+            if val is None or val == "":
+                return
+            name_box.click()
+            name_box.fill(coord)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(150)
+
+            editor = page.locator("#t-formula-bar-input .cell-input, #t-formula-bar-input [role='textbox'], #t-formula-bar-input").first
+            editor.click()
+            page.wait_for_timeout(50)
+            page.keyboard.press("Control+a")
+            page.keyboard.press("Backspace")
+            page.keyboard.insert_text(val)
+            page.wait_for_timeout(50)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(200)
+
+        # 3. Điền dữ liệu các dòng: CHỈ CỘT A, D, H - TUYỆT ĐỐI BỎ QUA ĐÁNH TICK
+        for r_item in rows:
+            r_idx = r_item.get('rowIndex')
+            num_label = r_item.get('numberLabel', '')
+            summary_text = r_item.get('summaryText', '')
+            formula_h = r_item.get('formulaH', '') or summary_text
+            status_a = r_item.get('statusA', 'đã nhập')
+
+            err = None
+            try:
+                # Cột A: Đánh dấu "đã nhập"
+                if status_a:
+                    set_cell_gsheet(f"A{r_idx}", status_a)
+                    print(f"PROGRESS_A:{r_idx}:{num_label}:A{r_idx}:{status_a}", flush=True)
+
+                # Cột D: Điền trích yếu kèm ngoặc
+                if summary_text:
+                    set_cell_gsheet(f"D{r_idx}", summary_text)
+                    print(f"PROGRESS_D:{r_idx}:{num_label}:D{r_idx}", flush=True)
+
+                # Cột H: Điền trích yếu kèm ngoặc
+                if formula_h:
+                    set_cell_gsheet(f"H{r_idx}", formula_h)
+                    print(f"PROGRESS_H:{r_idx}:{num_label}:H{r_idx}", flush=True)
+
+                synced_rows += 1
+                print(f"PROGRESS_ROW:{r_idx}:{num_label}:{synced_rows}", flush=True)
+            except Exception as e_row:
+                err = str(e_row)
+                print(f"ERROR_ROW:{r_idx}:{err}", flush=True)
+
+            results.append({
+                "rowIndex": r_idx,
+                "numberLabel": num_label,
+                "statusAFilled": bool(status_a and not err),
+                "summaryFilled": bool(summary_text and not err),
+                "formulaHFilled": bool(formula_h and not err),
+                "tickedColumns": [],
+                "untickedColumns": [],
+                "error": err
+            })
+
+        # Lưu trên Google Sheets
+        try:
+            page.keyboard.press("Control+s")
+        except Exception:
+            pass
+        page.wait_for_timeout(2000)
+
+        if screenshot_path:
+            try:
+                page.screenshot(path=screenshot_path)
+            except Exception:
+                pass
+
+        ctx.close()
+
+    if synced_rows == 0 and len(rows) > 0 and any(r.get("error") for r in results):
+        first_err = next((r.get("error") for r in results if r.get("error")), "Lỗi không xác định")
+        output_data = {
+            "success": False,
+            "syncedRowsCount": 0,
+            "tickedCellsCount": 0,
+            "newHeadersCount": 0,
+            "newHeaderTitles": [],
+            "message": f"Không thể điền hồ sơ lên Google Sheets: {first_err}",
+            "details": results
+        }
+    else:
+        sync_msg = f"Đã đồng bộ thành công {synced_rows} hồ sơ: điền Cột D, H và đánh dấu Cột A là '{data.get('statusA', 'đã nhập')}' lên Google Sheets!"
+        output_data = {
+            "success": True,
+            "syncedRowsCount": synced_rows,
+            "tickedCellsCount": 0,
+            "newHeadersCount": 0,
+            "newHeaderTitles": [],
+            "message": sync_msg,
+            "details": results
+        }
+
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(output_data, f, ensure_ascii=False, indent=2)
+
 def run_sync(input_file, output_file):
     with open(input_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    url = data.get('oneDriveUrl')
+    url = data.get('oneDriveUrl', '')
+    if 'docs.google.com' in url.lower() or 'google.com/spreadsheets' in url.lower():
+        try:
+            run_sync_google_sheet(data, output_file)
+        except Exception as ex_gs:
+            err_msg = f"Lỗi Google Sheets: {ex_gs}"
+            print(f"ERROR:{err_msg}", flush=True)
+            err_output = {
+                "success": False,
+                "message": err_msg,
+                "syncedRowsCount": 0,
+                "details": []
+            }
+            with open(output_file, 'w', encoding='utf-8') as f_err:
+                json.dump(err_output, f_err, ensure_ascii=False, indent=2)
+        return
     sheet_name = data.get('sheetName', '1997')
     rows = data.get('rows', [])
     screenshot_path = data.get('screenshotPath')
