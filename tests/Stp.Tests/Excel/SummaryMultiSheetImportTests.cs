@@ -160,15 +160,15 @@ public sealed class SummaryMultiSheetImportTests
             var names = workbook.Worksheets.Select(sheet => sheet.Name).ToList();
             Assert.Equal(new[] { "file nhập", "1995ok", "1997" }, names);
 
-            // file nhập chỉ giữ dòng tiêu đề + dòng 1994 (dòng 8); các dòng
+            // file nhập chỉ giữ dòng tiêu đề + dòng 1994 (dòng 8 cũ dồn lên dòng 2); các dòng
             // ngoài phạm vi bị xoá khỏi XML.
             var input = workbook.Worksheet("file nhập");
             Assert.Equal(
                 "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn "
                 + "với người nước ngoài của Bà VÕ THỊ E và Ông ADAM SMITH",
-                input.Cell("D8").GetString());
-            Assert.Equal(string.Empty, input.Cell("D2").GetString());
-            Assert.Equal(string.Empty, input.Cell("D7").GetString());
+                input.Cell("D2").GetString());
+            Assert.Equal(string.Empty, input.Cell("D8").GetString());
+            Assert.Equal(2, input.RangeUsed()!.LastRow().RowNumber());
 
             var year1995 = workbook.Worksheet("1995ok");
             Assert.Equal(

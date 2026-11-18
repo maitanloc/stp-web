@@ -264,7 +264,7 @@ internal static class SummaryXlsxPatcher
                 worksheetPart,
                 worksheetRelsXml);
 
-            var (filteredWorksheet, sharedRefs) = FilterWorksheet(
+            var (filteredWorksheet, sharedRefs, rowMapping) = FilterWorksheet(
                 ReadEntryText(worksheetEntry),
                 sheet.HeaderRow,
                 sheet.AllowedRows,
@@ -276,7 +276,8 @@ internal static class SummaryXlsxPatcher
                 : FilterComments(
                     ReadEntryText(source.GetEntry(annotations.CommentsPart)!),
                     sheet.HeaderRow,
-                    sheet.AllowedRows);
+                    sheet.AllowedRows,
+                    rowMapping);
 
             if (annotations.CommentsPart is not null && updatedCommentsXml is null)
             {
@@ -288,7 +289,8 @@ internal static class SummaryXlsxPatcher
                 : FilterVml(
                     ReadEntryText(source.GetEntry(annotations.VmlPart)!),
                     sheet.HeaderRow,
-                    sheet.AllowedRows);
+                    sheet.AllowedRows,
+                    rowMapping);
 
             if (annotations.VmlPart is not null && updatedVmlXml is null)
             {
@@ -456,7 +458,7 @@ internal static class SummaryXlsxPatcher
         }
     }
 
-    private static (string Xml, List<int> SharedRefs) FilterWorksheet(
+    private static (string Xml, List<int> SharedRefs, Dictionary<int, int> RowMapping) FilterWorksheet(
         string worksheetXml,
         int headerRow,
         IReadOnlySet<int> allowedRows,
@@ -474,7 +476,18 @@ internal static class SummaryXlsxPatcher
         var rowTags = FindRows(worksheetXml);
         if (rowTags.Count == 0)
         {
-            return (worksheetXml, new List<int>());
+            return (worksheetXml, new List<int>(), new Dictionary<int, int>());
+        }
+
+        // Tạo ánh xạ dồn dòng lọc lên sát phía sau dòng tiêu đề (compact / push to top)
+        var rowMapping = new Dictionary<int, int>();
+        var nextRow = headerRow + 1;
+        foreach (var row in rowTags)
+        {
+            if (row.RowNumber > headerRow && allowedRows.Contains(row.RowNumber))
+            {
+                rowMapping[row.RowNumber] = nextRow++;
+            }
         }
 
         var builder = new StringBuilder(worksheetXml.Length);
@@ -505,6 +518,11 @@ internal static class SummaryXlsxPatcher
                     }
                 }
 
+                if (rowMapping.TryGetValue(row.RowNumber, out var newRowNumber) && newRowNumber != row.RowNumber)
+                {
+                    segment = RenumberRowSegment(segment, row.RowNumber, newRowNumber, row.Prefix);
+                }
+
                 builder.Append(segment);
             }
 
@@ -516,8 +534,104 @@ internal static class SummaryXlsxPatcher
             builder.Append(worksheetXml, cursor, worksheetXml.Length - cursor);
         }
 
-        var filtered = UpdateDimension(builder.ToString(), headerRow, allowedRows);
-        return (filtered, CollectSharedStringReferences(filtered));
+        var xmlWithRows = builder.ToString();
+        var xmlWithMerge = UpdateMergeCells(xmlWithRows, headerRow, allowedRows, rowMapping);
+        var filtered = UpdateDimension(xmlWithMerge, headerRow, allowedRows);
+        return (filtered, CollectSharedStringReferences(filtered), rowMapping);
+    }
+
+    private static string RenumberRowSegment(string segment, int oldRow, int newRow, string prefix)
+    {
+        if (oldRow == newRow)
+        {
+            return segment;
+        }
+
+        var oldRowStr = oldRow.ToString(CultureInfo.InvariantCulture);
+        var newRowStr = newRow.ToString(CultureInfo.InvariantCulture);
+
+        // 1. Cập nhật thuộc tính r="..." của thẻ row
+        segment = Regex.Replace(
+            segment,
+            $@"(<{Regex.Escape(prefix)}row\b[^>]*?\br="")({oldRowStr})("")",
+            m => $"{m.Groups[1].Value}{newRowStr}{m.Groups[3].Value}",
+            RegexOptions.Singleline);
+
+        // 2. Cập nhật thuộc tính r="..." của tất cả các ô <c r="[A-Z]+{oldRow}" ...>
+        segment = Regex.Replace(
+            segment,
+            $@"(<{Regex.Escape(prefix)}c\b[^>]*?\br=""[A-Z]+)({oldRowStr})("")",
+            m => $"{m.Groups[1].Value}{newRowStr}{m.Groups[3].Value}",
+            RegexOptions.Singleline);
+
+        // 3. Cập nhật công thức <f>...</f> tham chiếu đến ô trong cùng dòng cũ
+        segment = Regex.Replace(
+            segment,
+            $@"<(?<p>(?:{Regex.Escape(prefix)})?)f(?<attrs>[^>]*)>(?<formula>.*?)</\k<p>?f>",
+            m =>
+            {
+                var formula = m.Groups["formula"].Value;
+                var updatedFormula = Regex.Replace(
+                    formula,
+                    $@"(?<=[A-Z]|\$){oldRowStr}\b",
+                    newRowStr);
+                return $"<{m.Groups["p"].Value}f{m.Groups["attrs"].Value}>{updatedFormula}</{m.Groups["p"].Value}f>";
+            },
+            RegexOptions.Singleline);
+
+        return segment;
+    }
+
+    private static string UpdateMergeCells(
+        string worksheetXml,
+        int headerRow,
+        IReadOnlySet<int> allowedRows,
+        IReadOnlyDictionary<int, int> rowMapping)
+    {
+        var match = Regex.Match(
+            worksheetXml,
+            @"<(?<prefix>[A-Za-z_][A-Za-z0-9_.-]*:)?mergeCells\b(?<attrs>[^>]*)>(?<content>.*?)</\k<prefix>?mergeCells>",
+            RegexOptions.Singleline);
+
+        if (!match.Success)
+        {
+            return worksheetXml;
+        }
+
+        var prefix = match.Groups["prefix"].Value;
+        var content = match.Groups["content"].Value;
+        var mergeCellMatches = Regex.Matches(
+            content,
+            $@"<{Regex.Escape(prefix)}mergeCell\b[^>]*?\bref=""(?<col1>[A-Z]+)(?<row1>\d+):(?<col2>[A-Z]+)(?<row2>\d+)""[^>]*/>",
+            RegexOptions.Singleline);
+
+        var keptMergeCells = new List<string>();
+        foreach (Match m in mergeCellMatches)
+        {
+            var r1 = int.Parse(m.Groups["row1"].Value, CultureInfo.InvariantCulture);
+            var r2 = int.Parse(m.Groups["row2"].Value, CultureInfo.InvariantCulture);
+
+            if (r1 <= headerRow && r2 <= headerRow)
+            {
+                keptMergeCells.Add(m.Value);
+            }
+            else if (allowedRows.Contains(r1) && allowedRows.Contains(r2))
+            {
+                var newR1 = rowMapping.TryGetValue(r1, out var nr1) ? nr1 : r1;
+                var newR2 = rowMapping.TryGetValue(r2, out var nr2) ? nr2 : r2;
+                var c1 = m.Groups["col1"].Value;
+                var c2 = m.Groups["col2"].Value;
+                keptMergeCells.Add($"<{prefix}mergeCell ref=\"{c1}{newR1}:{c2}{newR2}\"/>");
+            }
+        }
+
+        if (keptMergeCells.Count == 0)
+        {
+            return worksheetXml.Remove(match.Index, match.Length);
+        }
+
+        var newMergeCellsTag = $"<{prefix}mergeCells count=\"{keptMergeCells.Count}\">{string.Concat(keptMergeCells)}</{prefix}mergeCells>";
+        return string.Concat(worksheetXml[..match.Index], newMergeCellsTag, worksheetXml[(match.Index + match.Length)..]);
     }
 
     private static string NormalizeColumn(string columnLetter)
@@ -634,7 +748,7 @@ internal static class SummaryXlsxPatcher
         int headerRow,
         IReadOnlySet<int> allowedRows)
     {
-        var maxRow = allowedRows.Count == 0 ? headerRow : Math.Max(headerRow, allowedRows.Max());
+        var maxRow = allowedRows.Count == 0 ? headerRow : headerRow + allowedRows.Count;
         var match = Regex.Match(
             worksheetXml,
             @"<(?<prefix>[A-Za-z_][A-Za-z0-9_.-]*:)?dimension\b[^>]*\bref=""(?<ref>[^""]+)""",
@@ -1044,7 +1158,8 @@ internal static class SummaryXlsxPatcher
     private static string? FilterComments(
         string commentsXml,
         int headerRow,
-        IReadOnlySet<int> allowedRows)
+        IReadOnlySet<int> allowedRows,
+        IReadOnlyDictionary<int, int> rowMapping)
     {
         var document = XDocument.Parse(commentsXml, LoadOptions.PreserveWhitespace);
         var root = document.Root;
@@ -1058,12 +1173,23 @@ internal static class SummaryXlsxPatcher
             .Where(element => element.Name.LocalName == "comment")
             .ToList();
         var removed = 0;
+        var modified = 0;
 
         foreach (var comment in comments)
         {
             var row = ParseCellRow((string?)comment.Attribute("ref"));
             if (row <= headerRow || allowedRows.Contains(row))
             {
+                if (rowMapping.TryGetValue(row, out var newRow) && newRow != row)
+                {
+                    var oldRef = (string?)comment.Attribute("ref");
+                    if (oldRef is not null)
+                    {
+                        var col = Regex.Match(oldRef, @"^[A-Z]+").Value;
+                        comment.SetAttributeValue("ref", $"{col}{newRow}");
+                        modified++;
+                    }
+                }
                 continue;
             }
 
@@ -1071,7 +1197,7 @@ internal static class SummaryXlsxPatcher
             removed++;
         }
 
-        if (removed == 0)
+        if (removed == 0 && modified == 0)
         {
             return commentsXml;
         }
@@ -1084,7 +1210,8 @@ internal static class SummaryXlsxPatcher
     private static string? FilterVml(
         string vmlXml,
         int headerRow,
-        IReadOnlySet<int> allowedRows)
+        IReadOnlySet<int> allowedRows,
+        IReadOnlyDictionary<int, int> rowMapping)
     {
         var document = XDocument.Parse(vmlXml, LoadOptions.PreserveWhitespace);
         var root = document.Root;
@@ -1098,6 +1225,7 @@ internal static class SummaryXlsxPatcher
             .Where(element => element.Name.LocalName == "shape")
             .ToList();
         var removed = 0;
+        var modified = 0;
 
         foreach (var shape in shapes)
         {
@@ -1129,6 +1257,11 @@ internal static class SummaryXlsxPatcher
             var row = zeroBasedRow + 1;
             if (row <= headerRow || allowedRows.Contains(row))
             {
+                if (rowMapping.TryGetValue(row, out var newRow) && newRow != row)
+                {
+                    rowElement.Value = (newRow - 1).ToString(CultureInfo.InvariantCulture);
+                    modified++;
+                }
                 continue;
             }
 
@@ -1136,7 +1269,7 @@ internal static class SummaryXlsxPatcher
             removed++;
         }
 
-        if (removed == 0)
+        if (removed == 0 && modified == 0)
         {
             return vmlXml;
         }

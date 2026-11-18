@@ -241,14 +241,14 @@ public sealed class SummaryFilteredExportTests
                 Assert.Single(workbook.Worksheets);
                 var ml = workbook.Worksheet("ML");
 
-                Assert.Equal("Hồ sơ 38 (hộ chiếu)", ml.Cell("D4").GetString());
-                Assert.Equal(string.Empty, ml.Cell("D2").GetString());
+                Assert.Equal("Hồ sơ 38 (hộ chiếu)", ml.Cell("D2").GetString());
+                Assert.True(ml.Cell("D2").HasComment);
                 Assert.Equal(string.Empty, ml.Cell("D3").GetString());
+                Assert.Equal(string.Empty, ml.Cell("D4").GetString());
                 Assert.Equal(string.Empty, ml.Cell("D5").GetString());
                 Assert.Equal(string.Empty, ml.Cell("D6").GetString());
                 Assert.Equal(string.Empty, ml.Cell("D7").GetString());
-                Assert.False(ml.Cell("D2").HasComment);
-                Assert.True(ml.Cell("D4").HasComment);
+                Assert.Equal(2, ml.RangeUsed()!.LastRow().RowNumber());
             }
 
             using (var archive = ZipFile.OpenRead(output))
@@ -260,11 +260,12 @@ public sealed class SummaryFilteredExportTests
 
             var commentsXml = ReadEntry(output, "xl/comments1.xml");
             Assert.Contains("Ghi chú dòng 38", commentsXml);
+            Assert.Contains("ref=\"D2\"", commentsXml);
             Assert.DoesNotContain("Ghi chú dòng 36", commentsXml);
 
             var vmlXml = ReadEntry(output, "xl/drawings/vmldrawing.vml");
-            Assert.Matches(@"(?:\w+:)?Row>3</(?:\w+:)?Row>", vmlXml);
-            Assert.DoesNotMatch(@"(?:\w+:)?Row>1</(?:\w+:)?Row>", vmlXml);
+            Assert.Matches(@"(?:\w+:)?Row>1</(?:\w+:)?Row>", vmlXml);
+            Assert.DoesNotMatch(@"(?:\w+:)?Row>3</(?:\w+:)?Row>", vmlXml);
 
             var worksheetXml = ReadEntry(output, "xl/worksheets/sheet1.xml");
             Assert.Contains("legacyDrawing", worksheetXml);
@@ -300,9 +301,10 @@ public sealed class SummaryFilteredExportTests
             {
                 Assert.Single(workbook.Worksheets);
                 var ml = workbook.Worksheet("ML");
-                Assert.Equal("Hồ sơ 39", ml.Cell("D5").GetString());
+                Assert.Equal("Hồ sơ 39", ml.Cell("D2").GetString());
+                Assert.Equal(string.Empty, ml.Cell("D5").GetString());
                 Assert.False(ml.Cell("D2").HasComment);
-                Assert.False(ml.Cell("D4").HasComment);
+                Assert.Equal(2, ml.RangeUsed()!.LastRow().RowNumber());
             }
 
             using (var archive = ZipFile.OpenRead(output))
@@ -613,6 +615,79 @@ public sealed class SummaryFilteredExportTests
             Assert.Equal(8300, rowsSub.Items[0].Number);
             Assert.Equal(8135, rowsSub.Items[1].Number);
             Assert.Equal(8136, rowsSub.Items[2].Number);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task FilteredExport_PushesFilteredRowsToTopImmediatelyAfterHeader()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "source-far-down.xlsx");
+            using (var workbook = new XLWorkbook())
+            {
+                var ml = workbook.AddWorksheet("ML");
+                // Giả lập tiêu đề dòng 1-4 (chuẩn hồ sơ tư pháp)
+                ml.Cell("A4").Value = "Hộp";
+                ml.Cell("B4").Value = "Số hồ sơ";
+                ml.Cell("D4").Value = "Trích yếu nội dung";
+                ml.Cell("E4").Value = "Thời gian tài liệu";
+
+                // Dữ liệu bắt đầu tít dưới dòng 150-154
+                for (int i = 0; i < 5; i++)
+                {
+                    int r = 150 + i;
+                    int num = 8248 + i;
+                    ml.Cell(r, 2).Value = num;
+                    ml.Cell(r, 4).Value = $"Trích yếu hồ sơ {num}";
+                    ml.Cell(r, 5).Value = new DateTime(1997, 1, 1);
+                }
+
+                workbook.SaveAs(path);
+            }
+
+            var service = CreateService(directory);
+            var session = await OpenSessionAsync(service, path);
+
+            var scope = new SummaryScope(
+                NumberMode: SummaryNumberMode.Range,
+                NumberFrom: 8248,
+                NumberTo: 8252);
+
+            var result = await service.ExportFilteredAsync(
+                session.SessionId,
+                Array.Empty<SummaryChange>(),
+                scope);
+
+            Assert.Equal(5, result.TotalRows);
+
+            var outputPath = Path.Combine(directory, "pushed-to-top.xlsx");
+            await File.WriteAllBytesAsync(outputPath, result.Content);
+
+            using var outWb = new XLWorkbook(outputPath);
+            var outSheet = outWb.Worksheet("ML");
+
+            // Dòng tiêu đề 4 vẫn giữ nguyên
+            Assert.Equal("Trích yếu nội dung", outSheet.Cell("D4").GetString());
+
+            // 5 dòng dữ liệu thay vì nằm ở dòng 150..154 thì đã được ĐẨY LÊN ĐẦU sát dòng 5..9
+            Assert.Equal("Trích yếu hồ sơ 8248", outSheet.Cell("D5").GetString());
+            Assert.Equal("Trích yếu hồ sơ 8249", outSheet.Cell("D6").GetString());
+            Assert.Equal("Trích yếu hồ sơ 8250", outSheet.Cell("D7").GetString());
+            Assert.Equal("Trích yếu hồ sơ 8251", outSheet.Cell("D8").GetString());
+            Assert.Equal("Trích yếu hồ sơ 8252", outSheet.Cell("D9").GetString());
+
+            // Dòng cuối cùng của file xuất chỉ là dòng 9 (không còn khoảng trống trắng đến 154)
+            Assert.Equal(9, outSheet.RangeUsed()!.LastRow().RowNumber());
+            Assert.Equal(string.Empty, outSheet.Cell("D150").GetString());
         }
         finally
         {
