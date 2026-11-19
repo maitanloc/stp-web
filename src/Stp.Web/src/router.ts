@@ -128,6 +128,15 @@ const routes: RouteRecordRaw[] = [
           subtitle: 'Khu vực nghỉ ngơi văn phòng, xả stress và bảo trì máy chủ',
         },
       },
+      {
+        path: 'giai-tri/:gameSlug?',
+        name: 'games',
+        component: () => import('./views/GamesView.vue'),
+        meta: {
+          title: '🌾 Giải trí Nông trại',
+          subtitle: '4 mini-game pixel art thư giãn ấm áp giữa giờ làm việc',
+        },
+      },
     ],
   },
   {

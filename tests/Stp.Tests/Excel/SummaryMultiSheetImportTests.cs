@@ -96,7 +96,7 @@ public sealed class SummaryMultiSheetImportTests
             };
 
             var result = await service.ExportAsync(session.SessionId, changes);
-            Assert.Equal(2, result.ChangedRows);
+            Assert.Equal(5, result.ChangedRows);
 
             var output = Path.Combine(directory, "exported-multi.xlsx");
             await File.WriteAllBytesAsync(output, result.Content);
@@ -104,11 +104,10 @@ public sealed class SummaryMultiSheetImportTests
             using var workbook = new XLWorkbook(output);
             var input = workbook.Worksheet("file nhập");
             Assert.Equal(
-                row1.BaseSummary + " (phiếu đề xuất, giấy khai sinh)",
+                row1.NormalizedBaseSummary + " (phiếu đề xuất, giấy khai sinh)",
                 input.Cell("D2").GetString());
             Assert.Equal(
-                "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn "
-                + "với người nước ngoài của Bà TRẦN THỊ B và Ông NGUYỄN VĂN C",
+                "Về việc đăng ký kết hôn của Bà TRẦN THỊ B và Ông NGUYỄN VĂN C",
                 input.Cell("D3").GetString());
 
             var year1997 = workbook.Worksheet("1997");
@@ -151,7 +150,7 @@ public sealed class SummaryMultiSheetImportTests
 
             var result = await service.ExportFilteredAsync(session.SessionId, changes, scope);
             Assert.Equal(3, result.TotalRows);
-            Assert.Equal(1, result.ChangedRows);
+            Assert.Equal(2, result.ChangedRows);
 
             var output = Path.Combine(directory, "filtered-multi.xlsx");
             await File.WriteAllBytesAsync(output, result.Content);
@@ -164,8 +163,7 @@ public sealed class SummaryMultiSheetImportTests
             // ngoài phạm vi bị xoá khỏi XML.
             var input = workbook.Worksheet("file nhập");
             Assert.Equal(
-                "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn "
-                + "với người nước ngoài của Bà VÕ THỊ E và Ông ADAM SMITH",
+                "Về việc đăng ký kết hôn của Bà VÕ THỊ E và Ông ADAM SMITH",
                 input.Cell("D2").GetString());
             Assert.Equal(string.Empty, input.Cell("D8").GetString());
             Assert.Equal(2, input.RangeUsed()!.LastRow().RowNumber());

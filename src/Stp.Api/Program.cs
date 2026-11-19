@@ -254,6 +254,8 @@ app.UseAuthorization();
 app.MapControllers();
 // F1: hub nhóm — /hubs/team (ngrok free hỗ trợ websocket, link tunnel bình thường).
 app.MapHub<Stp.Api.Hubs.TeamHub>("/hubs/team");
+app.MapHub<Stp.Api.Hubs.GamePresenceHub>("/hubs/game-presence");
+app.MapHub<Stp.Api.Hubs.CaroHub>("/hubs/carohub");
 
 // Trạng thái migration dùng cho health: migrate hỏng thì báo degraded nhưng
 // service vẫn chạy (log lỗi chi tiết, không crash).

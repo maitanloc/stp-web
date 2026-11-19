@@ -14,8 +14,7 @@ namespace Stp.Tests.Excel;
 /// </summary>
 public sealed class SummarySelectedOnlyTests
 {
-    private const string StandardPrefix =
-        "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài";
+    private const string StandardPrefix = "Về việc đăng ký kết hôn";
 
     [Fact]
     public async Task Preview_WithOnlyRowNumbers_ExcludesOtherNormalizableRows()

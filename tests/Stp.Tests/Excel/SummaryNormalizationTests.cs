@@ -11,7 +11,7 @@ namespace Stp.Tests.Excel;
 public sealed class SummaryNormalizationTests
 {
     private const string StandardPrefix =
-        "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài";
+        "Về việc đăng ký kết hôn";
 
     [Fact]
     public async Task Inspect_DetectsSheetNumberColumnFromPageRangeData()
@@ -270,7 +270,7 @@ public sealed class SummaryNormalizationTests
             // Tìm bằng tiền tố chuẩn phải thấy cả các dòng còn dùng tiền tố cũ.
             var search = service.GetRows(
                 session.SessionId,
-                new SummaryScope(Search: "Quyết định về việc cho phép"),
+                new SummaryScope(Search: "Về việc đăng ký kết hôn"),
                 1,
                 20);
             Assert.Equal(5, search.Total);
@@ -370,9 +370,7 @@ public sealed class SummaryNormalizationTests
 
         // Dòng 9: đã đúng chuẩn, thiếu hồ sơ số.
         ml.Cell("B9").Value = 8;
-        ml.Cell("D9").Value =
-            "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn "
-            + "với người nước ngoài của Bà HOÀNG THỊ E và Ông LI WEI";
+        ml.Cell("D9").Value = "Về việc đăng ký kết hôn của Bà HOÀNG THỊ E và Ông LI WEI";
         ml.Cell("E9").Value = new DateTime(1993, 1, 10);
         ml.Cell("G9").Value = "91-100";
 

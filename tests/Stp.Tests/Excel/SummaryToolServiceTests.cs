@@ -78,15 +78,17 @@ public sealed class SummaryToolServiceTests
 
             var preview = service.Preview(session.SessionId, changes);
             Assert.All(preview, row => Assert.True(row.Changed));
+            var p5 = preview.Single(p => p.RowNumber == row5.RowNumber);
+            var p7 = preview.Single(p => p.RowNumber == row7.RowNumber);
             Assert.Equal(
-                row5.BaseSummary + " (phiếu đề xuất, giấy khai sinh, hộ chiếu)",
-                preview[0].Summary);
+                row5.NormalizedBaseSummary + " (phiếu đề xuất, giấy khai sinh, hộ chiếu)",
+                p5.Summary);
             Assert.Equal(
-                row7.BaseSummary + " (hộ chiếu)",
-                preview[1].Summary);
+                row7.NormalizedBaseSummary + " (hộ chiếu)",
+                p7.Summary);
 
             var result = await service.ExportAsync(session.SessionId, changes);
-            Assert.Equal(3, result.ChangedRows);
+            Assert.Equal(4, result.ChangedRows);
             Assert.Equal("sample_trichyeu.xlsx", result.FileName);
             Assert.True(result.Content.Length > 0);
 
@@ -97,12 +99,12 @@ public sealed class SummaryToolServiceTests
             {
                 var ml = workbook.Worksheet("ML");
                 Assert.Equal(
-                    row5.BaseSummary + " (phiếu đề xuất, giấy khai sinh, hộ chiếu)",
+                    row5.NormalizedBaseSummary + " (phiếu đề xuất, giấy khai sinh, hộ chiếu)",
                     ml.Cell("D5").GetString());
-                Assert.Equal(alias.OriginalSummary, ml.Cell("D6").GetString());
-                Assert.Equal(row7.BaseSummary + " (hộ chiếu)", ml.Cell("D7").GetString());
+                Assert.Equal(alias.NormalizedSummary, ml.Cell("D6").GetString());
+                Assert.Equal(row7.NormalizedBaseSummary + " (hộ chiếu)", ml.Cell("D7").GetString());
                 Assert.Equal(
-                    row8.BaseSummary + " (giấy xác nhận cư trú)",
+                    row8.NormalizedBaseSummary + " (giấy xác nhận cư trú)",
                     ml.Cell("D8").GetString());
 
                 // Định dạng của ô trích yếu được giữ nguyên.

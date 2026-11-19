@@ -68,7 +68,7 @@ public sealed class SummaryA1Tests
                 Assert.Equal("HS-99", sheet.Cell("C2").GetString());
                 Assert.Equal("21-40", sheet.Cell("G2").GetString());
                 Assert.StartsWith(
-                    "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài",
+                    "Về việc đăng ký kết hôn",
                     sheet.Cell("D2").GetString());
 
                 // Bản lọc (chỉ giữ ML + dòng trong phạm vi) cũng phải vá đúng B/C/D/G.
@@ -85,7 +85,7 @@ public sealed class SummaryA1Tests
                 Assert.Equal("HS-99", filteredSheet.Cell("C2").GetString());
                 Assert.Equal("21-40", filteredSheet.Cell("G2").GetString());
                 Assert.StartsWith(
-                    "Quyết định về việc cho phép công dân Việt Nam đăng ký kết hôn với người nước ngoài",
+                    "Về việc đăng ký kết hôn",
                     filteredSheet.Cell("D2").GetString());
             }
         }

@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&display=swap');
+
 /* ============================================================
    STP Archive - design system
    Teal + indigo identity, light and dark themes.
@@ -5501,4 +5503,85 @@ pre,
   100% {
     background-color: transparent;
   }
+}
+
+/* ============================================================
+   STARDEW VALLEY INSPIRED PIXEL ART GAMES THEME
+   Warm farm palette: Wood, Parchment, Soil, Pixel font
+   ============================================================ */
+
+.font-pixel {
+  font-family: 'Pixelify Sans', monospace, 'Courier New', sans-serif;
+  letter-spacing: 0.03em;
+}
+
+.pixel-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  -webkit-font-smoothing: none;
+}
+
+.pixel-box-wood {
+  background-color: #96602e;
+  border: 4px solid #4a2810;
+  box-shadow: inset -2px -2px 0px #311807, inset 2px 2px 0px #d49552, 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+}
+
+.pixel-box-parchment {
+  background-color: #f7eed7;
+  border: 3px solid #b38449;
+  box-shadow: inset -2px -2px 0px #ceb38b, inset 2px 2px 0px #fffcf5, 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+.pixel-box-soil {
+  background-color: #4a2d18;
+  border: 3px solid #2e170a;
+  box-shadow: inset -2px -2px 0px #1a0a03, inset 2px 2px 0px #704426;
+}
+
+.pixel-btn {
+  font-family: 'Pixelify Sans', monospace;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  text-transform: uppercase;
+  border: 2px solid #2e170a;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.05s ease, filter 0.05s ease;
+  image-rendering: pixelated;
+}
+
+.pixel-btn:hover {
+  filter: brightness(1.08);
+}
+
+.pixel-btn:active {
+  transform: translateY(2px);
+}
+
+.pixel-btn-wood {
+  background-color: #ab7338;
+  color: #fff8eb;
+  box-shadow: inset -2px -2px 0px #613b19, inset 2px 2px 0px #dda161, 0 2px 0px #311807;
+}
+
+.pixel-btn-green {
+  background-color: #5a9e32;
+  color: #ffffff;
+  box-shadow: inset -2px -2px 0px #346118, inset 2px 2px 0px #82cb50, 0 2px 0px #1e390c;
+}
+
+.pixel-btn-red {
+  background-color: #cf423c;
+  color: #ffffff;
+  box-shadow: inset -2px -2px 0px #7a1d19, inset 2px 2px 0px #f07b76, 0 2px 0px #4d0e0b;
+}
+
+.pixel-btn-amber {
+  background-color: #d99b26;
+  color: #2b1807;
+  box-shadow: inset -2px -2px 0px #855b0a, inset 2px 2px 0px #fed16b, 0 2px 0px #4a3002;
 }
