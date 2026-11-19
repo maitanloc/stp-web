@@ -147,6 +147,14 @@ def is_match(header_title, item):
     # Các loại khác
     if ('tuyenthe' in h and 'tuyenthe' in it):
         return True
+    if ('totrinh' in h and 'totrinh' in it):
+        return True
+    if ('thuongtru' in h and 'thuongtru' in it):
+        return True
+    if ('lephi' in h or 'thuphi' in h) and ('lephi' in it or 'thuphi' in it):
+        return True
+    if ('camket' in h and 'camket' in it):
+        return True
     if ('congham' in h and 'congham' in it):
         return True
     if ('lyhon' in h and 'lyhon' in it):

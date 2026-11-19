@@ -984,22 +984,29 @@ function orderItems(items: string[]): string[] {
 }
 
 /**
- * Bộ 12 giấy tờ chuẩn cho hồ sơ "Đăng ký kết hôn" (100% có theo quy chuẩn)
+ * Bộ giấy tờ chuẩn cho hồ sơ "Đăng ký kết hôn" (19 mục theo quy chuẩn mới)
  * Dùng cho áp nhanh hàng loạt và gán mặc định.
  */
 const STANDARD_TWELVE = [
   'giấy khai sinh',
   'bộ công hàm',
   'hộ khẩu',
-  'phiếu đề xuất',
   'chứng chỉ chuyên khoa',
-  'phiếu khám sức khỏe',
   'CMND',
   'phiếu nhập xuất cảnh',
   'hộ chiếu',
   'thị thực',
   'tờ khai đăng ký kết hôn',
   'đơn xin xác nhận độc thân và hôn nhân thực tế',
+  'tờ trình',
+  'chứng nhận đăng ký khai sinh',
+  'đơn xin xác nhận thường trú',
+  'bản tuyên thệ',
+  'chứng nhận kết hôn',
+  'biên lai thu phí và lệ phí',
+  'phiếu khám sức khỏe',
+  'giấy cam kết',
+  'giấy xác nhận',
 ]
 const STANDARD_SEVEN = STANDARD_TWELVE
 
@@ -1012,11 +1019,11 @@ const catalogCounts = computed<Record<string, number>>(() => {
   return map
 })
 
-/** Chọn sẵn bộ 12 chuẩn cho bulk picker (bấm "Áp dụng" để áp). */
+/** Chọn sẵn bộ chuẩn cho bulk picker (bấm "Áp dụng" để áp). */
 function bulkApplyStandardSeven(): void {
   if (!session.value) return
   bulkItems.value = [...STANDARD_TWELVE]
-  toast.info('Đã chọn bộ 12 chuẩn', 'Bấm "Áp dụng cho dòng đã chọn" để xác nhận.')
+  toast.info('Đã chọn Bộ chuẩn kết hôn', 'Bấm "Áp dụng cho dòng đã chọn" để xác nhận.')
 }
 
 // ===== Quản lý Bộ Mẫu Giấy Tờ do Admin cấu hình (Presets Studio) =====
@@ -2257,8 +2264,8 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
   setRowItems(current, [...STANDARD_TWELVE])
   voiceSuppressLearn = false
   openSummaryEditor(current)
-  toast.success('Đã điền Bộ 12 chuẩn', 'Kiểm rồi bấm Lưu hoặc nói "xong".')
-  speakVoiceFeedback('Đã điền bộ 12 chuẩn kết hôn.')
+  toast.success('Đã điền Bộ chuẩn', 'Kiểm rồi bấm Lưu hoặc nói "xong".')
+  speakVoiceFeedback('Đã điền bộ chuẩn kết hôn.')
 }
 
 function findTargetRow(rowNum?: number | null, docNum?: number | null): SummaryRowResponse | null {
@@ -5536,11 +5543,11 @@ onBeforeUnmount(() => {
                   class="btn btn-secondary btn-sm"
                   type="button"
                   :disabled="bulkApplying"
-                  title="Bộ 12 giấy tờ chuẩn mặc định (Đăng ký kết hôn)"
+                  title="Bộ giấy tờ chuẩn mặc định (Đăng ký kết hôn)"
                   @click="bulkApplyStandardSeven"
                 >
                   <Star :size="14" />
-                  Bộ 12 chuẩn
+                  Bộ chuẩn
                 </button>
                 <button
                   v-for="preset in catalogPresets"

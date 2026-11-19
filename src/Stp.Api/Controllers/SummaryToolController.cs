@@ -1130,7 +1130,7 @@ public sealed class SummaryToolController : ControllerBase
 
         var catalogList = request.Catalog != null && request.Catalog.Count > 0
             ? string.Join(", ", request.Catalog.Select(c => $"\"{c}\""))
-            : "\"giấy khai sinh\", \"bộ công hàm\", \"hộ khẩu\", \"phiếu đề xuất\", \"chứng chỉ chuyên khoa\", \"phiếu khám sức khỏe\", \"CMND\", \"phiếu nhập xuất cảnh\", \"hộ chiếu\", \"thị thực\", \"tờ khai đăng ký kết hôn\", \"đơn xin xác nhận độc thân và hôn nhân thực tế\"";
+            : "\"giấy khai sinh\", \"bộ công hàm\", \"hộ khẩu\", \"chứng chỉ chuyên khoa\", \"CMND\", \"phiếu nhập xuất cảnh\", \"hộ chiếu\", \"thị thực\", \"tờ khai đăng ký kết hôn\", \"đơn xin xác nhận độc thân và hôn nhân thực tế\", \"tờ trình\", \"chứng nhận đăng ký khai sinh\", \"đơn xin xác nhận thường trú\", \"bản tuyên thệ\", \"chứng nhận kết hôn\", \"biên lai thu phí và lệ phí\", \"phiếu khám sức khỏe\", \"giấy cam kết\", \"giấy xác nhận\"";
 
         using var db = await _factory.CreateDbContextAsync(cancellationToken);
         await EnsureDefaultMemoriesSeededAsync(db, cancellationToken);
@@ -1835,11 +1835,12 @@ JSON:
             // Tận dụng SemanticCatalogMatcher thông minh để bóc tách giấy tờ không phụ thuộc regex cứng
             var activeCatalog = request.Catalog ?? new List<string>
             {
-                "giấy khai sinh", "bộ công hàm", "hộ khẩu", "phiếu đề xuất",
-                "chứng chỉ chuyên khoa", "phiếu khám sức khỏe", "CMND",
-                "phiếu nhập xuất cảnh", "hộ chiếu", "thị thực",
+                "giấy khai sinh", "bộ công hàm", "hộ khẩu", "chứng chỉ chuyên khoa",
+                "CMND", "phiếu nhập xuất cảnh", "hộ chiếu", "thị thực",
                 "tờ khai đăng ký kết hôn", "đơn xin xác nhận độc thân và hôn nhân thực tế",
-                "giấy chứng nhận kết hôn", "sơ yếu lý lịch", "ảnh"
+                "tờ trình", "chứng nhận đăng ký khai sinh", "đơn xin xác nhận thường trú",
+                "bản tuyên thệ", "chứng nhận kết hôn", "biên lai thu phí và lệ phí",
+                "phiếu khám sức khỏe", "giấy cam kết", "giấy xác nhận", "phiếu đề xuất", "sơ yếu lý lịch", "ảnh"
             };
 
             var fallbackItems = SemanticCatalogMatcher.MatchItems(text, activeCatalog);
@@ -2068,6 +2069,14 @@ JSON:
         (@"thị\s*thực|visa\b", "thị thực"),
         (@"tờ\s*khai\s*(?:đăng\s*ký\s*)?kết\s*hôn|tờ\s*khai\b", "tờ khai đăng ký kết hôn"),
         (@"đơn\s*xin\s*xác\s*nhận\s*độc\s*thân\s*và\s*hôn\s*nhân\s*thực\s*tế|xác\s*nhận\s*độc\s*thân\s*và\s*hôn\s*nhân\s*thực\s*tế|độc\s*thân\s*và\s*hôn\s*nhân\s*thực\s*tế|hôn\s*nhân\s*thực\s*tế|hntt\b|giấy\s*xác\s*nhận\s*tình\s*trạng\s*hôn\s*nhân|xác\s*nhận\s*hôn\s*nhân|độc\s*thân\b", "đơn xin xác nhận độc thân và hôn nhân thực tế"),
+        (@"tờ\s*trình\b", "tờ trình"),
+        (@"chứng\s*nhận\s*đăng\s*ký\s*khai\s*sinh", "chứng nhận đăng ký khai sinh"),
+        (@"đơn\s*xin\s*xác\s*nhận\s*thường\s*trú|xác\s*nhận\s*thường\s*trú|thường\s*trú\b", "đơn xin xác nhận thường trú"),
+        (@"bản\s*tuyên\s*thệ|tuyên\s*thệ\b", "bản tuyên thệ"),
+        (@"chứng\s*nhận\s*kết\s*hôn", "chứng nhận kết hôn"),
+        (@"biên\s*lai\s*(?:thu\s*)?(?:phí|lệ\s*phí)|lệ\s*phí\b", "biên lai thu phí và lệ phí"),
+        (@"giấy\s*cam\s*kết|cam\s*kết\b", "giấy cam kết"),
+        (@"giấy\s*xác\s*nhận|xác\s*nhận\b", "giấy xác nhận"),
         (@"giấy\s*chứng\s*nhận\s*kết\s*hôn|chứng\s*nhận\s*kết\s*hôn", "giấy chứng nhận kết hôn"),
         (@"sơ\s*yếu\s*lý\s*lịch", "sơ yếu lý lịch"),
         (@"bản\s*sao\s*trích\s*lục\s*khai\s*sinh|trích\s*lục\s*khai\s*sinh", "bản sao trích lục khai sinh"),

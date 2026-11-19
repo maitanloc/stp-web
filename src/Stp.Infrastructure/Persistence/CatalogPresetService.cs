@@ -163,22 +163,29 @@ public sealed class CatalogPresetService : ICatalogPresetService
         {
             new(
                 Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                "Bộ 12 chuẩn (Đăng ký kết hôn)",
+                "Bộ chuẩn (Đăng ký kết hôn)",
                 "Đăng ký kết hôn",
                 new[]
                 {
                     "giấy khai sinh",
                     "bộ công hàm",
                     "hộ khẩu",
-                    "phiếu đề xuất",
                     "chứng chỉ chuyên khoa",
-                    "phiếu khám sức khỏe",
                     "CMND",
                     "phiếu nhập xuất cảnh",
                     "hộ chiếu",
                     "thị thực",
                     "tờ khai đăng ký kết hôn",
-                    "đơn xin xác nhận độc thân và hôn nhân thực tế"
+                    "đơn xin xác nhận độc thân và hôn nhân thực tế",
+                    "tờ trình",
+                    "chứng nhận đăng ký khai sinh",
+                    "đơn xin xác nhận thường trú",
+                    "bản tuyên thệ",
+                    "chứng nhận kết hôn",
+                    "biên lai thu phí và lệ phí",
+                    "phiếu khám sức khỏe",
+                    "giấy cam kết",
+                    "giấy xác nhận"
                 },
                 IsDefault: true,
                 Order: 1,
