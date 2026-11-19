@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   Clock,
   Dices,
+  Gamepad2,
   Hand,
   Moon,
   Music,
@@ -187,6 +188,16 @@ function handleExitPreview() {
           <span>{{ activeAmbientSound !== 'none' ? 'ASMR đang bật' : 'Bật ASMR' }}</span>
         </button>
 
+        <!-- Nút vào chơi Game Nông Trại -->
+        <router-link
+          to="/giai-tri"
+          class="btn btn-warning btn-sm header-tool-btn font-semibold"
+          title="Chơi mini-game pixel art nông trại giải trí nghỉ trưa"
+        >
+          <Gamepad2 :size="15" />
+          <span>🌾 Chơi Game Nông Trại</span>
+        </router-link>
+
         <!-- Nếu đang Preview thì có nút thoát -->
         <button
           v-if="isPreview"
@@ -247,6 +258,29 @@ function handleExitPreview() {
             <span class="timer-text">GIÂY</span>
           </div>
         </div>
+      </div>
+
+      <!-- Banner Nông Trại Giải Trí Nghỉ Trưa -->
+      <div class="lunch-games-banner my-4 p-4 rounded-xl border border-amber-600/40 bg-gradient-to-r from-amber-950/80 via-stone-900/90 to-amber-950/80 flex flex-wrap items-center justify-between gap-4 shadow-lg backdrop-blur">
+        <div class="flex items-center gap-3.5">
+          <span class="text-3xl p-2.5 rounded-lg bg-amber-900/50 border border-amber-500/30 text-amber-300">🌾</span>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-800 text-emerald-100 border border-emerald-500">Mới</span>
+              <h2 class="text-base font-bold text-amber-200">Góc Giải Trí Nghỉ Trưa: 4 Mini-game Nông Trại</h2>
+            </div>
+            <p class="text-xs text-stone-300 mt-0.5">
+              Caro Hướng Dương & Cà Rốt · Cờ Cá Ngựa Đua Gà · Đàn Gà Con · Gộp Nông Sản 2048
+            </p>
+          </div>
+        </div>
+        <router-link
+          to="/giai-tri"
+          class="btn btn-primary px-4 py-2 text-xs font-semibold flex items-center gap-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-stone-900 border-none shadow-md transition transform hover:scale-105"
+        >
+          <Gamepad2 :size="16" />
+          <span>Vào Chơi Game Ngay 🎮</span>
+        </router-link>
       </div>
 
       <!-- Toàn cảnh phòng làm việc Stickman sống động -->

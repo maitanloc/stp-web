@@ -68,11 +68,11 @@ function isActive(path: string): boolean {
 
 function handleToolNavClick(event: MouseEvent, to: string): void {
   sidebarOpen.value = false
-  if (isLunchHour.value && !isDevBypass.value && to !== '/nghi-trua') {
+  if (isLunchHour.value && !isDevBypass.value && to !== '/nghi-trua' && !to.startsWith('/giai-tri')) {
     event.preventDefault()
     toast.warning(
       'Giờ nghỉ trưa (12:00 – 13:00)',
-      'Hệ thống đang tạm khóa để bảo trì & nghỉ trưa. Vui lòng nghỉ ngơi hoặc nhập mã Dev (stp2026) để vào!',
+      'Hệ thống đang tạm khóa để bảo trì & nghỉ trưa. Mời bạn vào mục Giải trí để thư giãn hoặc nhập mã Dev (stp2026)!',
     )
   }
 }
@@ -126,7 +126,7 @@ onUnmounted(() => {
             :key="item.to"
             :to="item.to"
             class="nav-item"
-            :class="{ 'is-active': isActive(item.to), 'is-lunch-blocked': isLunchHour && !isDevBypass }"
+            :class="{ 'is-active': isActive(item.to), 'is-lunch-blocked': isLunchHour && !isDevBypass && !item.to.startsWith('/giai-tri') }"
             @click="handleToolNavClick($event, item.to)"
           >
             <component :is="item.icon" :size="17" />

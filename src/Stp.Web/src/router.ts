@@ -178,7 +178,8 @@ router.beforeEach(async (to) => {
   try {
     const isBypass = sessionStorage.getItem('stp.lunch.bypass') === 'true'
     const isLunchHour = new Date().getHours() === 12
-    if (isLunchHour && !isBypass && to.path !== '/nghi-trua') {
+    // Trong giờ nghỉ trưa vẫn cho phép truy cập mục Giải trí (/giai-tri) để xả stress
+    if (isLunchHour && !isBypass && to.path !== '/nghi-trua' && !to.path.startsWith('/giai-tri')) {
       const toast = useToast()
       toast.warning(
         'Giờ nghỉ trưa (12:00 – 13:00)',

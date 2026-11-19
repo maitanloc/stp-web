@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock, Coffee, Sparkles, Utensils, Wrench, X } from '@lucide/vue'
+import { Clock, Coffee, Gamepad2, Sparkles, Utensils, Wrench, X } from '@lucide/vue'
 import { useLunchBreak } from '../composables/useLunchBreak'
 
 const router = useRouter()
@@ -24,6 +24,11 @@ function onGoToLunch() {
   if (route.path !== '/nghi-trua') {
     void router.push('/nghi-trua')
   }
+}
+
+function onGoToGames() {
+  dismissWarningPopup()
+  void router.push('/giai-tri')
 }
 
 function submitPin() {
@@ -133,6 +138,15 @@ onUnmounted(() => {
         >
           <Wrench :size="14" />
           Em là Dev, để em sửa máy chủ!
+        </button>
+
+        <button
+          class="btn btn-warning btn-md lunch-action-btn flex items-center justify-center gap-1.5 font-bold"
+          type="button"
+          @click="onGoToGames"
+        >
+          <Gamepad2 :size="16" />
+          <span>🌾 Chơi Game Nông Trại 🎮</span>
         </button>
 
         <button

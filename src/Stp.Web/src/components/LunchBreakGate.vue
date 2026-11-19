@@ -16,10 +16,10 @@ const {
   disableDevBypass,
 } = useLunchBreak()
 
-// Cứ đến 12h: Tự động chuyển hướng sang tab nghỉ trưa (/nghi-trua)
+// Cứ đến 12h: Tự động chuyển hướng sang tab nghỉ trưa (/nghi-trua), nhưng CHO PHÉP chơi game tại /giai-tri
 function checkAutoNavigate(active: boolean) {
   if (active && !isDevBypass.value) {
-    if (route.path !== '/nghi-trua') {
+    if (route.path !== '/nghi-trua' && !route.path.startsWith('/giai-tri')) {
       try {
         sessionStorage.setItem('stp.lunch.auto_navigated', 'true')
       } catch {}
@@ -41,7 +41,7 @@ watch(isLunchBreakActive, (active) => {
 }, { immediate: true })
 
 watch(isDevBypass, (bypass) => {
-  if (!bypass && isLunchBreakActive.value && route.path !== '/nghi-trua') {
+  if (!bypass && isLunchBreakActive.value && route.path !== '/nghi-trua' && !route.path.startsWith('/giai-tri')) {
     void router.push('/nghi-trua')
   }
 })
