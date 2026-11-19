@@ -96,16 +96,40 @@ export class CaroRenderer {
 
   getTileFromEvent(e) {
     const rect = this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const x = Math.floor((clientX - rect.left) / this.scale);
-    const y = Math.floor((clientY - rect.top) / this.scale);
+    const normX = (clientX - rect.left) / rect.width;
+    const normY = (clientY - rect.top) / rect.height;
+    if (normX < 0 || normX >= 1 || normY < 0 || normY >= 1) return null;
+    const x = Math.floor(normX * this.logicWidth);
+    const y = Math.floor(normY * this.logicHeight);
     const c = Math.floor(x / this.tileSize);
     const r = Math.floor(y / this.tileSize);
     if (r >= 0 && r < this.boardSize && c >= 0 && c < this.boardSize) {
       return { r, c };
     }
     return null;
+  }
+
+  isCellEmpty(r, c) {
+    if (!this.state || !this.state.board || !this.state.board[r]) return true;
+    const raw = this.state.board[r][c];
+    if (raw == null) return true;
+    if (typeof raw === 'object') {
+      return !raw.symbol || raw.symbol === ' ';
+    }
+    return raw === ' ' || raw === '';
+  }
+
+  getCellSymbol(r, c) {
+    if (!this.state || !this.state.board || !this.state.board[r]) return null;
+    const raw = this.state.board[r][c];
+    if (raw == null) return null;
+    if (typeof raw === 'object') {
+      return raw.symbol && raw.symbol !== ' ' ? raw.symbol : null;
+    }
+    return raw !== ' ' && raw !== '' ? raw : null;
   }
 
   onMouseMove(e) {
@@ -115,7 +139,8 @@ export class CaroRenderer {
   onClick(e) {
     const tile = this.getTileFromEvent(e);
     if (!tile) return;
-    if (this.state && this.state.board && this.state.board[tile.r][tile.c] === ' ') {
+    if (this.state && (this.state.hasWon || this.state.winner || this.state.isGameOver || this.state.isAiThinking)) return;
+    if (this.isCellEmpty(tile.r, tile.c)) {
       sfx.playMove();
       if (this.dotNetRef?.invokeMethodAsync) {
         this.dotNetRef.invokeMethodAsync('OnCellClicked', tile.r, tile.c);
@@ -128,7 +153,9 @@ export class CaroRenderer {
   onTouchStart(e) {
     e.preventDefault();
     const tile = this.getTileFromEvent(e);
-    if (tile && this.state && this.state.board && this.state.board[tile.r][tile.c] === ' ') {
+    if (!tile) return;
+    if (this.state && (this.state.hasWon || this.state.winner || this.state.isGameOver || this.state.isAiThinking)) return;
+    if (this.isCellEmpty(tile.r, tile.c)) {
       sfx.playMove();
       if (this.dotNetRef?.invokeMethodAsync) {
         this.dotNetRef.invokeMethodAsync('OnCellClicked', tile.r, tile.c);
@@ -203,9 +230,9 @@ export class CaroRenderer {
     }
 
     // 2. Draw hover ghost piece
-    if (this.hoverTile && this.state && !this.state.isGameOver && !this.state.isThinking) {
+    if (this.hoverTile && this.state && !this.state.isGameOver && !this.state.winner && !this.state.hasWon && !this.state.isAiThinking) {
       const { r, c } = this.hoverTile;
-      if (this.state.board && this.state.board[r][c] === ' ') {
+      if (this.isCellEmpty(r, c)) {
         ctx.globalAlpha = 0.45;
         const spriteName = this.state.currentTurn === 'X' ? 'caro_sunflower_3' : 'caro_carrot_3';
         const spr = spriteAtlas.get(spriteName);
@@ -219,14 +246,13 @@ export class CaroRenderer {
     // 3. Draw placed pieces (Sunflower X / Carrot O)
     if (this.state && this.state.board) {
       const winSet = new Set(
-        (this.state.winningLine || []).map((p) => `${p.r},${p.c}`)
+        (this.state.winningLine || []).map((p) => Array.isArray(p) ? `${p[0]},${p[1]}` : `${p.r},${p.c}`)
       );
 
       for (let r = 0; r < this.boardSize; r++) {
-        const rowStr = this.state.board[r];
         for (let c = 0; c < this.boardSize; c++) {
-          const cell = rowStr[c];
-          if (cell === ' ') continue;
+          const sym = this.getCellSymbol(r, c);
+          if (!sym) continue;
 
           const key = `${r},${c}`;
           const isWinPiece = winSet.has(key);
@@ -240,8 +266,8 @@ export class CaroRenderer {
             frame = (Math.floor(time / 140) % 2 === 0) ? 3 : 4;
           }
 
-          const prefix = cell === 'X' ? 'caro_sunflower' : 'caro_carrot';
-          const spr = spriteAtlas.get(`${prefix}_${frame}`);
+          const prefix = sym === 'X' ? 'caro_sunflower' : 'caro_carrot';
+          const spr = spriteAtlas.get(`${prefix}_${frame}`) || spriteAtlas.get(`${prefix}_4`);
           if (spr) {
             ctx.drawImage(spr, c * this.tileSize, r * this.tileSize + bobY);
           }
@@ -302,3 +328,4 @@ export class CaroRenderer {
 export function initCaro(canvas, dotNetRef) {
   return new CaroRenderer(canvas, dotNetRef);
 }
+

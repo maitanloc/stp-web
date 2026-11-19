@@ -205,18 +205,44 @@ export class LudoRenderer {
 
   bindEvents() {
     this.canvas.addEventListener('click', (e) => this.onClick(e));
+    this.canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      if (touch) this.onClick(touch);
+    }, { passive: false });
+  }
+
+  setLegalMoves(moves) {
+    this.legalMoves = moves || [];
+  }
+
+  triggerKickFeathers(posIndex) {
+    const pos = this.trackCoords[posIndex];
+    if (pos) {
+      sfx.playKick();
+      this.particles.triggerShake(4);
+      this.particles.emitBurst(pos.c * 16 + 8, pos.r * 16 + 8, 20, ['#ffffff', '#fff3cd', '#ffd27f']);
+    }
   }
 
   onClick(e) {
     const rect = this.canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / this.scale);
-    const y = Math.floor((e.clientY - rect.top) / this.scale);
+    if (!rect.width || !rect.height) return;
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    const normX = (clientX - rect.left) / rect.width;
+    const normY = (clientY - rect.top) / rect.height;
+    if (normX < 0 || normX >= 1 || normY < 0 || normY >= 1) return;
+
+    const x = Math.floor(normX * this.logicWidth);
+    const y = Math.floor(normY * this.logicHeight);
     const c = Math.floor(x / this.tileSize);
     const r = Math.floor(y / this.tileSize);
 
-    // 1. Kiểm tra click vào xúc xắc giữa sân để đổ
-    if (r >= 6 && r <= 8 && c >= 6 && c <= 8) {
-      if (this.state && this.state.canRoll) {
+    // 1. Kiểm tra click vào xúc xắc giữa sân để đổ (vùng tâm 3x3)
+    if (r >= 5 && r <= 9 && c >= 5 && c <= 9) {
+      const canRoll = this.state ? (this.state.canRoll ?? true) : true;
+      if (canRoll) {
         if (this.dotNetRef?.invokeMethodAsync) {
           this.dotNetRef.invokeMethodAsync('OnRollDiceClicked');
         } else if (typeof this.dotNetRef?.onRollDiceClicked === 'function') {
@@ -254,23 +280,29 @@ export class LudoRenderer {
     const piece = player.pieces[pieceId];
     if (!piece) return null;
 
-    if (piece.state === 0) {
+    const state = piece.state ?? 0;
+    const trackPos = piece.trackPosition ?? piece.trackPos ?? -1;
+    const homeStep = piece.homeTrackStep ?? piece.homeStep ?? -1;
+
+    if (state === 0) {
       // In barn
-      const pt = this.barnCoords[playerColor][pieceId];
+      const barnList = this.barnCoords[playerColor] || this.barnCoords[0];
+      const pt = barnList[pieceId] || { r: 2, c: 2 };
       return { x: pt.c * 16, y: pt.r * 16 };
-    } else if (piece.state === 1) {
+    } else if (state === 1) {
       // On track
-      if (piece.trackPos >= 0 && piece.trackPos < this.trackCoords.length) {
-        const pt = this.trackCoords[piece.trackPos];
+      if (trackPos >= 0 && trackPos < this.trackCoords.length) {
+        const pt = this.trackCoords[trackPos];
         return { x: pt.c * 16, y: pt.r * 16 };
       }
-    } else if (piece.state === 2) {
+    } else if (state === 2) {
       // In home track
-      if (piece.homeStep >= 0 && piece.homeStep < 6) {
-        const pt = this.homeCoords[playerColor][piece.homeStep];
+      if (homeStep >= 0 && homeStep < 6) {
+        const homeList = this.homeCoords[playerColor] || this.homeCoords[0];
+        const pt = homeList[homeStep] || { r: 7, c: 7 };
         return { x: pt.c * 16, y: pt.r * 16 };
       }
-    } else if (piece.state === 3) {
+    } else if (state === 3) {
       // Finished in center goal
       return { x: 7 * 16 + (pieceId % 2) * 6, y: 7 * 16 + Math.floor(pieceId / 2) * 6 };
     }
@@ -386,9 +418,21 @@ export class LudoRenderer {
           }
 
           // Draw chick sprite
-          const spr = spriteAtlas.get(`ludo_chick_${colorName}_idle`);
+          const frame = Math.floor(time / 200) % 2;
+          const spr = spriteAtlas.get(`ludo_chick_${colorName}_idle_${frame}`) ||
+                      spriteAtlas.get(`ludo_chick_${colorName}_idle`) ||
+                      spriteAtlas.get(`ludo_chick_${colorName}`);
           if (spr) {
             ctx.drawImage(spr, pos.x, pos.y + bob);
+          } else {
+            // Fallback cute chick circle
+            ctx.fillStyle = colors[player.color]?.hex || '#fbc531';
+            ctx.beginPath();
+            ctx.arc(pos.x + 8, pos.y + 8 + bob, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#2c1810';
+            ctx.lineWidth = 1;
+            ctx.stroke();
           }
         });
       });
@@ -403,7 +447,8 @@ export class LudoRenderer {
       ctx.drawImage(diceSpr, 7 * 16, 7 * 16);
 
       // If canRoll, draw flashing prompt
-      if (this.state && this.state.canRoll) {
+      const canRoll = this.state ? (this.state.canRoll ?? true) : true;
+      if (canRoll) {
         const pulse = 0.5 + 0.5 * Math.sin(time * 0.008);
         ctx.strokeStyle = `rgba(255, 235, 59, ${pulse})`;
         ctx.lineWidth = 1;
@@ -413,8 +458,9 @@ export class LudoRenderer {
 
     // 4. Draw turn arrow pointing at active player
     if (this.state) {
-      const activeColor = this.state.currentTurnColor;
-      const barnPt = this.barnCoords[activeColor][0];
+      const activeColor = this.state.currentTurnColor ?? this.state.currentTurn ?? 0;
+      const barnList = this.barnCoords[activeColor] || this.barnCoords[0];
+      const barnPt = barnList[0] || { r: 2, c: 2 };
       const arrowY = barnPt.r * 16 - 6 + Math.round(Math.sin(time * 0.01) * 2);
       ctx.fillStyle = '#fbc531';
       ctx.beginPath();

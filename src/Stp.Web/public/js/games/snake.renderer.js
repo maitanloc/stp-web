@@ -106,6 +106,48 @@ export class SnakeRenderer {
       }
     };
     this.canvas.addEventListener('click', this._clickHandler);
+
+    // Touch swipe controls for mobile
+    let touchStartX = 0;
+    let touchStartY = 0;
+    this.canvas.addEventListener('touchstart', (e) => {
+      const touch = e.touches[0];
+      if (touch) {
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+      }
+    }, { passive: true });
+
+    this.canvas.addEventListener('touchend', (e) => {
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      if (Math.max(absDx, absDy) > 20) {
+        let dir = 'Right';
+        if (absDx > absDy) {
+          dir = dx > 0 ? 'Right' : 'Left';
+        } else {
+          dir = dy > 0 ? 'Down' : 'Up';
+        }
+        if (typeof this.dotNetRef?.onDirectionChange === 'function') {
+          this.dotNetRef.onDirectionChange(dir);
+        } else if (this.dotNetRef?.invokeMethodAsync) {
+          this.dotNetRef.invokeMethodAsync('OnDirectionChange', dir);
+        }
+      } else {
+        if (this.state && (!this.state.isRunning || this.state.isGameOver)) {
+          if (typeof this.dotNetRef?.onStartOrRestart === 'function') {
+            this.dotNetRef.onStartOrRestart();
+          } else if (this.dotNetRef?.invokeMethodAsync) {
+            this.dotNetRef.invokeMethodAsync('OnStartOrRestart');
+          }
+        }
+      }
+    }, { passive: true });
   }
 
   updateState(dto) {
@@ -167,8 +209,8 @@ export class SnakeRenderer {
 
     // 2. Draw Crop Food (bouncing & pulsating)
     if (this.state && this.state.food) {
-      const cropIndex = this.state.cropType || 0;
-      const cropSpr = spriteAtlas.get(`snake_crop_${cropIndex}`);
+      const cropIndex = this.state.food.type ?? this.state.cropType ?? 0;
+      const cropSpr = spriteAtlas.get(`snake_crop_${cropIndex}`) || spriteAtlas.get('crop_carrot') || spriteAtlas.get('crop_strawberry');
       const fx = this.state.food.x * 16;
       const fy = this.state.food.y * 16;
       const bounce = Math.round(Math.sin(time * 0.008) * 2);
@@ -188,9 +230,9 @@ export class SnakeRenderer {
     }
 
     // 3. Draw Snake Body (Chicks bobbing with phase offset)
-    if (this.state && this.state.body && this.state.body.length > 1) {
-      const chickSpr = spriteAtlas.get('snake_chick');
-      for (let i = this.state.body.length - 1; i >= 1; i--) {
+    if (this.state && this.state.body && this.state.body.length > 0) {
+      const chickSpr = spriteAtlas.get('snake_chick') || spriteAtlas.get('snake_chick_0');
+      for (let i = 0; i < this.state.body.length; i++) {
         const pt = this.state.body[i];
         const px = pt.x * 16;
         const py = pt.y * 16;
@@ -213,8 +255,11 @@ export class SnakeRenderer {
 
     // 4. Draw Mother Hen Head (facing current direction)
     if (this.state && this.state.head) {
-      const dir = this.state.direction || 'right';
-      const henSpr = spriteAtlas.get(`snake_hen_${dir}`);
+      const rawDir = (this.state.direction || 'right').toLowerCase();
+      const henSpr = spriteAtlas.get(`snake_hen_${rawDir}`) ||
+                     spriteAtlas.get(`snake_hen_${rawDir}_0`) ||
+                     spriteAtlas.get('snake_hen_right_0') ||
+                     spriteAtlas.get('snake_hen_right');
       const hx = this.state.head.x * 16;
       const hy = this.state.head.y * 16;
       const headBob = Math.round(Math.sin(time * 0.012) * 1.5);

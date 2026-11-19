@@ -43,7 +43,43 @@ export class Game2048Renderer {
     await spriteAtlas.init();
     this.setupCanvas();
     this.createStaticBackground();
+    this.bindEvents();
     this.startLoop();
+  }
+
+  bindEvents() {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    this.canvas.addEventListener('touchstart', (e) => {
+      const touch = e.touches[0];
+      if (touch) {
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+      }
+    }, { passive: true });
+
+    this.canvas.addEventListener('touchend', (e) => {
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      if (Math.max(absDx, absDy) > 20) {
+        let dir = 'right';
+        if (absDx > absDy) {
+          dir = dx > 0 ? 'right' : 'left';
+        } else {
+          dir = dy > 0 ? 'down' : 'up';
+        }
+        if (typeof this.dotNetRef?.onMove === 'function') {
+          this.dotNetRef.onMove(dir);
+        } else if (this.dotNetRef?.invokeMethodAsync) {
+          this.dotNetRef.invokeMethodAsync('OnMove', dir);
+        }
+      }
+    }, { passive: true });
   }
 
   setupCanvas() {
@@ -190,12 +226,17 @@ export class Game2048Renderer {
     }
 
     // 2. Render 4x4 Crops
-    if (this.state && this.state.board && this.state.tierBoard) {
+    const board = this.state ? (this.state.grid || this.state.board) : null;
+    if (board) {
       for (let r = 0; r < this.boardSize; r++) {
         for (let c = 0; c < this.boardSize; c++) {
-          const val = this.state.board[r][c];
-          const tier = this.state.tierBoard[r][c];
-          if (val === 0 || tier === 0) continue;
+          const val = board[r] ? board[r][c] : 0;
+          if (!val || val === 0) continue;
+
+          const tier = (this.state.tierBoard && this.state.tierBoard[r])
+            ? this.state.tierBoard[r][c]
+            : Math.max(1, Math.min(11, Math.round(Math.log2(val))));
+          if (tier === 0) continue;
 
           const baseX = this.boardPadding + c * (this.tileSize + this.gap);
           const baseY = this.boardPadding + r * (this.tileSize + this.gap);
@@ -224,7 +265,7 @@ export class Game2048Renderer {
           ctx.fillRect(baseX + 1, baseY + 1, this.tileSize - 2, this.tileSize - 2);
 
           // Draw crop sprite centered & scaled
-          const spr = spriteAtlas.get(`crop2048_${tier}`);
+          const spr = spriteAtlas.get(`crop_2048_tier_${tier}`) || spriteAtlas.get(`crop2048_${tier}`);
           const cx = baseX + this.tileSize / 2;
           const cy = baseY + this.tileSize / 2;
 

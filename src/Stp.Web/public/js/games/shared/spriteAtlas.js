@@ -375,6 +375,10 @@ class SpriteAtlas {
         ctx.fillRect(8, 12, 1, 2);
 
         this.cache.set(`ludo_chick_${c.name}_idle_${f}`, canvas);
+        if (f === 0) {
+          this.cache.set(`ludo_chick_${c.name}_idle`, canvas);
+          this.cache.set(`ludo_chick_${c.name}`, canvas);
+        }
       }
 
       // Hopping chicken 4 frames (jump arc)
@@ -403,6 +407,9 @@ class SpriteAtlas {
         ctx.fillRect(9, 4 + jumpH, 3, 4);
 
         this.cache.set(`ludo_chick_${c.name}_hop_${f}`, canvas);
+        if (f === 0) {
+          this.cache.set(`ludo_chick_${c.name}_hop`, canvas);
+        }
       }
 
       // Feather burst particle for kick effect
@@ -498,6 +505,9 @@ class SpriteAtlas {
         }
 
         this.cache.set(`snake_hen_${dir}_${f}`, canvas);
+        if (f === 0) {
+          this.cache.set(`snake_hen_${dir}`, canvas);
+        }
       }
     });
 
@@ -524,6 +534,9 @@ class SpriteAtlas {
       ctx.fillRect(9, 12, 1, 2);
 
       this.cache.set(`snake_chick_${f}`, canvas);
+      if (f === 0) {
+        this.cache.set('snake_chick', canvas);
+      }
     }
 
     // 4 Crops (Food): Carrot, Strawberry, Corn, Pumpkin
@@ -569,7 +582,7 @@ class SpriteAtlas {
       }},
     ];
 
-    foods.forEach((f) => {
+    foods.forEach((f, idx) => {
       const { canvas, ctx } = this.createCanvas(16, 16);
       ctx.fillStyle = PALETTE.shadow_soft;
       ctx.beginPath();
@@ -577,6 +590,8 @@ class SpriteAtlas {
       ctx.fill();
       f.draw(ctx);
       this.cache.set(`crop_${f.name}`, canvas);
+      this.cache.set(`snake_crop_${idx}`, canvas);
+      this.cache.set(`snake_crop_${f.name}`, canvas);
     });
   }
 
@@ -677,6 +692,7 @@ class SpriteAtlas {
       ctx.fill();
       c.draw(ctx);
       this.cache.set(`crop_2048_tier_${c.tier}`, canvas);
+      this.cache.set(`crop2048_${c.tier}`, canvas);
     });
   }
 

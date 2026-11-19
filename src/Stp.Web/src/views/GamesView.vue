@@ -99,6 +99,7 @@ const caroBoard = ref<Array<Array<{ symbol: 'X' | 'O' | null; turn: number }>>>(
 const caroWinLine = ref<Array<[number, number]>>([])
 const caroMoveCount = ref(0)
 const caroIsAiThinking = ref(false)
+const caroLastMove = ref<{ r: number; c: number; player: string } | null>(null)
 
 function initCaroGame() {
   caroBoard.value = Array(15).fill(null).map(() => Array(15).fill(null).map(() => ({ symbol: null, turn: 0 })))
@@ -107,19 +108,22 @@ function initCaroGame() {
   caroWinLine.value = []
   caroMoveCount.value = 0
   caroIsAiThinking.value = false
+  caroLastMove.value = null
   syncCaroRenderer()
 }
 
 function syncCaroRenderer() {
   if (!caroRenderer) return
   const boardDto = caroBoard.value.map(row =>
-    row.map(cell => (cell.symbol ? { symbol: cell.symbol, growthLevel: 5, turn: cell.turn } : null))
+    row.map(cell => (cell.symbol ? cell.symbol : ' '))
   )
   caroRenderer.updateState({
     board: boardDto,
     currentTurn: caroTurn.value,
     winner: caroWinner.value,
-    winningLine: caroWinLine.value,
+    hasWon: caroWinner.value !== null,
+    winningLine: caroWinLine.value.map(([r, c]) => ({ r, c })),
+    lastMove: caroLastMove.value,
     isAiThinking: caroIsAiThinking.value,
     aiLevel: caroBotDiff.value,
   })
@@ -145,6 +149,7 @@ function handleCaroCellClick(row: number, col: number) {
 function makeCaroMove(r: number, c: number, sym: 'X' | 'O') {
   caroMoveCount.value++
   caroBoard.value[r][c] = { symbol: sym, turn: caroMoveCount.value }
+  caroLastMove.value = { r, c, player: sym }
 
   // Check 5 in a row
   const win = checkCaroWin(r, c, sym)
@@ -278,10 +283,10 @@ function evaluateCaroCell(r: number, c: number, sym: 'X' | 'O'): number {
 // 2. LUDO STATE & LOGIC
 // ==========================================
 const ludoPlayers = ref<any[]>([
-  { color: 0, isHuman: true, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
-  { color: 1, isHuman: false, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
-  { color: 2, isHuman: false, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
-  { color: 3, isHuman: false, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
+  { color: 0, isHuman: true, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
+  { color: 1, isHuman: false, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
+  { color: 2, isHuman: false, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
+  { color: 3, isHuman: false, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
 ])
 const ludoCurrentTurn = ref(0)
 const ludoDiceRoll = ref(0)
@@ -289,29 +294,66 @@ const ludoCanRoll = ref(true)
 const ludoWinner = ref<number | null>(null)
 const ludoPlayerCount = ref(4)
 
+function updateLudoPieceCoords() {
+  ludoPlayers.value.forEach(player => {
+    player.pieces.forEach((piece: any) => {
+      if (piece.state === 0) {
+        piece.trackPos = -1
+        piece.trackPosition = -1
+        piece.homeStep = -1
+        piece.homeTrackStep = -1
+      } else if (piece.state === 1) {
+        const tp = (piece.step + player.color * 13) % 52
+        piece.trackPos = tp
+        piece.trackPosition = tp
+        piece.homeStep = -1
+        piece.homeTrackStep = -1
+      } else if (piece.state === 2) {
+        piece.trackPos = -1
+        piece.trackPosition = -1
+        const hs = Math.max(0, Math.min(5, piece.step - 50))
+        piece.homeStep = hs
+        piece.homeTrackStep = hs
+      } else if (piece.state === 3) {
+        piece.trackPos = -1
+        piece.trackPosition = -1
+        piece.homeStep = 5
+        piece.homeTrackStep = 5
+      }
+    })
+  })
+}
+
 function initLudoGame() {
   ludoPlayers.value = [
-    { color: 0, isHuman: true, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
-    { color: 1, isHuman: false, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
-    { color: 2, isHuman: false, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
-    { color: 3, isHuman: false, pieces: [{ id: 0, state: 0, step: -1 }, { id: 1, state: 0, step: -1 }, { id: 2, state: 0, step: -1 }, { id: 3, state: 0, step: -1 }] },
+    { color: 0, isHuman: true, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
+    { color: 1, isHuman: false, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
+    { color: 2, isHuman: false, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
+    { color: 3, isHuman: false, pieces: [{ id: 0, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 1, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 2, state: 0, step: -1, trackPos: -1, homeStep: -1 }, { id: 3, state: 0, step: -1, trackPos: -1, homeStep: -1 }] },
   ]
   ludoCurrentTurn.value = 0
   ludoDiceRoll.value = 0
   ludoCanRoll.value = true
   ludoWinner.value = null
+  updateLudoPieceCoords()
   syncLudoRenderer()
 }
 
 function syncLudoRenderer(legalMoves: any[] = []) {
   if (!ludoRenderer) return
+  updateLudoPieceCoords()
   ludoRenderer.updateState({
     players: ludoPlayers.value,
+    currentTurnColor: ludoCurrentTurn.value,
     currentTurn: ludoCurrentTurn.value,
+    canRoll: ludoCanRoll.value,
     lastDiceRoll: ludoDiceRoll.value,
     winner: ludoWinner.value,
-  })
-  ludoRenderer.setLegalMoves(legalMoves)
+    isGameOver: ludoWinner.value !== null,
+  }, legalMoves)
+  if (typeof ludoRenderer.setLegalMoves === 'function') {
+    ludoRenderer.setLegalMoves(legalMoves)
+  }
 }
 
 function handleLudoRollDice() {
@@ -338,7 +380,7 @@ function evaluateLudoTurnMoves(roll: number) {
   player.pieces.forEach((p: any) => {
     if (p.state === 0 && roll === 6) {
       validMoves.push({ player: player.color, pieceId: p.id, type: 'Deploy' })
-    } else if (p.state === 1) {
+    } else if (p.state === 1 || p.state === 2) {
       if (p.step + roll <= 56) {
         validMoves.push({ player: player.color, pieceId: p.id, type: 'Move', steps: roll })
       }
@@ -374,7 +416,7 @@ function handleLudoPieceSelected(pieceId: number) {
 
   if (piece.state === 0 && ludoDiceRoll.value === 6) {
     executeLudoMove({ player: player.color, pieceId, type: 'Deploy' })
-  } else if (piece.state === 1 && piece.step + ludoDiceRoll.value <= 56) {
+  } else if ((piece.state === 1 || piece.state === 2) && piece.step + ludoDiceRoll.value <= 56) {
     executeLudoMove({ player: player.color, pieceId, type: 'Move', steps: ludoDiceRoll.value })
   }
 }
@@ -390,15 +432,19 @@ function executeLudoMove(move: any) {
   } else {
     piece.step += move.steps
     if (piece.step >= 56) {
-      piece.state = 2 // Finished
+      piece.state = 3 // Finished in center goal
+    } else if (piece.step >= 50) {
+      piece.state = 2 // Home track
     }
   }
+
+  updateLudoPieceCoords()
 
   // Check kick opponent
   checkLudoKicks(player.color, piece)
 
   // Check winner
-  if (player.pieces.every((p: any) => p.state === 2)) {
+  if (player.pieces.every((p: any) => p.state === 3)) {
     ludoWinner.value = player.color
   } else {
     if (ludoDiceRoll.value !== 6) {
@@ -413,20 +459,21 @@ function executeLudoMove(move: any) {
 
 function checkLudoKicks(myColor: number, myPiece: any) {
   if (myPiece.state !== 1) return
-  const myTrackPos = (myPiece.step + myColor * 13) % 52
+  const myTrackPos = myPiece.trackPos
 
   ludoPlayers.value.forEach((p) => {
     if (p.color === myColor) return
     p.pieces.forEach((other: any) => {
-      if (other.state === 1) {
-        const otherTrackPos = (other.step + p.color * 13) % 52
-        if (myTrackPos === otherTrackPos && other.step < 50) {
-          // Kicked back to yard!
-          other.state = 0
-          other.step = -1
-          if (ludoRenderer) {
-            ludoRenderer.triggerKickFeathers(myTrackPos)
-          }
+      if (other.state === 1 && other.trackPos === myTrackPos && other.step < 50) {
+        // Kicked back to yard!
+        other.state = 0
+        other.step = -1
+        other.trackPos = -1
+        other.trackPosition = -1
+        other.homeStep = -1
+        other.homeTrackStep = -1
+        if (ludoRenderer) {
+          ludoRenderer.triggerKickFeathers(myTrackPos)
         }
       }
     })
@@ -548,6 +595,13 @@ function triggerSnakeGameOver() {
   syncSnakeRenderer()
 }
 
+function setSnakeDirection(dir: 'Up' | 'Down' | 'Left' | 'Right') {
+  if (dir === 'Up' && snakeDir.y === 0) nextSnakeDir = { x: 0, y: -1 }
+  else if (dir === 'Down' && snakeDir.y === 0) nextSnakeDir = { x: 0, y: 1 }
+  else if (dir === 'Left' && snakeDir.x === 0) nextSnakeDir = { x: -1, y: 0 }
+  else if (dir === 'Right' && snakeDir.x === 0) nextSnakeDir = { x: 1, y: 0 }
+}
+
 function syncSnakeRenderer() {
   if (!snakeRenderer) return
   let dirName = 'Right'
@@ -565,7 +619,7 @@ function syncSnakeRenderer() {
     isPaused: snakeIsPaused.value,
     isGameOver: snakeIsGameOver.value,
     wallWrap: snakeWallWrap.value,
-    direction: dirName,
+    direction: dirName.toLowerCase(),
   })
 }
 
@@ -725,8 +779,13 @@ function check2048GameOver() {
 
 function sync2048Renderer(merged: any[] = [], spawned: any = null) {
   if (!game2048Renderer) return
+  const tierBoard = g2048Grid.value.map(row =>
+    row.map(val => (val > 0 ? Math.min(11, Math.round(Math.log2(val))) : 0))
+  )
   game2048Renderer.updateState({
     grid: g2048Grid.value,
+    board: g2048Grid.value,
+    tierBoard,
     score: g2048Score.value,
     highScore: g2048HighScore.value,
     isGameOver: g2048IsGameOver.value,
@@ -774,11 +833,14 @@ async function mountActiveRenderer() {
     const mod = await loadModule('/js/games/snake.renderer.js')
     snakeRenderer = mod.initSnake(gameCanvas.value, {
       onStartOrRestart: () => initSnakeGame(),
+      onDirectionChange: (dir: string) => setSnakeDirection(dir as any),
     })
     initSnakeGame()
   } else if (slug === 'gop-nong-san') {
     const mod = await loadModule('/js/games/game2048.renderer.js')
-    game2048Renderer = mod.initGame2048(gameCanvas.value, {})
+    game2048Renderer = mod.initGame2048(gameCanvas.value, {
+      onMove: (dir: 'up' | 'down' | 'left' | 'right') => move2048(dir),
+    })
     init2048Game()
   }
 }
@@ -1090,11 +1152,96 @@ onUnmounted(() => {
       </div>
 
       <!-- Canvas Box Wrapper -->
-      <div class="pixel-box-wood p-3 rounded-lg shadow-2xl relative flex items-center justify-center">
+      <div class="pixel-box-wood p-3 rounded-lg shadow-2xl relative flex items-center justify-center max-w-[480px] w-full">
         <canvas
           ref="gameCanvas"
           class="pixel-canvas cursor-pointer block max-w-full rounded border-2 border-[#4a2810]"
+          style="width: min(88vw, 440px); height: auto; aspect-ratio: 1/1;"
         ></canvas>
+      </div>
+
+      <!-- ON-SCREEN CONTROLS & STATUS -->
+      <!-- Caro Status & Interactive Info -->
+      <div v-if="activeGame === 'caro'" class="mt-3 w-full max-w-[480px] bg-[#3a200f] p-2.5 rounded border border-[#613b19] flex items-center justify-between text-xs font-pixel">
+        <div v-if="caroWinner" class="w-full text-center text-sm font-bold text-[#fbc531]">
+          {{ caroWinner === 'Draw' ? '🤝 Hai bên hòa cờ!' : (caroWinner === 'X' ? '🌻 Bạn (Hoa Hướng Dương) Chiến Thắng!' : '🥕 Máy (Cà Rốt) Chiến Thắng!') }}
+        </div>
+        <template v-else>
+          <div class="flex items-center gap-2">
+            <span class="text-[#ceb38b]">Lượt:</span>
+            <span :class="caroTurn === 'X' ? 'text-[#ffcc00] font-bold' : 'text-[#f36e21] font-bold'">
+              {{ caroTurn === 'X' ? '🌻 Hoa Hướng Dương (X - Bạn)' : (caroMode === 'bot' ? '🥕 Cà Rốt (O - Máy)' : '🥕 Cà Rốt (O - Người 2)') }}
+            </span>
+          </div>
+          <div v-if="caroIsAiThinking" class="text-[#fbc531] animate-pulse">
+            🐥 Máy đang suy nghĩ...
+          </div>
+          <div v-else class="text-[11px] text-[#ceb38b]">
+            Nước đi #{{ caroMoveCount }}
+          </div>
+        </template>
+      </div>
+
+      <!-- Ludo Interactive Controls -->
+      <div v-if="activeGame === 'co-ca-ngua'" class="mt-3 w-full max-w-[480px] bg-[#3a200f] p-3 rounded border border-[#613b19] flex flex-col items-center gap-2 text-xs font-pixel">
+        <div v-if="ludoWinner !== null" class="text-sm font-bold text-[#fbc531]">
+          🏆 Người chơi {{ ['Đỏ', 'Lam', 'Vàng', 'Lục'][ludoWinner] }} đã về đích toàn bộ đàn gà!
+        </div>
+        <div v-else class="flex flex-wrap items-center justify-between w-full gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-[#ceb38b]">Lượt của:</span>
+            <span class="font-bold text-sm" :style="{ color: ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71'][ludoCurrentTurn] }">
+              {{ ['Nông dân Đỏ (Bạn)', 'Nông dân Lam (Bot)', 'Nông dân Vàng (Bot)', 'Nông dân Lục (Bot)'][ludoCurrentTurn] }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-[#ceb38b]">Điểm xúc xắc:</span>
+            <span class="px-2 py-0.5 bg-[#4e2b14] border border-[#d3a364] text-[#fbc531] font-bold text-sm rounded">
+              {{ ludoDiceRoll > 0 ? ludoDiceRoll : '-' }}
+            </span>
+          </div>
+        </div>
+
+        <button
+          v-if="ludoCanRoll && ludoWinner === null && ludoPlayers[ludoCurrentTurn]?.isHuman"
+          @click="handleLudoRollDice"
+          class="pixel-btn pixel-btn-green w-full py-2 text-sm font-bold shadow-lg animate-bounce mt-1"
+        >
+          🎲 BẤM ĐỂ LẮC XÚC XẮC NGAY
+        </button>
+      </div>
+
+      <!-- Snake Virtual D-Pad -->
+      <div v-if="activeGame === 'dan-ga-con'" class="mt-3 flex flex-col items-center gap-1.5 font-pixel select-none">
+        <button @click="setSnakeDirection('Up')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">▲</button>
+        <div class="flex items-center gap-3">
+          <button @click="setSnakeDirection('Left')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">◀</button>
+          <button
+            @click="snakeIsPaused = !snakeIsPaused; syncSnakeRenderer()"
+            class="pixel-btn pixel-btn-amber px-3 py-1.5 text-xs font-bold"
+          >
+            {{ snakeIsPaused ? '▶ Tiếp tục' : '⏸ Tạm dừng' }}
+          </button>
+          <button @click="setSnakeDirection('Right')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">▶</button>
+        </div>
+        <button @click="setSnakeDirection('Down')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">▼</button>
+      </div>
+
+      <!-- 2048 Virtual D-Pad -->
+      <div v-if="activeGame === 'gop-nong-san'" class="mt-3 flex flex-col items-center gap-1.5 font-pixel select-none">
+        <button @click="move2048('up')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">▲</button>
+        <div class="flex items-center gap-3">
+          <button @click="move2048('left')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">◀</button>
+          <button
+            @click="undo2048"
+            :disabled="g2048History.length === 0"
+            class="pixel-btn pixel-btn-amber px-3 py-1.5 text-xs font-bold disabled:opacity-50"
+          >
+            ↩ Đi lại
+          </button>
+          <button @click="move2048('right')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">▶</button>
+        </div>
+        <button @click="move2048('down')" class="pixel-btn pixel-btn-wood w-14 h-10 flex items-center justify-center text-lg active:scale-95 shadow font-bold">▼</button>
       </div>
 
       <!-- Quick Guidance Footer -->
@@ -1242,3 +1389,4 @@ onUnmounted(() => {
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
 </style>
+
