@@ -984,28 +984,24 @@ function orderItems(items: string[]): string[] {
 }
 
 /**
- * Bộ 16 giấy tờ chuẩn cho hồ sơ "Đăng ký kết hôn"
- * Dùng cho áp nhanh hàng loạt.
+ * Bộ 12 giấy tờ chuẩn cho hồ sơ "Đăng ký kết hôn" (100% có theo quy chuẩn)
+ * Dùng cho áp nhanh hàng loạt và gán mặc định.
  */
-const STANDARD_SIXTEEN = [
+const STANDARD_TWELVE = [
   'giấy khai sinh',
   'bộ công hàm',
   'hộ khẩu',
+  'phiếu đề xuất',
   'chứng chỉ chuyên khoa',
+  'phiếu khám sức khỏe',
   'CMND',
   'phiếu nhập xuất cảnh',
   'hộ chiếu',
   'thị thực',
   'tờ khai đăng ký kết hôn',
   'đơn xin xác nhận độc thân và hôn nhân thực tế',
-  'tờ trình',
-  'chứng nhận đăng ký khai sinh',
-  'đơn xin xác nhận thường trú',
-  'bản tuyên thệ',
-  'chứng nhận kết hôn',
-  'biên lai thu phí và lệ phí',
 ]
-const STANDARD_SEVEN = STANDARD_SIXTEEN
+const STANDARD_SEVEN = STANDARD_TWELVE
 
 /** Tần suất từng mục theo meta phiên → badge ×N trong picker "hay gặp nhất". */
 const catalogCounts = computed<Record<string, number>>(() => {
@@ -1016,11 +1012,11 @@ const catalogCounts = computed<Record<string, number>>(() => {
   return map
 })
 
-/** Chọn sẵn bộ 16 chuẩn cho bulk picker (bấm "Áp dụng" để áp). */
+/** Chọn sẵn bộ 12 chuẩn cho bulk picker (bấm "Áp dụng" để áp). */
 function bulkApplyStandardSeven(): void {
   if (!session.value) return
-  bulkItems.value = [...STANDARD_SIXTEEN]
-  toast.info('Đã chọn bộ 16 chuẩn', 'Bấm "Áp dụng cho dòng đã chọn" để xác nhận.')
+  bulkItems.value = [...STANDARD_TWELVE]
+  toast.info('Đã chọn bộ 12 chuẩn', 'Bấm "Áp dụng cho dòng đã chọn" để xác nhận.')
 }
 
 // ===== Quản lý Bộ Mẫu Giấy Tờ do Admin cấu hình (Presets Studio) =====
@@ -2258,11 +2254,11 @@ function runVoiceCommand(command: 'commit' | 'next' | 'prev' | 'seven'): void {
     return
   }
   voiceSuppressLearn = true
-  setRowItems(current, [...STANDARD_SIXTEEN])
+  setRowItems(current, [...STANDARD_TWELVE])
   voiceSuppressLearn = false
   openSummaryEditor(current)
-  toast.success('Đã điền Bộ 16 chuẩn', 'Kiểm rồi bấm Lưu hoặc nói "xong".')
-  speakVoiceFeedback('Đã điền bộ 16 chuẩn kết hôn.')
+  toast.success('Đã điền Bộ 12 chuẩn', 'Kiểm rồi bấm Lưu hoặc nói "xong".')
+  speakVoiceFeedback('Đã điền bộ 12 chuẩn kết hôn.')
 }
 
 function findTargetRow(rowNum?: number | null, docNum?: number | null): SummaryRowResponse | null {
@@ -5265,7 +5261,7 @@ onBeforeUnmount(() => {
           <span class="voice-dot" :class="{ 'is-listening': voiceListening }" />
           <span class="voice-live">
             <strong>{{ voiceListening ? '🎙️ Đang nghe:' : 'Đã nghe:' }}</strong>
-            {{ voiceInputText || voiceInterim || voiceLastHeard || 'Nói tên giấy tờ hoặc lệnh xong, tiếp, bộ 16...' }}
+            {{ voiceInputText || voiceInterim || voiceLastHeard || 'Nói tên giấy tờ hoặc lệnh xong, tiếp, bộ 12...' }}
           </span>
           <span v-if="voiceLastHeard && voiceListening" class="voice-heard" :title="`Câu vừa nghe: ${voiceLastHeard}`">
             (Trước đó: {{ voiceLastHeard }})
@@ -5540,11 +5536,11 @@ onBeforeUnmount(() => {
                   class="btn btn-secondary btn-sm"
                   type="button"
                   :disabled="bulkApplying"
-                  title="Bộ 16 giấy tờ chuẩn mặc định"
+                  title="Bộ 12 giấy tờ chuẩn mặc định (Đăng ký kết hôn)"
                   @click="bulkApplyStandardSeven"
                 >
                   <Star :size="14" />
-                  Bộ 16 chuẩn
+                  Bộ 12 chuẩn
                 </button>
                 <button
                   v-for="preset in catalogPresets"
@@ -7543,7 +7539,7 @@ onBeforeUnmount(() => {
           <!-- Hướng dẫn nhanh bên dưới -->
           <div class="voice-console-footer">
             <span class="hint" style="font-size: 11px">
-              💡 <strong>Space</strong> để nói · Lệnh: <em>"bộ 16"</em>, <em>"áp dòng thiếu"</em>, <em>"như dòng trên"</em>, <em>"trang sau"</em>, <em>"xuất excel"</em>...
+              💡 <strong>Space</strong> để nói · Lệnh: <em>"bộ 12"</em>, <em>"áp dòng thiếu"</em>, <em>"như dòng trên"</em>, <em>"trang sau"</em>, <em>"xuất excel"</em>...
             </span>
           </div>
         </div>

@@ -59,6 +59,8 @@ ABBREVIATIONS = {
     "bc": "ban chinh",
     "ch": "cong ham",
     "tt": "thi thuc",
+    "hc": "ho chieu",
+    "tk": "to khai",
 }
 
 def remove_accents(s):
@@ -92,34 +94,57 @@ def is_match(header_title, item):
     it = normalize_text(item)
     if h == it:
         return True
+    # 1. Phiếu đề xuất
     if ('dexuat' in h and 'dexuat' in it):
         return True
-    if ('visa' in h and ('thithuc' in it or 'visa' in it)) or ('visa' in it and ('thithuc' in h or 'visa' in h)):
+    # 2. Thị thực / Visa
+    if ('visa' in h or 'thithuc' in h) and ('visa' in it or 'thithuc' in it):
         return True
+    # 3. Hộ chiếu / Passport / HC
+    if ('hochieu' in h or 'passport' in h or 'hc' == h) and ('hochieu' in it or 'passport' in it):
+        return True
+    # 4. CMND / CCCD / Căn cước / Chứng minh
     if ('chungminh' in h or 'cmnd' in h or 'cccd' in h or 'cancuoc' in h) and ('chungminh' in it or 'cmnd' in it or 'cccd' in it or 'cancuoc' in it):
         return True
+    # 5. Hộ khẩu / Sổ hộ khẩu
     if ('hokhau' in h and 'hokhau' in it):
         return True
+    # 6. Giấy khai sinh
     if ('khaisinh' in h and 'khaisinh' in it):
         return True
+    # 7. Tờ khai đăng ký kết hôn / Tờ khai
+    if ('tokhai' in h or 'tokhai' in it):
+        if ('kethon' in h or 'kethon' in it or 'dkkh' in h or 'dkkh' in it):
+            return True
+        if 'tokhai' in h and 'tokhai' in it:
+            return True
+    # 8. Đơn xin xác nhận độc thân và hôn nhân thực tế / Hôn nhân thực tế / Độc thân
+    if ('honnhanthucte' in h or 'honnhanthucte' in it or 'hntt' in h or 'hntt' in it):
+        if ('honnhanthucte' in h and 'honnhanthucte' in it) or ('hntt' in h and 'hntt' in it):
+            return True
+        if ('honnhanthucte' in it or 'hntt' in it) and ('docthan' in h or 'honnhan' in h or 'thucte' in h):
+            return True
+        if ('honnhanthucte' in h or 'hntt' in h) and ('docthan' in it or 'honnhan' in it or 'thucte' in it):
+            return True
+    if ('docthan' in h or 'chuakethon' in h) and ('docthan' in it or 'chuakethon' in it):
+        return True
+    # 9. Kết hôn nói chung
     if ('kethon' in h or 'honthu' in h) and ('kethon' in it or 'honthu' in it):
         h_dn = 'docthan' in h or 'chuakethon' in h
         it_dn = 'docthan' in it or 'chuakethon' in it
         if h_dn != it_dn:
             return False
         return True
-    if ('docthan' in h or 'chuakethon' in h) and ('docthan' in it or 'chuakethon' in it):
-        h_tt = 'honnhanthucte' in h
-        it_tt = 'honnhanthucte' in it
-        if h_tt != it_tt:
-            return False
+    # 10. Chứng chỉ chuyên khoa
+    if 'chuyenkhoa' in it and 'chuyenkhoa' in h:
         return True
-    if 'chuyenkhoa' in it:
-        return 'chuyenkhoa' in h
-    if 'suckhoe' in it:
-        return 'suckhoe' in h
-    if ('nhapxuatcanh' in h or 'xuatnhapcanh' in h) and ('nhapxuatcanh' in it or 'xuatnhapcanh' in it):
+    # 11. Phiếu khám sức khỏe
+    if 'suckhoe' in it and 'suckhoe' in h:
         return True
+    # 12. Phiếu nhập xuất cảnh / xuất nhập cảnh / NXC
+    if ('nhapxuatcanh' in h or 'xuatnhapcanh' in h or 'nxc' in h or 'xnc' in h) and ('nhapxuatcanh' in it or 'xuatnhapcanh' in it or 'nxc' in it or 'xnc' in it):
+        return True
+    # Các loại khác
     if ('tuyenthe' in h and 'tuyenthe' in it):
         return True
     if ('congham' in h and 'congham' in it):

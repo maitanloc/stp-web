@@ -314,6 +314,10 @@ function buildCommands(): Array<{ tokens: string[]; command: 'commit' | 'next' |
     { tokens: ['dong', 'truoc'], command: 'prev' },
     { tokens: ['bo', 'bay'], command: 'seven' },
     { tokens: ['bon', 'bay'], command: 'seven' }, // nghe nhầm "bộ bảy"
+    { tokens: ['bo', 'muoi', 'hai'], command: 'seven' },
+    { tokens: ['bo', '12'], command: 'seven' },
+    { tokens: ['bo', 'chuan'], command: 'seven' },
+    { tokens: ['bo', 'ket', 'hon'], command: 'seven' },
     { tokens: ['bo', 'muoi', 'sau'], command: 'seven' },
     { tokens: ['bo', '16'], command: 'seven' },
   ]

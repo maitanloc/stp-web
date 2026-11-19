@@ -1130,7 +1130,7 @@ public sealed class SummaryToolController : ControllerBase
 
         var catalogList = request.Catalog != null && request.Catalog.Count > 0
             ? string.Join(", ", request.Catalog.Select(c => $"\"{c}\""))
-            : "\"Giấy khai sinh\", \"Căn cước công dân\", \"Giấy xác nhận tình trạng hôn nhân\", \"Giấy chứng nhận kết hôn\", \"Sổ hộ khẩu\", \"Bản sao trích lục khai sinh\", \"Đơn xin đăng ký kết hôn\", \"Giấy khám sức khỏe\", \"Ảnh\", \"Tờ khai đăng ký kết hôn\"";
+            : "\"giấy khai sinh\", \"bộ công hàm\", \"hộ khẩu\", \"phiếu đề xuất\", \"chứng chỉ chuyên khoa\", \"phiếu khám sức khỏe\", \"CMND\", \"phiếu nhập xuất cảnh\", \"hộ chiếu\", \"thị thực\", \"tờ khai đăng ký kết hôn\", \"đơn xin xác nhận độc thân và hôn nhân thực tế\"";
 
         using var db = await _factory.CreateDbContextAsync(cancellationToken);
         await EnsureDefaultMemoriesSeededAsync(db, cancellationToken);
@@ -1214,18 +1214,22 @@ QUY TẮC BẮT BUỘC:
 
 4. Giấy tờ (items):
    - Chỉ thêm khi người dùng nói tên giấy tờ.
-   - Nhận diện đúng danh mục kể cả khi nói thầm, nói nhỏ hoặc bị nghe lệch:
-     * "bộ công hàm", "công hàm", "bản công hàm", "bộ công an" -> "Bộ công hàm" (hoặc "Bản công hàm")
-     * "phiếu đề xuất" -> "Phiếu đề xuất"
-     * "sơ yếu lý lịch" -> "Sơ yếu lý lịch"
-     * "cần cước/cccd" -> "Căn cước công dân"
-     * "khai sinh" -> "Giấy khai sinh"
-     * "kết hôn/chứng nhận kết hôn" -> "Giấy chứng nhận kết hôn"
-     * "hôn nhân/độc thân" -> "Giấy xác nhận tình trạng hôn nhân"
-     * "khẩu" -> "Sổ hộ khẩu"
-     * "sức khỏe" -> "Giấy khám sức khỏe"
-     * "ảnh" -> "Ảnh"
-     * "chứng chỉ chuyên khoa" -> "Chứng chỉ chuyên khoa"
+   - Nhận diện đúng 12 giấy tờ chuẩn Đăng ký kết hôn và các giấy tờ hộ tịch phổ biến:
+     * "khai sinh" -> "giấy khai sinh"
+     * "bộ công hàm", "công hàm", "bản công hàm", "bộ công an" -> "bộ công hàm"
+     * "khẩu", "hộ khẩu", "sổ hộ khẩu" -> "hộ khẩu"
+     * "phiếu đề xuất", "đề xuất" -> "phiếu đề xuất"
+     * "chứng chỉ chuyên khoa", "chuyên khoa" -> "chứng chỉ chuyên khoa"
+     * "sức khỏe", "khám sức khỏe", "phiếu khám sức khỏe" -> "phiếu khám sức khỏe"
+     * "cmnd", "chứng minh", "chứng minh nhân dân", "căn cước", "cccd" -> "CMND"
+     * "nhập xuất cảnh", "xuất nhập cảnh", "phiếu nhập xuất cảnh", "phiếu xuất nhập cảnh", "nxc", "xnc" -> "phiếu nhập xuất cảnh"
+     * "hộ chiếu", "passport" -> "hộ chiếu"
+     * "thị thực", "visa" -> "thị thực"
+     * "tờ khai đăng ký kết hôn", "tờ khai kết hôn", "tờ khai" -> "tờ khai đăng ký kết hôn"
+     * "đơn xin xác nhận độc thân và hôn nhân thực tế", "độc thân và hôn nhân thực tế", "hôn nhân thực tế", "đơn độc thân", "xác nhận độc thân" -> "đơn xin xác nhận độc thân và hôn nhân thực tế"
+     * "kết hôn/chứng nhận kết hôn" -> "giấy chứng nhận kết hôn"
+     * "sơ yếu lý lịch" -> "sơ yếu lý lịch"
+     * "ảnh" -> "ảnh"
 
 5. Phản hồi đối thoại & Giải thích (reply):
    - Quy định câu trả lời (reply): CỰC KỲ NGẮN GỌN (tối đa 5-8 từ), đúng trọng tâm, tuyệt đối không giải thích dài dòng để AI phản hồi nhanh trong 1-2 giây.
@@ -1831,9 +1835,11 @@ JSON:
             // Tận dụng SemanticCatalogMatcher thông minh để bóc tách giấy tờ không phụ thuộc regex cứng
             var activeCatalog = request.Catalog ?? new List<string>
             {
-                "Giấy khai sinh", "Căn cước công dân", "Giấy xác nhận tình trạng hôn nhân",
-                "Giấy chứng nhận kết hôn", "Sổ hộ khẩu", "Bản sao trích lục khai sinh",
-                "Tờ khai đăng ký kết hôn", "Giấy khám sức khỏe", "Ảnh"
+                "giấy khai sinh", "bộ công hàm", "hộ khẩu", "phiếu đề xuất",
+                "chứng chỉ chuyên khoa", "phiếu khám sức khỏe", "CMND",
+                "phiếu nhập xuất cảnh", "hộ chiếu", "thị thực",
+                "tờ khai đăng ký kết hôn", "đơn xin xác nhận độc thân và hôn nhân thực tế",
+                "giấy chứng nhận kết hôn", "sơ yếu lý lịch", "ảnh"
             };
 
             var fallbackItems = SemanticCatalogMatcher.MatchItems(text, activeCatalog);
@@ -2050,21 +2056,23 @@ JSON:
 
     private static readonly (string Pattern, string StandardName)[] KnownPaperPatterns = new[]
     {
-        (@"giấy\s*chứng\s*nhận\s*kết\s*hôn|chứng\s*nhận\s*kết\s*hôn", "Giấy chứng nhận kết hôn"),
-        (@"tờ\s*khai\s*(?:đăng\s*ký\s*)?kết\s*hôn", "Tờ khai đăng ký kết hôn"),
-        (@"chứng\s*minh\s*nhân\s*dân|cmnd\b", "Chứng minh nhân dân"),
-        (@"căn\s*cước\s*(?:công\s*dân)?|cccd\b", "Căn cước công dân"),
-        (@"sổ\s*hộ\s*khẩu|hộ\s*khẩu\b", "Sổ hộ khẩu"),
-        (@"giấy\s*khai\s*sinh|khai\s*sinh\b", "Giấy khai sinh"),
-        (@"giấy\s*xác\s*nhận\s*tình\s*trạng\s*hôn\s*nhân|xác\s*nhận\s*hôn\s*nhân|độc\s*thân\b", "Giấy xác nhận tình trạng hôn nhân"),
-        (@"bản\s*công\s*hàm|bộ\s*công\s*hàm|công\s*hàm\b", "Bộ công hàm"),
-        (@"phiếu\s*đề\s*xuất", "Phiếu đề xuất"),
-        (@"sơ\s*yếu\s*lý\s*lịch", "Sơ yếu lý lịch"),
-        (@"giấy\s*khám\s*sức\s*khỏe|khám\s*sức\s*khỏe", "Giấy khám sức khỏe"),
-        (@"bản\s*sao\s*trích\s*lục\s*khai\s*sinh|trích\s*lục\s*khai\s*sinh", "Bản sao trích lục khai sinh"),
-        (@"đơn\s*xin\s*đăng\s*ký\s*kết\s*hôn|đơn\s*kết\s*hôn", "Đơn xin đăng ký kết hôn"),
-        (@"chứng\s*chỉ\s*chuyên\s*khoa", "Chứng chỉ chuyên khoa"),
-        (@"\bảnh\b", "Ảnh"),
+        (@"giấy\s*khai\s*sinh|khai\s*sinh\b", "giấy khai sinh"),
+        (@"bản\s*công\s*hàm|bộ\s*công\s*hàm|công\s*hàm\b", "bộ công hàm"),
+        (@"sổ\s*hộ\s*khẩu|hộ\s*khẩu\b", "hộ khẩu"),
+        (@"phiếu\s*đề\s*xuất|đề\s*xuất\b", "phiếu đề xuất"),
+        (@"chứng\s*chỉ\s*chuyên\s*khoa|chuyên\s*khoa\b", "chứng chỉ chuyên khoa"),
+        (@"phiếu\s*khám\s*sức\s*khỏe|giấy\s*khám\s*sức\s*khỏe|khám\s*sức\s*khỏe|sức\s*khỏe\b", "phiếu khám sức khỏe"),
+        (@"chứng\s*minh\s*nhân\s*dân|cmnd\b|căn\s*cước|cccd\b", "CMND"),
+        (@"phiếu\s*(?:nhập\s*xuất|xuất\s*nhập)\s*cảnh|(?:nhập\s*xuất|xuất\s*nhập)\s*cảnh|nxc\b|xnc\b", "phiếu nhập xuất cảnh"),
+        (@"hộ\s*chiếu|passport\b", "hộ chiếu"),
+        (@"thị\s*thực|visa\b", "thị thực"),
+        (@"tờ\s*khai\s*(?:đăng\s*ký\s*)?kết\s*hôn|tờ\s*khai\b", "tờ khai đăng ký kết hôn"),
+        (@"đơn\s*xin\s*xác\s*nhận\s*độc\s*thân\s*và\s*hôn\s*nhân\s*thực\s*tế|xác\s*nhận\s*độc\s*thân\s*và\s*hôn\s*nhân\s*thực\s*tế|độc\s*thân\s*và\s*hôn\s*nhân\s*thực\s*tế|hôn\s*nhân\s*thực\s*tế|hntt\b|giấy\s*xác\s*nhận\s*tình\s*trạng\s*hôn\s*nhân|xác\s*nhận\s*hôn\s*nhân|độc\s*thân\b", "đơn xin xác nhận độc thân và hôn nhân thực tế"),
+        (@"giấy\s*chứng\s*nhận\s*kết\s*hôn|chứng\s*nhận\s*kết\s*hôn", "giấy chứng nhận kết hôn"),
+        (@"sơ\s*yếu\s*lý\s*lịch", "sơ yếu lý lịch"),
+        (@"bản\s*sao\s*trích\s*lục\s*khai\s*sinh|trích\s*lục\s*khai\s*sinh", "bản sao trích lục khai sinh"),
+        (@"đơn\s*xin\s*đăng\s*ký\s*kết\s*hôn|đơn\s*kết\s*hôn", "đơn xin đăng ký kết hôn"),
+        (@"\bảnh\b", "ảnh"),
     };
 
     private static string PreprocessSpokenText(string text, IReadOnlyList<SummaryVoiceLearnedPair>? learned)
